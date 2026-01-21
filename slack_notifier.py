@@ -9,6 +9,15 @@ class SlackNotifier:
     BLACKLIST_PREFIXES = ("calls", "wc")
 
     def __init__(self, bot_token: str, default_channel: str | None = None):
+        """
+        Inicializa o cliente do Slack e define o canal padrão para envio de mensagens.
+
+        :param bot_token: Token do bot do Slack usado para autenticação na API.
+        :param default_channel: Canal padrão onde as mensagens serão enviadas caso
+                                nenhum canal seja informado explicitamente.
+        :raises Exception: Propaga qualquer erro ocorrido durante a inicialização
+                        do cliente do Slack.
+        """
         try:
             self.client = WebClient(token=bot_token)
             self.default_channel = default_channel
