@@ -168,7 +168,8 @@ async def webhook_buygoods(
         )
 
 
-@app.api_route("/digistore24/{secret_token}", methods=["GET", "POST"])
+@app.get("/digistore24/{secret_token}", operation_id="webhook_digistore24_get")
+@app.post("/digistore24/{secret_token}", operation_id="webhook_digistore24_post")
 async def webhook_digistore24(
     secret_token: str,
     request: Request,
