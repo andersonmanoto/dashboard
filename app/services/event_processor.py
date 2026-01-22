@@ -1,7 +1,3 @@
-"""
-Serviço responsável por processar e enriquecer eventos antes de persistir.
-Coordena a lógica de negócio entre normalização, enriquecimento e persistência.
-"""
 from typing import Optional
 from uuid import UUID
 from loguru import logger
@@ -129,7 +125,6 @@ class EventProcessor:
                 status=AffiliateStatus.ACTIVE
             )
 
-            # Blindagem contra race condition
             try:
                 affiliate = self.db.create_affiliate(new_affiliate)
             except Exception:
@@ -143,11 +138,17 @@ class EventProcessor:
 
 
     async def _enrich_checkout(self, event: NormalizedEvent) -> None:
+        """
+        Enriquece o evento com dados de Checkout e Produto.
+        No fallback (busca por nome), força funnel_stage="Purchase" e ignora checkout_id.
+        """
         checkout_code = event.order_details.external_checkout_code
         account_id = event.payload.get("account_id") if event.payload else None
 
         checkout_info: Optional[CheckoutInfo] = None
+        is_exact_match = False
 
+        # 1. Tentativa de busca pelo Código (Match Exato)
         if checkout_code:
             checkout_info = self.db.get_checkout_by_code(
                 checkout_code,
@@ -155,6 +156,7 @@ class EventProcessor:
             )
 
             if checkout_info:
+                is_exact_match = True
                 logger.debug(
                     f"Checkout vinculado via código: {checkout_code} "
                     f"(Account: {account_id})"
@@ -174,7 +176,7 @@ class EventProcessor:
                         account_id=event.account_id
                     )
 
-        # Fallback por nome do produto
+        # 2. Fallback por nome do produto
         if not checkout_info:
             product_name = event.order_details.product_name
             if product_name:
@@ -182,11 +184,20 @@ class EventProcessor:
                     product_name
                 )
 
+        # 3. Condições do checkout_code
         if checkout_info:
-            event.checkout_id = checkout_info.checkout_id
             event.product_id = checkout_info.product_id
-            event.funnel_stage = checkout_info.funnel_stage
             event.funnel_number = checkout_info.funnel_number
+
+            if is_exact_match:
+                event.checkout_id = checkout_info.checkout_id
+                event.funnel_stage = checkout_info.funnel_stage
+            else:
+                # Fallback: Se não existir o checkout_code na checkouts:
+                # funnel_stage: Purchase e funnel_number: 1
+                event.checkout_id = None
+                event.funnel_stage = "Purchase"
+                event.funnel_number = 1
 
 
     def _adjust_event_by_action_type(self, event: NormalizedEvent) -> None:
