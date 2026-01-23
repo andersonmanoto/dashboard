@@ -42,7 +42,7 @@ class PayloadNormalizer:
         if not order_id:
             raise ValueError(f"Campo 'order_id' obrigatório ausente em {network}")
         
-        logger.info(f"⚙️ Normalizando: {network} | Order: {order_id}")
+        logger.info(f"Normalizando: {network} | Order: {order_id}")
         
         if network == NetworkType.BUYGOODS:
             return self._normalize_buygoods(payload, order_id)

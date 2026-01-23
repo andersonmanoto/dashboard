@@ -131,7 +131,6 @@ class SlackService:
         """Constrói blocos formatados para mensagem Slack."""
         codename_display = codename or "N/A"
         account_display = account_id or "N/A"
-        print(account_display)
         
         network_name = (
             network.value 
@@ -176,7 +175,7 @@ class SlackService:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "⚠️ codename não encontrado na tabela `checkouts`"
+                        "text": "Codename não encontrado."
                     }
                 ]
             }
