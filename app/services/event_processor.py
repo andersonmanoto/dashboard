@@ -168,12 +168,16 @@ class EventProcessor:
                 )
 
                 if self.slack:
+                    # URL de Compra
+                    buy_url = event.payload.get("buy_url") if event.payload else None
+
                     self.slack.notify_codename_not_found(
                         network=self._network_value(event.network),
                         order_id=event.order_id,
                         product=event.order_details.product_name or "N/A",
                         codename=checkout_code,
-                        account_id=event.account_id
+                        account_id=event.account_id,
+                        buy_url=buy_url
                     )
 
         # 2. Fallback por nome do produto

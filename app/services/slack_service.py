@@ -34,6 +34,7 @@ class SlackService:
         product: str,
         codename: Optional[str],
         account_id: Optional[str] = None,
+        buy_url: Optional[str] = None,  # <--- NOVO PARÂMETRO
         channel: Optional[str] = None
     ) -> bool:
         """
@@ -56,7 +57,8 @@ class SlackService:
             order_id=order_id,
             product=product,
             codename=codename,
-            account_id=account_id
+            account_id=account_id,
+            buy_url=buy_url  # <--- PASSANDO ADIANTE
         )
         
         # Envia para Slack
@@ -126,7 +128,8 @@ class SlackService:
         order_id: str,
         product: str,
         codename: Optional[str],
-        account_id: Optional[str] = None
+        account_id: Optional[str] = None,
+        buy_url: Optional[str] = None  # <--- RECEBENDO A URL
     ) -> list[dict]:
         """Constrói blocos formatados para mensagem Slack."""
         codename_display = codename or "N/A"
@@ -155,6 +158,13 @@ class SlackService:
             fields.append({
                 "type": "mrkdwn",
                 "text": f"*Account ID:*\n`{account_display}`"
+            })
+
+        # Adiciona Buy URL se existir
+        if buy_url:
+            fields.append({
+                "type": "mrkdwn",
+                "text": f"*Buy URL:*\n<{buy_url}|Link>"
             })
 
         return [
