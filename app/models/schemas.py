@@ -4,7 +4,7 @@ Modelos Pydantic para validação e serialização de dados.
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 from .enums import ActionType, NetworkType, AffiliateStatus
 
@@ -108,8 +108,7 @@ class NormalizedEvent(BaseModel):
         except (ValueError, TypeError):
             return 0.0
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class SalesStatus(BaseModel):
@@ -125,8 +124,7 @@ class SalesStatus(BaseModel):
     status_time: Optional[str] = None
     amount_affected: float = 0.0
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class CheckoutInfo(BaseModel):
@@ -145,5 +143,4 @@ class Affiliate(BaseModel):
     aff_name: str
     status: AffiliateStatus = AffiliateStatus.ACTIVE
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
