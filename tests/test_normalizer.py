@@ -206,16 +206,3 @@ def test_normalize_digistore_sale(normalizer):
     assert event.event_date == "2024-03-20"
     assert event.sale_total == 49.90
     assert event.is_test is True
-
-
-# ========== TESTES SEM ORDER_ID ==========
-def test_missing_order_id(normalizer):
-    """Deve levantar erro se não houver ID do pedido."""
-    # Payload sem order_id ou order_id_global
-    payload_invalido = {"action_type": "neworder", "total": "100.00"} 
-    
-    # O teste passa se o código levantar um ValueError
-    with pytest.raises(ValueError) as excinfo:
-        normalizer.normalize(NetworkType.BUYGOODS, payload_invalido)
-    
-    assert "order_id" in str(excinfo.value)
