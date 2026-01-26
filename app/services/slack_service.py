@@ -185,7 +185,7 @@ class SlackService:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "Codename não encontrado."
+                        "text": "Codename não encontrado na tabela 'checkouts'."
                     }
                 ]
             }
