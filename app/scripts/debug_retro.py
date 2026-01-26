@@ -4,7 +4,6 @@ import asyncio
 import json
 import pandas as pd
 from loguru import logger
-from datetime import datetime
 
 # --- SETUP DE CAMINHO ---
 # Adiciona a pasta raiz ao path para encontrar o módulo 'app'
