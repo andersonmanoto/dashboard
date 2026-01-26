@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentação de Lógica de Negócio e Métricas</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px;
+            background-color: #fcfcfc;
+        }
+        h1 { color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 15px; margin-bottom: 30px; }
+        h2 { color: #34495e; margin-top: 40px; border-left: 5px solid #3498db; padding-left: 15px; }
+        h3 { color: #16a085; margin-top: 30px; }
+        ul { margin-bottom: 20px; }
+        li { margin-bottom: 10px; }
+        p { margin-bottom: 15px; text-align: justify; }
+        
+        /* Estilo de código inline */
+        code {
+            background-color: #f1f2f6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: #e74c3c;
+            font-size: 0.9em;
+            border: 1px solid #e1e1e1;
+        }
+
+        /* Tabelas */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 30px 0;
+            font-size: 0.95em;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            background-color: white;
+        }
+        th, td {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            text-align: left;
+        }
+        th {
+            background-color: #3498db;
+            color: #ffffff;
+            font-weight: 600;
+        }
+        tr:hover { background-color: #f9f9f9; }
+
+        /* Container de Fórmulas Matemáticas */
+        .math-container {
+            overflow-x: auto;
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 8px;
+        }
+    </style>
+    
+    <!-- Script para renderizar as fórmulas matemáticas (LaTeX) -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+
+    <h1>Documentação de Lógica de Negócio e Métricas</h1>
+
+    <p>Este documento descreve como o sistema processa, calcula e armazena os dados financeiros e de performance das vendas. O objetivo é garantir transparência sobre como números críticos como <strong>CPA</strong>, <strong>Net Revenue</strong> e <strong>Taxas de Reembolso</strong> são gerados.</p>
+
+    <h2>1. Regras Globais de Processamento</h2>
+    <p>Antes de qualquer cálculo, todos os eventos (vendas, reembolsos, etc.) passam por um filtro de qualidade para garantir a integridade dos relatórios.</p>
+
+    <h3>1.1. Exclusão de Testes</h3>
+    <ul>
+        <li><strong>Regra:</strong> Qualquer transação marcada como "Teste" (<code>is_test = true</code>) no momento da compra é <strong>excluída</strong> de todos os relatórios financeiros.</li>
+        <li><strong>Impacto:</strong> O sistema reflete apenas dinheiro real. Testes de cartão de crédito ou simulações de compra não "sujam" as métricas.</li>
+    </ul>
+
+    <h3>1.2. Tratamento do "Tiger Offers" (Interno)</h3>
+    <ul>
+        <li><strong>Regra:</strong> O afiliado identificado como <strong>"Tiger Offers"</strong> (ID <code>0</code>) é tratado como tráfego interno/orgânico.</li>
+        <li><strong>Impacto:</strong> Ele é <strong>excluído</strong> propositalmente de todos os relatórios de performance de afiliados (<code>snapshot_daily_affiliate_*</code>). Isso evita que o tráfego da casa distorça o ranking e as médias dos afiliados externos.</li>
+    </ul>
+
+    <h3>1.3. Regra Especial: HelpGrid</h3>
+    <ul>
+        <li><strong>Cenário:</strong> Vendas recuperadas pela equipe da HelpGrid.</li>
+        <li><strong>Identificação:</strong> O nome do afiliado contém "HelpGrid" e o codename do produto (<code>product_codename</code>) começa com <code>calls_</code> ou <code>wc_</code>.</li>
+        <li><strong>Tratamento:</strong> Como estas vendas não seguem o fluxo normal do site e os códigos não são inseridos na tabela de checkouts, o sistema atribui automaticamente:
+            <ul>
+                <li><strong>Estágio do Funil (<code>funnel_stage</code>):</strong> "Purchase" (Compra Direta).</li>
+                <li><strong>Número do Funil (<code>funnel_number</code>):</strong> "1".</li>
+            </ul>
+        </li>
+        <li><strong>Impacto:</strong> Garante que estas vendas manuais sejam contabilizadas corretamente como receita de entrada (Front), permitindo o cálculo correto de comissões e receita.</li>
+    </ul>
+
+    <h2>2. Definição das Métricas Calculadas</h2>
+    <p>Aqui explicamos a matemática exata por trás de cada indicador chave de performance (KPI).</p>
+
+    <h3>2.1. Net Revenue (Lucro Líquido Operacional)</h3>
+    <p>Representa o dinheiro que efetivamente fica na empresa após deduzir os custos diretos variáveis da transação.</p>
+
+    <div class="math-container">
+        \[ \text{Net Revenue} = \text{Gross} - \text{Refunds} - \text{Chargebacks} - \text{Comissões (Afiliados)} - \text{Taxas (Merchant)} \]
+    </div>
+
+    <ul>
+        <li><strong>O que entra (+):</strong> Valor total das vendas brutas (<code>gross_revenue</code>), incluindo Upsells e Assinaturas (Rebills).</li>
+        <li><strong>O que sai (-):</strong>
+            <ul>
+                <li><code>refund_amount</code>: Dinheiro devolvido aos clientes.</li>
+                <li><code>chargeback_amount</code>: Disputas perdidas no banco.</li>
+                <li><code>aff_commission_amount</code>: Comissões pagas aos afiliados.</li>
+                <li><code>merchant_commission_amount</code>: Taxas cobradas pelo processador de pagamentos.</li>
+            </ul>
+        </li>
+        <li><em>Nota:</em> Impostos (<code>tax_amount</code>) e Frete (<code>shipping_cost_amount</code>) são registrados para controle, mas <strong>não</strong> são deduzidos desta fórmula específica de Net Revenue.</li>
+    </ul>
+
+    <h3>2.2. CPA Real (Custo por Aquisição de Cliente)</h3>
+    <p>Mede quanto custou, em comissões, trazer um <strong>novo cliente</strong> para a base.</p>
+
+    <div class="math-container">
+        \[ \text{CPA} = \frac{\text{Total de Comissões Pagas (aff_commission_amount)}}{\text{Total de Vendas Front (total_front)}} \]
+    </div>
+
+    <ul>
+        <li><strong>Diferencial Crítico:</strong> O denominador usa "Vendas Front" e não "Vendas Totais".</li>
+        <li><strong>Porquê?</strong> Se um cliente compra o produto principal e depois compra 2 upsells, isso conta como <strong>1 cliente</strong> (Front), não 3 vendas. O CPA deve refletir o custo de aquisição da <em>pessoa</em>, não das transações adicionais.</li>
+        <li><em>Nota:</em> Assinaturas recorrentes (Rebills) <strong>não</strong> contam como "Novo Cliente" (<code>total_front</code>), garantindo que o CPA não seja artificialmente diluído ao longo do tempo.</li>
+    </ul>
+
+    <h3>2.3. Refund Rate (Taxa de Reembolso)</h3>
+    <p>Mede a qualidade do tráfego ou do produto através da porcentagem de vendas que resultaram em devolução.</p>
+
+    <div class="math-container">
+        \[ \text{Refund Rate} = \frac{\text{Quantidade de Reembolsos (total_refunds)}}{\text{Quantidade Total de Vendas (total_sales)}} \]
+    </div>
+
+    <ul>
+        <li><strong>Formato:</strong> O sistema armazena em formato decimal com 4 casas de precisão (ex: <code>0.0850</code> representa <strong>8.5%</strong>).</li>
+        <li><strong>Base:</strong> O cálculo é feito por <strong>quantidade de pedidos</strong> (Count), não por valor monetário.</li>
+    </ul>
+
+    <h3>2.4. Merchant Commission Rate (Taxa Média da Plataforma)</h3>
+    <p>Mede a porcentagem média que a plataforma de pagamento (ex: BuyGoods) retém sobre a venda bruta.</p>
+
+    <div class="math-container">
+        \[ \text{Rate} = \text{Média de } \left( \frac{\text{merchant_commission}}{\text{sale_total}} \right) \text{ de todas as vendas do dia} \]
+    </div>
+
+    <h3>2.5. Taxas de Conversão de Funil (Step-by-Step)</h3>
+    <p>Utilizadas exclusivamente no <strong>Snapshot de Funil</strong>, estas taxas medem a eficiência de cada etapa da oferta (Upsells). A lógica aplicada é "passo a passo", onde a base de cálculo é sempre a quantidade de pessoas que chegaram na etapa anterior.</p>
+
+    <ul>
+        <li><strong>Front &rarr; Up1 (<code>front_to_up1_rate</code>):</strong>
+            <div class="math-container">\[ \text{Taxa} = \frac{\text{Qtd (Up1 + Dw1)}}{\text{Qtd Front}} \]</div>
+        </li>
+        <li><strong>Up1 &rarr; Up2 (<code>up1_to_up2_rate</code>):</strong>
+            <div class="math-container">\[ \text{Taxa} = \frac{\text{Qtd (Up2 + Dw2)}}{\text{Qtd (Up1 + Dw1)}} \]</div>
+            <em>(Nota: Divide-se por quem comprou o Up1, não pelo Front total).</em>
+        </li>
+        <li><strong>Up2 &rarr; Up3 (<code>up2_to_up3_rate</code>):</strong>
+            <div class="math-container">\[ \text{Taxa} = \frac{\text{Qtd (Up3 + Dw3)}}{\text{Qtd (Up2 + Dw2)}} \]</div>
+        </li>
+    </ul>
+
+    <h2>3. Estrutura dos Relatórios (Snapshots)</h2>
+    <p>O sistema gera automaticamente 8 tipos de relatórios diários ("snapshots") para permitir análises em diferentes níveis de profundidade.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Nome do Relatório (Tabela)</th>
+                <th>Nível de Detalhe</th>
+                <th>Uso Principal</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>1. Daily Sale</strong></td>
+                <td>Geral</td>
+                <td>Visão macro da empresa. Quanto faturamos hoje no total?</td>
+            </tr>
+            <tr>
+                <td><strong>2. Network</strong></td>
+                <td>Por Plataforma</td>
+                <td>Comparar performance entre BuyGoods, DigiStore, etc.</td>
+            </tr>
+            <tr>
+                <td><strong>3. Product</strong></td>
+                <td>Por Produto + Funil</td>
+                <td>Saber qual funil (V1 ou V2) de um produto está convertendo melhor.</td>
+            </tr>
+            <tr>
+                <td><strong>4. Product + Network</strong></td>
+                <td>Produto por Plataforma</td>
+                <td>O produto X vende melhor na rede A ou B?</td>
+            </tr>
+            <tr>
+                <td><strong>5. Affiliate</strong></td>
+                <td>Por Afiliado</td>
+                <td>Ranking de performance dos parceiros. Quem traz mais lucro?</td>
+            </tr>
+            <tr>
+                <td><strong>6. Affiliate + Network</strong></td>
+                <td>Afiliado por Plataforma</td>
+                <td>Onde o afiliado X está escalando as suas campanhas?</td>
+            </tr>
+            <tr>
+                <td><strong>7. Affiliate + Product</strong></td>
+                <td>Afiliado por Produto</td>
+                <td>O afiliado X é bom vendendo o produto Y, mas mau no produto Z?</td>
+            </tr>
+            <tr>
+                <td><strong>8. Affiliate + Prod + Net</strong></td>
+                <td>Granularidade Máxima</td>
+                <td>Análise microscópica para detectar anomalias específicas.</td>
+            </tr>
+            <tr>
+                <td><strong>9. Funnel</strong></td>
+                <td>Etapas do Funil</td>
+                <td>Análise de conversão detalhada (Upsells/Downsells) passo a passo.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>4. Lógica Específica do Snapshot de Funil (<code>snapshot_daily_funnel</code>)</h3>
+    <p>Este relatório diferencia-se dos demais por realizar um "pivoteamento" dos dados, transformando linhas de eventos individuais em colunas de etapas.</p>
+    <ul>
+        <li><strong>Fonte de Dados:</strong> Os eventos são cruzados com a tabela <code>checkouts</code> através do código do produto (<code>external_checkout_code</code> no JSON <code>order_details</code>) para identificar a etapa exata (Upsell 1, Downsell 2, etc.).</li>
+        <li><strong>Agrupamento:</strong> Os dados são consolidados por Data, Produto, Network e <strong>Número do Funil</strong> (<code>funnel_number</code>).</li>
+        <li><strong>Mapeamento de Colunas:</strong>
+            <ul>
+                <li>Vendas marcadas como <code>Purchase</code> &rarr; Colunas <code>front_amount</code> / <code>total_front</code>.</li>
+                <li>Vendas marcadas como <code>Up1</code> &rarr; Colunas <code>up1_amount</code> / <code>total_up1</code>.</li>
+                <li>Vendas marcadas como <code>Dw1</code> &rarr; Colunas <code>dw1_amount</code> / <code>total_dw1</code>.</li>
+                <li><em>(A lógica repete-se para Up2/Dw2, Up3/Dw3, etc.)</em></li>
+            </ul>
+        </li>
+        <li><strong>Objetivo:</strong> Permitir a visualização clara do fluxo de receita ao longo da oferta, identificando onde ocorrem as quebras de conversão (Drop-off).</li>
+    </ul>
+
+    <hr>
+
+    <h3>Regras de Atualização e Recorrência (Rebills)</h3>
+    <ul>
+        <li><strong>Frequência:</strong> Os dados são recalculados automaticamente ao longo do dia para manter o dashboard atualizado.</li>
+        <li><strong>Rebills (Assinaturas):</strong>
+            <ul>
+                <li>São contabilizados no dia em que a cobrança ocorre (ex: a cobrança do 2º mês entra no relatório do dia atual).</li>
+                <li><strong>Somam</strong> ao <code>Gross Revenue</code> (Fluxo de Caixa).</li>
+                <li><strong>Não somam</strong> ao <code>Total Front</code> (Aquisição de Cliente), preservando a integridade do cálculo de CPA.</li>
+            </ul>
+        </li>
+    </ul>
+
+</body>
+</html>
