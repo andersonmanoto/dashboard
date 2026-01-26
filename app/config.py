@@ -4,6 +4,7 @@ Usa pydantic-settings para validação e carregamento de variáveis de ambiente.
 """
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import tempfile
 
 class Settings(BaseSettings):
     """Configurações da aplicação carregadas de variáveis de ambiente."""
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     
     # Segurança
     webhook_secret: str
+    upload_api_key: str
     
     # Supabase
     supabase_url: str
@@ -36,6 +38,9 @@ class Settings(BaseSettings):
     
     # Blacklist de codenames
     codename_blacklist_prefixes: tuple[str, ...] = ("calls", "wc")
+
+    # Arquivos
+    temp_dir: str = tempfile.gettempdir()
 
 
 @lru_cache

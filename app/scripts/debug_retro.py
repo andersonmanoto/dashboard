@@ -11,7 +11,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.enums import NetworkType, ActionType
-from services.importer_service import SpreadsheetImporter, SPREADSHEET_MAPPING
+from services.retro_service import SpreadsheetImporter, SPREADSHEET_MAPPING
 from services.event_processor import EventProcessor
 
 # Mock do EventProcessor para não precisar de banco de dados

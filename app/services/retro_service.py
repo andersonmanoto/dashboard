@@ -8,6 +8,7 @@ from datetime import datetime
 from models.schemas import NormalizedEvent, OrderDetails, ShippingDetails
 from models.enums import NetworkType, ActionType
 from services.event_processor import EventProcessor
+from repositories.database import DatabaseRepository
 
 # Mapeamento Unificado
 SPREADSHEET_MAPPING = {
@@ -15,7 +16,7 @@ SPREADSHEET_MAPPING = {
     "Order ID": "order_id",
     "External Order ID": "external_order_id",
     
-    # --- Datas Específicas (Não sobrepõem raw_date diretamente aqui) ---
+    # --- Datas Específicas ---
     "Date Created": "created_date",     # Data da venda original
     "rr_createdate": "created_date",    # Variação de nome
     "Order Date": "created_date",       # Variação de nome
@@ -275,3 +276,31 @@ class SpreadsheetImporter:
             shipping_details=shipping_details,
             payload=payload
         )
+    
+# Helper para o importer em background
+async def run_importer_background(file_path: str, db_repo: DatabaseRepository):
+    """
+    Função wrapper para rodar o importer em background e limpar o arquivo depois.
+    """
+    path_obj = Path(file_path)
+    try:
+        from services.event_processor import EventProcessor 
+        from models.enums import NetworkType
+
+        processor = EventProcessor(db_repo, slack_service=None) 
+        importer = SpreadsheetImporter(processor)
+        
+        logger.info(f"⏳ Background Task: Iniciando processamento de {file_path}")
+        await importer.process_file(file_path, network=NetworkType.BUYGOODS)
+        logger.info("✅ Background Task: Processamento finalizado")
+        
+    except Exception as e:
+        logger.exception(f"❌ Background Task Falhou: {e}")
+        
+    finally:
+        if path_obj.exists():
+            try:
+                path_obj.unlink()
+                logger.debug(f"Arquivo temporário removido: {file_path}")
+            except OSError as e:
+                logger.warning(f"Não foi possível remover arquivo: {e}")

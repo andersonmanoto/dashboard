@@ -13,7 +13,7 @@ load_dotenv(os.path.join(ROOT_DIR, '.env'))
 
 from config import get_settings
 from repositories.database import DatabaseRepository
-from services.importer_service import SpreadsheetImporter
+from services.retro_service import SpreadsheetImporter
 from services.event_processor import EventProcessor
 from models.enums import NetworkType
 

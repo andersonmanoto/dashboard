@@ -2,21 +2,25 @@
 API FastAPI para receber e processar webhooks de redes de afiliados.
 """
 import json
+from uuid import uuid4
 from typing import Annotated
 from pathlib import Path
 
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends, status
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends, status, UploadFile, File, Header
 from loguru import logger
 from contextlib import asynccontextmanager
 
 from config import Settings, get_settings
 from dependencies import (
     get_payload_normalizer,
-    get_event_processor
+    get_event_processor,
+    get_database_repository
 )
 from models.enums import NetworkType
 from services.normalizer import PayloadNormalizer
 from services.event_processor import EventProcessor
+from services.retro_service import SpreadsheetImporter, run_importer_background
+from repositories.database import DatabaseRepository
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -107,6 +111,28 @@ async def process_webhook_background(
     except Exception as e:
         logger.exception(f"Erro no processamento ({network}): {e}")
 
+# ========== HELPERS - SECURITY ==========
+
+async def verify_upload_key(
+    x_api_key: str = Header(None),
+    settings: Settings = Depends(get_settings)
+) -> None:
+    """
+    Verifica a chave de API para uploads no header 'x-api-key'.
+    """
+    if not settings.upload_api_key:
+        logger.critical("UPLOAD_API_KEY não configurada no servidor!")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Configuration Error"
+        )
+
+    if x_api_key != settings.upload_api_key:
+        logger.warning(f"Tentativa de upload não autorizada. Key inválida: {x_api_key}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Credenciais inválidas"
+        )
 
 # ========== ENDPOINTS ==========
 
@@ -266,3 +292,56 @@ async def get_codenames(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro ao ler arquivo codenames.json"
         )
+    
+    
+@app.post("/retro/upload", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_upload_key)])
+async def upload_spreadsheet(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
+    settings: Settings = Depends(get_settings),
+    db_repo: DatabaseRepository = Depends(get_database_repository) 
+):
+    """
+    Endpoint para upload manual de planilhas (CSV/Excel).
+    Requer header 'x-api-key' com a chave correta.
+    """
+    # 1. Validação básica de extensão
+    filename = file.filename.lower()
+    if not filename.endswith(('.csv', '.xlsx', '.xls')):
+        raise HTTPException(400, "Formato inválido. Use .csv ou .xlsx")
+
+    # 2. Salvar arquivo temporariamente no disco
+    temp_dir = Path(settings.temp_dir)
+    if not temp_dir.exists():
+        # Fallback para diretório atual se /tmp não existir (Windows/Dev)
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Falha ao criar diretório temporário {temp_dir}: {e}")
+            raise HTTPException(500, "Erro de configuração de servidor")
+        
+    temp_filename = f"import_{uuid4()}_{file.filename}"
+    temp_path = temp_dir / temp_filename
+    
+    try:
+        # Lê o conteúdo e escreve
+        content = await file.read()
+        temp_path.write_bytes(content)
+            
+        logger.info(f"Arquivo recebido e salvo em: {temp_path}")
+        
+        # 3. Agendar processamento em Background
+        background_tasks.add_task(run_importer_background, str(temp_path.absolute()), db_repo)
+        
+        return {
+            "status": "queued",
+            "message": "Arquivo recebido. O processamento iniciará em breve.",
+            "file_id": temp_filename
+        }
+        
+    except Exception as e:
+        # Se der erro ao salvar o arquivo, limpa e retorna erro
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+        logger.error(f"Erro no upload: {e}")
+        raise HTTPException(500, "Falha ao salvar arquivo")
