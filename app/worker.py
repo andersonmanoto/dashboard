@@ -27,69 +27,73 @@ def handle_signal(signum, frame):
 signal.signal(signal.SIGINT, handle_signal)
 signal.signal(signal.SIGTERM, handle_signal)
 
+async def process_single_webhook(db_repo, normalizer, processor, item):
+    """
+    Função auxiliar para processar UM item de forma isolada.
+    """
+    inbox_id = item['id']
+    try:
+        # Executa operações de banco (síncronas) em uma thread separada
+        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, "processing")
+
+        network_str = item['network']
+        payload = item['payload']
+
+        # Normalização
+        if network_str == NetworkType.BUYGOODS.value:
+            network = NetworkType.BUYGOODS
+        elif network_str == NetworkType.DIGISTORE24.value:
+            network = NetworkType.DIGISTORE24
+        else:
+            raise ValueError(f"Rede desconhecida: {network_str}")
+
+        normalized_event = normalizer.normalize(network, payload)
+        success = await processor.process_event(normalized_event)
+        
+        status = "processed" if success else "processed"
+        msg = None if success else "Ignored/Duplicate"
+
+        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, status, msg)
+        
+    except Exception as e:
+        logger.error(f"❌ Falha no webhook {inbox_id}: {e}")
+        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, "failed", str(e))
+
 async def run_worker():
-    logger.info("Worker iniciado. Aguardando webhooks...")
+    logger.info("🚀 Worker Async V2 iniciado. Aguardando webhooks...")
     
     settings = get_settings()
     db_repo = DatabaseRepository(settings)
     slack = SlackService(settings, db_repo)
     normalizer = PayloadNormalizer()
-    # Processador completo
     processor = EventProcessor(db_repo, slack_service=slack)
 
     while RUNNING:
         try:
-            # 1. Busca Pendentes
-            pendings = db_repo.fetch_pending_webhooks(limit=10)
+            # 1. Busca Pendentes (thread separada)
+            pendings = await asyncio.to_thread(db_repo.fetch_pending_webhooks, limit=10)
             
             if not pendings:
-                # Se não tem nada, dorme um pouco para economizar CPU/Banco
-                time.sleep(5) 
+                # Sleep não bloqueante
+                await asyncio.sleep(5) 
                 continue
             
-            logger.info(f"Processando lote de {len(pendings)} webhooks...")
+            logger.info(f"⚡ Disparando processamento paralelo de {len(pendings)} webhooks...")
 
-            for item in pendings:
-                if not RUNNING:
-                    break
-
-                inbox_id = item['id']
-                network_str = item['network']
-                payload = item['payload']
-                
-                try:
-                    # Marca como 'processing'
-                    db_repo.update_inbox_status(inbox_id, "processing")
-
-                    # 2. Identifica Rede
-                    network = None
-                    if network_str == NetworkType.BUYGOODS.value:
-                        network = NetworkType.BUYGOODS
-                    elif network_str == NetworkType.DIGISTORE24.value:
-                        network = NetworkType.DIGISTORE24
-                    else:
-                        raise ValueError(f"Rede desconhecida: {network_str}")
-
-                    # 3. Normaliza
-                    normalized_event = normalizer.normalize(network, payload)
-                    
-                    # 4. Processa
-                    success = await processor.process_event(normalized_event)
-                    
-                    if success:
-                        db_repo.update_inbox_status(inbox_id, "processed")
-                    else:
-                        db_repo.update_inbox_status(inbox_id, "processed", "Ignored/Duplicate")
-
-                except Exception as e:
-                    logger.error(f"Falha no webhook {inbox_id}: {e}")
-                    db_repo.update_inbox_status(inbox_id, "failed", str(e))
+            # Lista de Tarefas (thread)
+            tasks = [
+                process_single_webhook(db_repo, normalizer, processor, item)
+                for item in pendings
+            ]
+            
+            # O gather espera todos terminarem. 
+            await asyncio.gather(*tasks)
             
         except Exception as main_e:
-            logger.exception(f"Erro no loop principal do worker: {main_e}")
-            time.sleep(5) # Dorme para não flodar log de erro
+            logger.exception(f"Erro no loop do worker: {main_e}")
+            await asyncio.sleep(5)
 
-    logger.info("Worker finalizado com sucesso.")
+    logger.info("👋 Worker finalizado.")
 
 if __name__ == "__main__":
     asyncio.run(run_worker())
