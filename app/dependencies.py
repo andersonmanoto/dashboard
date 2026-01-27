@@ -27,7 +27,8 @@ def get_database_repository(
 
 
 def get_slack_service(
-    settings: Annotated[Settings, Depends(get_settings)]
+    settings: Annotated[Settings, Depends(get_settings)],
+    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)]
 ) -> SlackService:
     """
     Retorna instância singleton do serviço Slack.
@@ -38,7 +39,7 @@ def get_slack_service(
     Returns:
         SlackService: Instância do serviço
     """
-    return SlackService(settings)
+    return SlackService(settings, db_repo)
 
 
 def get_payload_normalizer() -> PayloadNormalizer:

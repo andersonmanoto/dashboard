@@ -271,36 +271,12 @@ async def webhook_digistore24(
 
 @app.get("/codenames")
 async def get_codenames(
-    settings: Annotated[Settings, Depends(get_settings)]
-) -> dict:
+    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)]
+) -> list[dict]:
     """
-    Retorna lista de codenames não encontrados.
-    
-    Args:
-        settings: Configurações da aplicação
-        
-    Returns:
-        dict: Conteúdo do arquivo codenames.json
-        
-    Raises:
-        HTTPException: Se arquivo não existir
+    Retorna lista de codenames não mapeados (do banco de dados).
     """
-    codenames_path = Path(settings.codenames_file)
-    
-    if not codenames_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Arquivo codenames.json não encontrado"
-        )
-    
-    try:
-        with codenames_path.open('r', encoding='utf-8') as f:
-            return json.load(f)
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro ao ler arquivo codenames.json"
-        )
+    return db_repo.get_missing_codenames()
     
     
 @app.post("/retro-buygoods/upload", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_upload_key)])

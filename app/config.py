@@ -33,9 +33,6 @@ class Settings(BaseSettings):
     slack_default_channel: str = "#None"
     slack_monitor_channel: str = "#monitor-sites"
     
-    # Processamento
-    codenames_file: str = "codenames.json"
-    
     # Blacklist de codenames
     codename_blacklist_prefixes: tuple[str, ...] = ("calls", "wc")
 

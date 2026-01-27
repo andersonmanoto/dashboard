@@ -144,3 +144,13 @@ class Affiliate(BaseModel):
     status: AffiliateStatus = AffiliateStatus.ACTIVE
     
     model_config = ConfigDict(use_enum_values=True)
+
+
+class MissingCodename(BaseModel):
+    """Log de codename não encontrado."""
+    network: str
+    order_id: str
+    product_name: Optional[str] = None
+    codename: Optional[str] = None
+    account_id: Optional[str] = None
+    buy_url: Optional[str] = None

@@ -2,7 +2,6 @@
 Serviço para envio de notificações via Slack.
 """
 import json
-from pathlib import Path
 from typing import Optional, Union
 from loguru import logger
 from slack_sdk import WebClient
@@ -11,21 +10,64 @@ from slack_sdk.errors import SlackApiError
 from config import Settings
 from models.enums import NetworkType
 
+from repositories.database import DatabaseRepository
+from models.schemas import MissingCodename 
+
 
 class SlackService:
     """Gerencia notificações via Slack."""
     
-    def __init__(self, settings: Settings):
-        """
-        Inicializa cliente do Slack.
-        """
+    def __init__(self, settings: Settings, db_repo: DatabaseRepository):
+        """ Inicializa o Slack Service """
         self.client = WebClient(token=settings.slack_bot_token)
         self.default_channel = settings.slack_default_channel
         self.monitor_channel = settings.slack_monitor_channel
         self.blacklist_prefixes = settings.codename_blacklist_prefixes
-        self.codenames_file = Path(settings.codenames_file)
+        self.db = db_repo
         
         logger.info("Cliente do Slack inicializado com sucesso")
+
+    def notify_codename_not_found(
+        self,
+        network: Union[NetworkType, str],
+        order_id: str,
+        product: str,
+        codename: Optional[str],
+        account_id: Optional[str] = None,
+        buy_url: Optional[str] = None,
+        channel: Optional[str] = None
+    ) -> bool:
+        """Notifica Slack e persiste no Banco de Dados."""
+        
+        if self._is_blacklisted(codename):
+            return False
+        
+        # 1. Salva no Supabase
+        self._log_missing_codename_db(
+            network, order_id, product, codename, account_id, buy_url
+        )
+        
+        # 2. Notifica Slack
+        blocks = self._build_codename_not_found_blocks(
+            network, order_id, product, codename, account_id, buy_url
+        )
+        target_channel = channel or self.monitor_channel
+        
+        return self._send_message(target_channel, "Codename não encontrado", blocks)
+
+    def _log_missing_codename_db(self, network, order_id, product, codename, account_id, buy_url):
+        """Helper para salvar no banco."""
+        network_val = network.value if isinstance(network, NetworkType) else str(network)
+        
+        entry = MissingCodename(
+            network=network_val,
+            order_id=order_id,
+            product_name=product,
+            codename=codename or "N/A",
+            account_id=account_id,
+            buy_url=buy_url
+        )
+        self.db.register_missing_codename(entry)
     
     def notify_codename_not_found(
         self,
@@ -34,7 +76,7 @@ class SlackService:
         product: str,
         codename: Optional[str],
         account_id: Optional[str] = None,
-        buy_url: Optional[str] = None,  # <--- NOVO PARÂMETRO
+        buy_url: Optional[str] = None,
         channel: Optional[str] = None
     ) -> bool:
         """
@@ -58,7 +100,7 @@ class SlackService:
             product=product,
             codename=codename,
             account_id=account_id,
-            buy_url=buy_url  # <--- PASSANDO ADIANTE
+            buy_url=buy_url
         )
         
         # Envia para Slack

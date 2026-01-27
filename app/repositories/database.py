@@ -14,6 +14,7 @@ from models.schemas import (
     Affiliate
 )
 from models.enums import AffiliateStatus, NetworkType
+from models.schemas import MissingCodename
 
 
 class DatabaseRepository:
@@ -317,3 +318,32 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao salvar sales_status: {e}")
             return None
+        
+
+    def register_missing_codename(self, data: MissingCodename) -> None:
+        """
+        Registra um codename não encontrado no banco de dados.
+        """
+        try:
+            payload = data.model_dump(exclude_none=True)
+            self.client.table("missing_codenames").insert(payload).execute()
+        except Exception as e:
+            # Log de erro silencioso para não parar o fluxo principal
+            logger.error(f"Erro ao salvar missing_codename: {e}")
+
+
+    def get_missing_codenames(self, limit: int = 100) -> list[dict]:
+        """
+        Retorna lista de codenames não resolvidos.
+        """
+        try:
+            response = self.client.table("missing_codenames")\
+                .select("*")\
+                .eq("is_resolved", False)\
+                .order("created_at", desc=True)\
+                .limit(limit)\
+                .execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Erro ao buscar missing_codenames: {e}")
+            return []
