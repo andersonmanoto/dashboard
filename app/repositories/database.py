@@ -322,13 +322,25 @@ class DatabaseRepository:
 
     def register_missing_codename(self, data: MissingCodename) -> None:
         """
-        Registra um codename não encontrado no banco de dados.
+        Registra um codename não encontrado (ignora se já existir).
         """
         try:
             payload = data.model_dump(exclude_none=True)
-            self.client.table("missing_codenames").insert(payload).execute()
+            
+            response = self.client.table("missing_codenames")\
+                .upsert(
+                    payload, 
+                    on_conflict="codename,account_id", 
+                    ignore_duplicates=True
+                ).execute()
+            
+            if response.data:
+                saved_id = response.data[0].get('id')
+                logger.info(
+                    f"Missing Codename salvo: {data.codename} | ID: {saved_id}"
+                )
+
         except Exception as e:
-            # Log de erro silencioso para não parar o fluxo principal
             logger.error(f"Erro ao salvar missing_codename: {e}")
 
 

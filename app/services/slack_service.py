@@ -47,7 +47,7 @@ class SlackService:
             )
             return False
         
-        # 1. Salva no Banco de Dados (NOVO)
+        # 1. Salva no Banco de Dados
         self._log_missing_codename_db(
             network, order_id, product, codename, account_id, buy_url
         )

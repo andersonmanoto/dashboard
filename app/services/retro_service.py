@@ -86,6 +86,9 @@ class SpreadsheetRetro:
             raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
 
         logger.info(f"Iniciando importação de: {file_path}")
+        
+        # Início da contagem
+        start_time = datetime.now()
 
         # 1. LOAD
         try:
@@ -94,7 +97,6 @@ class SpreadsheetRetro:
             df = pd.read_excel(file_path, skiprows=3)
 
         # 2. RENAME
-        # Mantém apenas colunas mapeadas
         cols_to_keep = list(SPREADSHEET_MAPPING.keys())
         df = df[df.columns.intersection(cols_to_keep)].copy()
         df.rename(columns=SPREADSHEET_MAPPING, inplace=True)
@@ -125,8 +127,12 @@ class SpreadsheetRetro:
                 error_count += 1
                 logger.error(f"Erro ao processar linha {row.get('order_id')}: {e}")
 
+        # Fim da contagem e cálculo da duração
+        end_time = datetime.now()
+        duration = end_time - start_time
+
         logger.success(
-            f"Importação concluída\n"
+            f"Importação concluída em {duration}\n"
             f"---> Processados: {success_count}\n"
             f"---> Ignorados: {skipped_count}\n"
             f"---> Falhas: {error_count}"
@@ -203,7 +209,7 @@ class SpreadsheetRetro:
         elif 'chargeback' in action_source:
             action = ActionType.CHARGEBACK
         
-        # 2. Determina Data (Crucial!)
+        # 2. Determina Data
         event_date, event_time = self._get_event_datetime(row, action)
 
         # 3. Payload Extra
@@ -236,7 +242,6 @@ class SpreadsheetRetro:
         if 'total_clean' not in payload and row.get('total_amount'):
             payload['total_clean'] = row.get('total_amount')
         
-        # GARANTIA FINAL CONTRA NAN
         # Se algum campo numérico obrigatório for None/NaN, força 0.0
         sale_total = row.get('total_amount')
         if sale_total is None or pd.isna(sale_total):
@@ -263,7 +268,7 @@ class SpreadsheetRetro:
             action_type=action,
             event_date=event_date,
             event_time=event_time,
-            sale_total=float(sale_total), # Garante float
+            sale_total=float(sale_total),
             aff_commission=float(row.get('aff_commission') or 0.0),
             tax_amount=float(row.get('tax_amount') or 0.0),
             shipping_cost=float(row.get('shipping_cost') or 0.0),
