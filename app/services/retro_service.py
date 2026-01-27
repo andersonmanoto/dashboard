@@ -265,6 +265,7 @@ class SpreadsheetRetro:
         return NormalizedEvent(
             network=network,
             order_id=str(row.get('order_id')),
+            account_id=str(row.get('account_id')) if row.get('account_id') else None,
             action_type=action,
             event_date=event_date,
             event_time=event_time,

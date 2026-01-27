@@ -1,6 +1,4 @@
-"""
-Repositório para acesso ao banco de dados Supabase.
-"""
+from functools import lru_cache
 from typing import Optional, Union
 from uuid import UUID
 from loguru import logger
@@ -11,10 +9,10 @@ from models.schemas import (
     NormalizedEvent, 
     SalesStatus, 
     CheckoutInfo, 
-    Affiliate
+    Affiliate,
+    MissingCodename
 )
 from models.enums import AffiliateStatus, NetworkType
-from models.schemas import MissingCodename
 
 
 class DatabaseRepository:
@@ -38,21 +36,10 @@ class DatabaseRepository:
             settings.supabase_key
         )
         logger.info("Conexão com Supabase estabelecida")
-    
-    # ========== HELPER MÉTODOS ==========
-
-    def _sanitize_data(self, data: dict) -> dict:
-        """
-        Converte tipos complexos (como UUID) para strings para garantir
-        serialização JSON correta.
-        """
-        for key, value in data.items():
-            if isinstance(value, UUID):
-                data[key] = str(value)
-        return data
 
     # ========== AFFILIATES ==========
     
+    @lru_cache(maxsize=1000)
     def get_affiliate_by_external_id(
         self,
         network: Union[NetworkType, str],
@@ -61,6 +48,7 @@ class DatabaseRepository:
         """
         Busca afiliado por ID externo e rede.
         Aceita network como Enum ou str (blindado contra erros de borda).
+        Usa cache em memória para otimizar importações em lote.
         """
         network_value = (
             network.value
@@ -94,18 +82,9 @@ class DatabaseRepository:
     def create_affiliate(self, affiliate: Affiliate) -> Optional[Affiliate]:
         """
         Cria novo afiliado.
-        
-        Args:
-            affiliate: Dados do afiliado
-            
-        Returns:
-            Affiliate criado ou None em caso de erro
         """
         try:
-            data = affiliate.model_dump(exclude={'id'}, exclude_none=True)
-            
-            # CORREÇÃO: Sanitização de UUIDs
-            data = self._sanitize_data(data)
+            data = affiliate.model_dump(mode='json', exclude={'id'}, exclude_none=True)
             
             response = self.client.table("affiliates")\
                 .insert(data)\
@@ -122,6 +101,7 @@ class DatabaseRepository:
     
     # ========== CHECKOUTS ==========
     
+    @lru_cache(maxsize=1000)
     def get_checkout_by_code(
         self, 
         code: str, 
@@ -129,13 +109,7 @@ class DatabaseRepository:
     ) -> Optional[CheckoutInfo]:
         """
         Busca checkout por código, com desambiguação por account_id.
-        
-        Args:
-            code: Código do checkout
-            account_id: ID da conta para desambiguação (opcional)
-            
-        Returns:
-            CheckoutInfo ou None se não encontrado
+        Usa cache em memória para performance.
         """
         try:
             response = self.client.table("checkouts")\
@@ -177,12 +151,7 @@ class DatabaseRepository:
         """
         Busca checkout fazendo match parcial pelo nome do produto.
         Estratégia de contingência quando o código não é encontrado.
-        
-        Args:
-            product_name: Nome do produto para buscar
-            
-        Returns:
-            CheckoutInfo ou None se não encontrado
+        (Sem Cache propositalmente, pois é um fallback raro)
         """
         if not product_name:
             return None
@@ -247,86 +216,53 @@ class DatabaseRepository:
             logger.error(f"Erro ao buscar checkout por product_id: {e}")
             return None
     
-    # ========== EVENTS ==========
+    # ========== TRANSACTIONS (RPC) ==========
     
-    def upsert_event(self, event: NormalizedEvent) -> Optional[dict]:
+    def save_event_transaction(
+        self, 
+        event: NormalizedEvent, 
+        status: Optional[SalesStatus] = None
+    ) -> Optional[dict]:
         """
-        Insere ou atualiza evento usando UPSERT.
-        
-        Args:
-            event: Evento normalizado
-            
-        Returns:
-            Dados do evento salvo ou None em caso de erro
+        Salva Evento e Status numa única transação via RPC.
+        Substitui upsert_event e create_sales_status.
         """
         try:
-            data = event.model_dump(exclude_none=True)
-            # Remove o account_id do upsert em 'events'
-            data = event.model_dump(exclude_none=True, exclude={'account_id'})
+            event_json = event.model_dump(mode='json', exclude_none=True)
             
-            # Sanitização de UUIDs
-            data = self._sanitize_data(data)
-            
-            response = self.client.table("events").upsert(
-                data,
-                on_conflict="network,order_id,action_type,event_date,event_time,sale_total"
-            ).execute()
-            
-            if response.data:
-                saved_id = response.data[0].get('id')
-                logger.info(
-                    f"Evento salvo: {event.action_type} | ID: {saved_id}"
-                )
+            status_json = None
+            if status:
+                status_json = status.model_dump(mode='json', exclude={'event_id'}, exclude_none=True)
 
-                return response.data[0]
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Erro ao salvar evento: {e}")
-            raise
-    
-    # ========== SALES STATUS ==========
-    
-    def create_sales_status(self, status: SalesStatus) -> Optional[dict]:
-        """
-        Cria registro de mudança de status de venda.
-        
-        Args:
-            status: Dados do status
-            
-        Returns:
-            Dados do status salvo ou None em caso de erro
-        """
-        try:
-            data = status.model_dump(exclude_none=True)
-            data = self._sanitize_data(data)
-            
-            response = self.client.table("sales_status")\
-                .insert(data)\
-                .execute()
-            
+            # Chama a função no Supabase
+            response = self.client.rpc(
+                'save_event_transaction', 
+                {'event_data': event_json, 'status_data': status_json}
+            ).execute()
+
             if response.data:
-                saved_id = response.data[0].get('id')
-                logger.info(
-                    f"Status salvo: {status.status_type} | ID: {saved_id}"
-                )
-                return response.data[0]
-            
+                saved_data = response.data
+                event_id = saved_data.get('id') if isinstance(saved_data, dict) else 'N/A'
+                
+                logger.info(f"Transação OK | Order: {event.order_id} | Event ID: {event_id}")
+                return saved_data
+
             return None
-            
+
         except Exception as e:
-            logger.error(f"Erro ao salvar sales_status: {e}")
-            return None
-        
+            logger.error(f"Erro na transação RPC: {e}")
+            raise e
+
+    # ========== MISSING CODENAMES ==========
 
     def register_missing_codename(self, data: MissingCodename) -> None:
         """
         Registra um codename não encontrado (ignora se já existir).
         """
         try:
-            payload = data.model_dump(exclude_none=True)
+            payload = data.model_dump(mode='json', exclude_none=True)
             
+            # Upsert com ignore_duplicates para respeitar a constraint unique_codename_account
             response = self.client.table("missing_codenames")\
                 .upsert(
                     payload, 
@@ -334,6 +270,7 @@ class DatabaseRepository:
                     ignore_duplicates=True
                 ).execute()
             
+            # Se response.data vier preenchido, significa que houve inserção/atualização
             if response.data:
                 saved_id = response.data[0].get('id')
                 logger.info(
@@ -342,7 +279,6 @@ class DatabaseRepository:
 
         except Exception as e:
             logger.error(f"Erro ao salvar missing_codename: {e}")
-
 
     def get_missing_codenames(self, limit: int = 100) -> list[dict]:
         """

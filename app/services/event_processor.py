@@ -46,57 +46,59 @@ class EventProcessor:
     async def process_event(self, event: NormalizedEvent) -> bool:
         try:
             order_id = event.order_id
-            action_type = event.action_type
-
+            
             # 1. Ignora cancelamentos
-            if action_type == ActionType.CANCEL:
+            if event.action_type == ActionType.CANCEL:
                 logger.info(
                     f"action_type: CANCEL (Order: {order_id}). Ignorando evento."
                 )
                 return False
 
-            # 2. Afiliado
+            # 2. Enriquecimento de Dados
             await self._enrich_affiliate(event)
-
-            # 3. Checkout / produto
             await self._enrich_checkout(event)
-
-            # 4. Ajustes por ação
+            
+            # Ajustes de datas para Refund/Rebill
             self._adjust_event_by_action_type(event)
 
-            # 5. Persistência do evento
-            saved_event = self.db.upsert_event(event)
+            # 3. Preparação do Sales Status
+            sales_status_obj = None
 
-            if not saved_event:
-                logger.info(
-                    f"Evento duplicado ou não salvo (Order: {order_id})"
-                )
-                return False
-
-            event_id = self._normalize_uuid(saved_event.get("id"))
-
-            if not event_id:
-                logger.warning(
-                    f"Evento salvo mas sem ID retornado (Order: {order_id})"
-                )
-                return False
-
-            # 6. Eventos de teste não geram sales_status
+            # Eventos de TESTE não geram impacto financeiro (sales_status)
             if event.is_test:
                 logger.info(
                     f"Evento de TESTE detectado (Order: {order_id}). "
-                    f"Ignorando sales_status."
+                    f"Status financeiro será ignorado."
                 )
-                return True
+            
+            # Apenas ações rastreáveis geram sales_status
+            elif event.action_type in TRACKABLE_ACTIONS:
+                payload = event.payload or {}
+                amount_affected = self._calculate_amount_affected(event)
+                
+                sales_status_obj = SalesStatus(
+                    event_id=UUID('00000000-0000-0000-0000-000000000000'),
+                    order_id=order_id,
+                    affiliate_id=event.affiliate_id,
+                    product_id=event.product_id,
+                    network=self._network_value(event.network),
+                    status_type=event.action_type,
+                    status_reason=payload.get("comments"),
+                    status_date=event.event_date,
+                    status_time=event.event_time,
+                    amount_affected=amount_affected
+                )
 
-            # 7. Sales status
-            if action_type in TRACKABLE_ACTIONS:
-                self._create_sales_status(event, event_id)
+            # 4. Envia o Evento e o Status (se houver) para o banco via RPC
+            result = self.db.save_event_transaction(event, sales_status_obj)
+
+            if not result:
+                return False
 
             return True
 
         except Exception as e:
-            logger.exception(f"Erro ao processar evento: {e}")
+            logger.exception(f"Erro fatal ao processar evento {event.order_id}: {e}")
             return False
 
 
