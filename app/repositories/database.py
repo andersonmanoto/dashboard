@@ -295,3 +295,54 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao buscar missing_codenames: {e}")
             return []
+        
+    def create_inbox_entry(self, network: str, payload: dict) -> str:
+        """
+        Salva o webhook cru na tabela de entrada.
+        Retorna o ID do registro.
+        """
+        try:
+            data = {
+                "network": network,
+                "payload": payload,
+                "status": "pending"
+            }
+            response = self.client.table("webhook_inbox").insert(data).execute()
+            if response.data:
+                return response.data[0]['id']
+            return None
+        except Exception as e:
+            logger.error(f"Erro CRÍTICO ao salvar na inbox: {e}")
+            raise e
+
+    def fetch_pending_webhooks(self, limit: int = 10) -> list[dict]:
+        """
+        Busca webhooks pendentes (FIFO).
+        """
+        try:
+            response = self.client.table("webhook_inbox")\
+                .select("*")\
+                .eq("status", "pending")\
+                .order("created_at", desc=False)\
+                .limit(limit)\
+                .execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Erro ao buscar pendentes: {e}")
+            return []
+
+    def update_inbox_status(self, inbox_id: str, status: str, error_msg: str = None):
+        """
+        Atualiza o status do processamento.
+        """
+        try:
+            data = {"status": status}
+            if error_msg:
+                data["error_log"] = error_msg
+            
+            self.client.table("webhook_inbox")\
+                .update(data)\
+                .eq("id", inbox_id)\
+                .execute()
+        except Exception as e:
+            logger.error(f"Erro ao atualizar inbox {inbox_id}: {e}")

@@ -149,58 +149,27 @@ async def verify_upload_key(
 async def webhook_buygoods(
     secret_token: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
-    normalizer: Annotated[PayloadNormalizer, Depends(get_payload_normalizer)],
-    processor: Annotated[EventProcessor, Depends(get_event_processor)]
+    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)]
 ) -> dict:
-    """
-    Endpoint para receber webhooks da BuyGoods.
     
-    Args:
-        secret_token: Token de segurança na URL
-        request: Request do FastAPI
-        background_tasks: Gerenciador de tarefas em background
-        settings: Configurações da aplicação
-        normalizer: Serviço de normalização
-        processor: Processador de eventos
-        
-    Returns:
-        dict: Resposta de confirmação
-        
-    Raises:
-        HTTPException: Se token for inválido ou erro 500
-    """
-    # Valida segurança
     verify_secret_token(secret_token, settings)
     
     try:
-        # Extrai payload
         payload = await extract_payload(request)
         
-        # Pega order_id para logging
-        order_id = payload.get("order_id_global") or payload.get("order_id")
-        action = payload.get("action_type", "sale")
-        
-        logger.info(f"BuyGoods: Recebido Order {order_id} ({action})")
-        
-        # Agenda processamento em background
-        background_tasks.add_task(
-            process_webhook_background,
-            normalizer,
-            processor,
-            NetworkType.BUYGOODS,
-            payload
+        # Apenas salva e responde rápido
+        inbox_id = db_repo.create_inbox_entry(
+            network=NetworkType.BUYGOODS.value,
+            payload=payload
         )
         
-        return {"status": "received", "id": order_id}
+        logger.info(f"BuyGoods: Webhook salvo na inbox. ID: {inbox_id}")
+        return {"status": "queued", "inbox_id": inbox_id}
         
     except Exception as e:
-        logger.exception("Erro 500 no endpoint BuyGoods")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal Server Error"
-        )
+        logger.exception("Erro ao salvar webhook BuyGoods")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @app.get("/digistore24/{secret_token}", operation_id="webhook_digistore24_get")
