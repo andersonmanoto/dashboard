@@ -126,10 +126,10 @@ class SpreadsheetRetro:
                 logger.error(f"Erro ao processar linha {row.get('order_id')}: {e}")
 
         logger.success(
-            f"Importação concluída.\n"
-            f"✅ Processados: {success_count}\n"
-            f"⏭️ Ignorados: {skipped_count}\n"
-            f"❌ Falhas: {error_count}"
+            f"Importação concluída\n"
+            f"---> Processados: {success_count}\n"
+            f"---> Ignorados: {skipped_count}\n"
+            f"---> Falhas: {error_count}"
         )
 
     def _clean_dataframe(self, df: pd.DataFrame):
