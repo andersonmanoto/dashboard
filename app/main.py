@@ -6,7 +6,16 @@ from uuid import uuid4
 from typing import Annotated
 from pathlib import Path
 
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends, status, UploadFile, File, Header
+from fastapi import (
+    FastAPI, Request,
+    HTTPException,
+    BackgroundTasks,
+    Depends,
+    status,
+    UploadFile,
+    File, 
+    Header
+)
 from loguru import logger
 from contextlib import asynccontextmanager
 
@@ -19,7 +28,7 @@ from dependencies import (
 from models.enums import NetworkType
 from services.normalizer import PayloadNormalizer
 from services.event_processor import EventProcessor
-from services.retro_service import SpreadsheetImporter, run_importer_background
+from services.retro_service import SpreadsheetRetro, run_retro_background
 from repositories.database import DatabaseRepository
 
 @asynccontextmanager
@@ -32,9 +41,9 @@ async def lifespan(app: FastAPI):
 
 # Configuração da aplicação
 app = FastAPI(
-    title="Webhook Dashboard",
+    title="Tiger Offers - Webhook Dashboard",
     description="API para normalizar e processar webhooks de redes de afiliados",
-    version="2.0.0",
+    version="2.2.0",
     lifespan=lifespan
 )
 
@@ -294,7 +303,7 @@ async def get_codenames(
         )
     
     
-@app.post("/retro/upload", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_upload_key)])
+@app.post("/retro-buygoods/upload", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_upload_key)])
 async def upload_spreadsheet(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
@@ -303,7 +312,6 @@ async def upload_spreadsheet(
 ):
     """
     Endpoint para upload manual de planilhas (CSV/Excel).
-    Requer header 'x-api-key' com a chave correta.
     """
     # 1. Validação básica de extensão
     filename = file.filename.lower()
@@ -327,11 +335,11 @@ async def upload_spreadsheet(
         # Lê o conteúdo e escreve
         content = await file.read()
         temp_path.write_bytes(content)
-            
+
         logger.info(f"Arquivo recebido e salvo em: {temp_path}")
         
         # 3. Agendar processamento em Background
-        background_tasks.add_task(run_importer_background, str(temp_path.absolute()), db_repo)
+        background_tasks.add_task(run_retro_background, str(temp_path.absolute()), db_repo)
         
         return {
             "status": "queued",

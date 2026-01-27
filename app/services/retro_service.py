@@ -15,6 +15,7 @@ SPREADSHEET_MAPPING = {
     # --- Identificadores ---
     "Order ID": "order_id",
     "External Order ID": "external_order_id",
+    "Account ID": "account_id",
     
     # --- Datas Específicas ---
     "Date Created": "created_date",     # Data da venda original
@@ -70,7 +71,7 @@ SPREADSHEET_MAPPING = {
     "Is Test": "is_test"
 }
 
-class SpreadsheetImporter:
+class SpreadsheetRetro:
     """
     Serviço responsável por importar planilhas de vendas, refunds e chargebacks.
     Seleciona a data correta baseada no tipo de evento.
@@ -106,8 +107,7 @@ class SpreadsheetImporter:
         error_count = 0
         skipped_count = 0
 
-        # Converte para dict, substituindo NaN por None explicitamente para evitar erro de JSON
-        # O replace({np.nan: None}) é crucial aqui
+        # Converte para dict (NaN dá ruim pro json)
         records = df.replace({np.nan: None}).to_dict(orient='records')
 
         for row in records:
@@ -277,10 +277,10 @@ class SpreadsheetImporter:
             payload=payload
         )
     
-# Helper para o importer em background
-async def run_importer_background(file_path: str, db_repo: DatabaseRepository):
+# Helper para o retro em background
+async def run_retro_background(file_path: str, db_repo: DatabaseRepository):
     """
-    Função wrapper para rodar o importer em background e limpar o arquivo depois.
+    Função wrapper para rodar o retro em background e limpar o arquivo depois.
     """
     path_obj = Path(file_path)
     try:
@@ -288,10 +288,10 @@ async def run_importer_background(file_path: str, db_repo: DatabaseRepository):
         from models.enums import NetworkType
 
         processor = EventProcessor(db_repo, slack_service=None) 
-        importer = SpreadsheetImporter(processor)
+        retro = SpreadsheetRetro(processor)
         
         logger.info(f"⏳ Background Task: Iniciando processamento de {file_path}")
-        await importer.process_file(file_path, network=NetworkType.BUYGOODS)
+        await retro.process_file(file_path, network=NetworkType.BUYGOODS)
         logger.info("✅ Background Task: Processamento finalizado")
         
     except Exception as e:
