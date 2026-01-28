@@ -1,0 +1,26 @@
+services:
+  api:
+    build: .
+    container_name: dashhook-api
+    restart: always
+    env_file:
+      - /etc/dashhook.env
+    environment:
+      - PYTHONPATH=/app:/app/app
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build: .
+    container_name: dashhook-worker
+    restart: always
+    env_file:
+      - /etc/dashhook.env
+    environment:
+      - PYTHONPATH=/app:/app/app
+    volumes:
+      - .:/app
+    command: python -m app.worker
