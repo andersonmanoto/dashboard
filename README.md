@@ -47,10 +47,10 @@ Em vez de usar filas em memória (como Redis), gravamos o evento cru no banco pr
    Crie um arquivo `.env` na raiz (baseado no `.env.example`):
 
    ```bash
-   cp .env.example /etc/dashhook.env
+   cp .env.example .env
    ```
 
-   *Preencha com as credenciais do Supabase e Slack.*
+   *Preencha com as credenciais do Supabase e Slack (etc...).*
 
 3. **Suba o ambiente:**
 

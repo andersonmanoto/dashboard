@@ -4,7 +4,7 @@ services:
     container_name: dashhook-api
     restart: always
     env_file:
-      - /etc/dashhook.env
+      - .env
     environment:
       - PYTHONPATH=/app:/app/app
     ports:
@@ -18,7 +18,7 @@ services:
     container_name: dashhook-worker
     restart: always
     env_file:
-      - /etc/dashhook.env
+      - .env
     environment:
       - PYTHONPATH=/app:/app/app
     volumes:
