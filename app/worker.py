@@ -56,11 +56,11 @@ async def process_single_webhook(db_repo, normalizer, processor, item):
         await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, status, msg)
         
     except Exception as e:
-        logger.error(f"❌ Falha no webhook {inbox_id}: {e}")
+        logger.error(f"Falha no webhook {inbox_id}: {e}")
         await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, "failed", str(e))
 
 async def run_worker():
-    logger.info("🚀 Worker Async V2 iniciado. Aguardando webhooks...")
+    logger.info("Worker Async V2 iniciado. Aguardando webhooks...")
     
     settings = get_settings()
     db_repo = DatabaseRepository(settings)
@@ -93,7 +93,7 @@ async def run_worker():
             logger.exception(f"Erro no loop do worker: {main_e}")
             await asyncio.sleep(5)
 
-    logger.info("👋 Worker finalizado.")
+    logger.info("Worker finalizado.")
 
 if __name__ == "__main__":
     asyncio.run(run_worker())

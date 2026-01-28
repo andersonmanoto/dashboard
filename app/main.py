@@ -19,7 +19,7 @@ from fastapi import (
 from loguru import logger
 from contextlib import asynccontextmanager
 
-from config import Settings, get_settings
+from app.config import Settings, get_settings
 from dependencies import (
     get_payload_normalizer,
     get_event_processor,
@@ -37,7 +37,6 @@ async def lifespan(app: FastAPI):
     
     yield
     logger.info("Webhook Dashboard encerrado")
-
 
 # Configuração da aplicação
 app = FastAPI(
