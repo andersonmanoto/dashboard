@@ -235,16 +235,6 @@ async def webhook_digistore24(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error"
         )
-
-
-@app.get("/codenames")
-async def get_codenames(
-    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)]
-) -> list[dict]:
-    """
-    Retorna lista de codenames não mapeados (do banco de dados).
-    """
-    return db_repo.get_missing_codenames()
     
     
 @app.post("/retro-buygoods/upload", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_upload_key)])
