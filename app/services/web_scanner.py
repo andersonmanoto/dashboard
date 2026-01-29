@@ -11,11 +11,7 @@ logger = logging.getLogger(__name__)
 
 class WebScannerService:
     def __init__(self):
-        """
-        Inicializa o serviço carregando as configurações do config.py
-        """
         settings = get_settings()
-
         self.map_file = Path(settings.structure_map_file)
         self.concurrency_limit = 20
 
@@ -34,19 +30,32 @@ class WebScannerService:
         path = urlparse(url).path.strip("/")
         return path.split("/")[-1] if path else "home"
 
-    async def _check_url(self, client: httpx.AsyncClient, semaphore: asyncio.Semaphore, url: str, codename: str):
+    async def _check_url(self, client: httpx.AsyncClient, semaphore: asyncio.Semaphore, url: str, codename: str, debug: bool):
         found_data = []
         unique_links = set()
 
         async with semaphore:
             try:
-                response = await client.get(url, timeout=10.0, follow_redirects=True)
+                if debug:
+                    logger.warning(f"[DEBUG] Acessando: {url}")
+
+                response = await client.get(url, timeout=15.0, follow_redirects=True)
+                
+                if debug:
+                    logger.warning(f"[DEBUG] {url} -> Status: {response.status_code}")
+
                 if response.status_code != 200:
+                    if debug:
+                        logger.warning(f"[DEBUG] Falha ao carregar {url} (Status {response.status_code})")
                     return []
 
                 soup = BeautifulSoup(response.text, 'html.parser')
+                all_links = soup.find_all('a', href=True)
                 
-                for link in soup.find_all('a', href=True):
+                if debug:
+                    logger.warning(f"[DEBUG] {url} -> Links brutos encontrados: {len(all_links)}")
+
+                for link in all_links:
                     href = link['href']
                     
                     if href in unique_links:
@@ -68,19 +77,27 @@ class WebScannerService:
                             if match_found: break
                         
                         if match_found:
+                            if debug:
+                                logger.warning(f"[DEBUG] MATCH! Link encontrado em {url}: {href}")
+                            
                             found_data.append({
                                 "source_url": url,
                                 "stage": self._extract_stage_from_url(url),
                                 "found_link": href
                             })
+                        # else:
+                        #    if debug: logger.warning(f"   [DEBUG] Ignorado: {href}")
+
                     except:
                         continue
-            except Exception:
+            except Exception as e:
+                if debug:
+                    logger.warning(f"[DEBUG] Erro de conexão em {url}: {e}")
                 pass
                 
         return found_data
 
-    async def run_scan(self, codename: str, domain_filter: str):
+    async def run_scan(self, codename: str, domain_filter: str, debug: bool = False):
         structure_data = self._load_structure_map()
         urls_to_scan = []
 
@@ -95,6 +112,8 @@ class WebScannerService:
                     urls_to_scan.append(f"{base_funnel_url}/{directory}/")
 
         if not urls_to_scan:
+            if debug:
+                logger.warning(f"[DEBUG] Nenhuma URL gerada para o domínio {domain_filter}")
             return []
 
         semaphore = asyncio.Semaphore(self.concurrency_limit)
@@ -103,7 +122,7 @@ class WebScannerService:
         limits = httpx.Limits(max_keepalive_connections=20, max_connections=40)
         async with httpx.AsyncClient(limits=limits, verify=False) as client:
             tasks = [
-                self._check_url(client, semaphore, url, codename) 
+                self._check_url(client, semaphore, url, codename, debug) 
                 for url in urls_to_scan
             ]
             scan_results = await asyncio.gather(*tasks)

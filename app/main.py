@@ -324,6 +324,7 @@ async def upload_spreadsheet(
 async def find_offer_in_funnel(
     codename: str = Query(..., description="O codename do produto (ex: vis3)"),
     domain: str = Query(..., description="O domínio do funil para varrer (ex: visiumpro.com)"),
+    debug: bool = Query(False, description="Logs no terminal"),
     token: str = Depends(get_api_key)
 ):
     """
@@ -331,19 +332,21 @@ async def find_offer_in_funnel(
     """
     service = WebScannerService()
     
-    # Executa o scan
-    results = await service.run_scan(codename=codename, domain_filter=domain)
+    # Passando o debug para o serviço
+    results = await service.run_scan(codename=codename, domain_filter=domain, debug=debug)
     
     if not results:
         return {
             "message": "Nenhum link encontrado para este codename neste domínio.",
             "codename": codename,
             "domain": domain,
+            "debug_mode": debug, # Retorna no JSON só pra confirmar que estava ativo
             "data": []
         }
 
     return {
         "message": "Scan finalizado.",
         "total_found": len(results),
+        "debug_mode": debug,
         "data": results 
     }
