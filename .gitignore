@@ -1,9 +1,7 @@
 __pycache__/
 *.pyc
 .env
-.env.*
 venv/
 .idea/
 .vscode/
 *.log
-codenames.json
