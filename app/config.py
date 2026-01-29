@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_key: str
     
+    # Web Scanner
+    scanner_secret_token: str
+    structure_map_file: str = "structure_map.json"
+    
     # Slack
     slack_bot_token: str
     slack_default_channel: str = "#None"

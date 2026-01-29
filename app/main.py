@@ -14,7 +14,9 @@ from fastapi import (
     status,
     UploadFile,
     File, 
-    Header
+    Header,
+    Query,
+    Security
 )
 from loguru import logger
 from contextlib import asynccontextmanager
@@ -25,11 +27,14 @@ from dependencies import (
     get_event_processor,
     get_database_repository
 )
+from fastapi.security import APIKeyHeader
 from models.enums import NetworkType
 from services.normalizer import PayloadNormalizer
 from services.event_processor import EventProcessor
 from services.retro_service import SpreadsheetRetro, run_retro_background
 from repositories.database import DatabaseRepository
+
+from services.web_scanner import WebScannerService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,8 +51,34 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-
 # ========== HELPERS ==========
+
+API_KEY_NAME = "x-token"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key_header: str = Security(api_key_header)):
+    """
+    Valida se o token passado no Header bate com o configurado no settings.
+    """
+    settings = get_settings()
+    
+    # 1. Fail-safe: Se a chave não estiver configurada no .env, bloqueia tudo por segurança.
+    if not settings.scanner_secret_token:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro de segurança: Token do scanner não configurado no servidor."
+        )
+
+    # 2. Validação: Compara o token recebido com o token secreto
+    if api_key_header == settings.scanner_secret_token:
+        return api_key_header
+    
+    # 3. Se chegou aqui, a senha está errada ou o header não foi enviado
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Acesso Negado: Token inválido ou ausente."
+    )
+
 
 def verify_secret_token(secret_token: str, settings: Settings) -> None:
     """
@@ -287,3 +318,32 @@ async def upload_spreadsheet(
             temp_path.unlink(missing_ok=True)
         logger.error(f"Erro no upload: {e}")
         raise HTTPException(500, "Falha ao salvar arquivo")
+    
+
+@app.get("/scanner/offers/lookup")
+async def find_offer_in_funnel(
+    codename: str = Query(..., description="O codename do produto (ex: vis3)"),
+    domain: str = Query(..., description="O domínio do funil para varrer (ex: visiumpro.com)"),
+    token: str = Depends(get_api_key)
+):
+    """
+    Varre os diretórios do `domain` e busca o funnel_stage, funnel_number e buy_url correspondentes ao `codename`
+    """
+    service = WebScannerService()
+    
+    # Executa o scan
+    results = await service.run_scan(codename=codename, domain_filter=domain)
+    
+    if not results:
+        return {
+            "message": "Nenhum link encontrado para este codename neste domínio.",
+            "codename": codename,
+            "domain": domain,
+            "data": []
+        }
+
+    return {
+        "message": "Scan finalizado.",
+        "total_found": len(results),
+        "data": results 
+    }
