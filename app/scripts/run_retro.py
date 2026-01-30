@@ -10,6 +10,14 @@ from services.retro_service import SpreadsheetRetro
 
 
 async def main():
+    """
+    Função principal do script de importação.
+
+    Lê o caminho do arquivo dos argumentos de linha de comando, configura
+    as dependências (Banco, Processador) e inicia a importação assíncrona.
+    O serviço de Slack é desativado propositalmente para evitar spam
+    durante importações em massa.
+    """
     if len(sys.argv) < 2:
         logger.error("Uso: python scripts/run_import.py <caminho_do_arquivo.csv>")
         return

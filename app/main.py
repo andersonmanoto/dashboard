@@ -1,7 +1,3 @@
-"""
-API FastAPI para receber e processar webhooks de redes de afiliados.
-"""
-
 from contextlib import asynccontextmanager
 from json import JSONDecodeError
 from pathlib import Path
@@ -40,6 +36,16 @@ from app.config import Settings, get_settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Gerencia o ciclo de vida da aplicação (Startup e Shutdown).
+
+    Este gerenciador de contexto é executado automaticamente pelo FastAPI.
+    - Antes do `yield`: Executa na inicialização do servidor.
+    - Depois do `yield`: Executa no desligamento (graceful shutdown).
+
+    Args:
+        app (FastAPI): A instância da aplicação FastAPI.
+    """
     logger.info("Webhook Dashboard iniciado")
 
     yield
@@ -62,7 +68,23 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 async def get_api_key(api_key_header: str = Security(api_key_header)):
     """
-    Valida se o token passado no Header bate com o configurado no settings.
+    Valida a chave de API (Token) para rotas protegidas (ex: Scanner).
+
+    Esta função verifica se o token enviado no cabeçalho `x-token` da
+    requisição corresponde ao token secreto configurado no servidor.
+
+    Args:
+        api_key_header (str): O valor do cabeçalho 'x-token' extraído automaticamente.
+
+    Returns:
+        str: O token validado, se estiver correto.
+
+    Raises:
+        Raises:
+        HTTPException (500): Se o servidor não tiver um token secreto
+            configurado (falha de segurança interna).
+        HTTPException (403): Se o token fornecido for inválido ou
+            estiver ausente (Acesso Negado).
     """
     settings = get_settings()
 
@@ -112,13 +134,17 @@ def verify_secret_token(secret_token: str, settings: Settings) -> None:
 
 async def extract_payload(request: Request) -> dict:
     """
-    Extrai payload do request (JSON ou form data).
+    Extrai os dados (payload) de uma requisição HTTP.
+
+    Tenta ler o corpo da requisição primeiro como JSON. Se falhar
+    (comum em alguns webhooks antigos que mandam form-data),
+    tenta ler como dados de formulário.
 
     Args:
-        request: Request do FastAPI
+        request (Request): O objeto de requisição bruta do FastAPI.
 
     Returns:
-        dict: Payload extraído
+        dict: Um dicionário Python contendo os dados recebidos.
     """
     try:
         return await request.json()
@@ -134,13 +160,17 @@ async def process_webhook_background(
     payload: dict,
 ) -> None:
     """
-    Processa webhook em background task.
+    Executa o processamento de um webhook em segundo plano.
+
+    Esta função é chamada pelo `BackgroundTasks` do FastAPI para não travar
+    a resposta HTTP imediata. Ela orquestra a normalização (limpeza)
+    e o processamento (salvamento/regras de negócio) do evento.
 
     Args:
-        normalizer: Serviço de normalização
-        processor: Processador de eventos
-        network: Rede de origem
-        payload: Dados do webhook
+        normalizer (PayloadNormalizer): Serviço que padroniza o JSON.
+        processor (EventProcessor): Serviço que aplica regras de negócio.
+        network (NetworkType): A rede de onde veio o webhook (ex: BuyGoods).
+        payload (dict): O dicionário de dados bruto recebido.
     """
     try:
         # Normaliza payload
@@ -162,7 +192,18 @@ async def verify_upload_key(
     x_api_key: str = Header(None), settings: Settings = Depends(get_settings)
 ) -> None:
     """
-    Verifica a chave de API para uploads no header 'x-api-key'.
+    Valida a chave de API específica para uploads de arquivos.
+
+    Diferente dos webhooks, o upload manual exige uma chave
+    passada no Header `x-api-key`.
+
+    Args:
+        x_api_key (str, optional): O valor do header 'x-api-key'.
+        settings (Settings): Configurações da aplicação.
+
+    Raises:
+        HTTPException (500): Se a chave de upload não estiver configurada no servidor.
+        HTTPException (403): Se a chave fornecida for inválida.
     """
     if not settings.upload_api_key:
         logger.critical("UPLOAD_API_KEY não configurada no servidor!")
@@ -188,6 +229,26 @@ async def webhook_buygoods(
     settings: Annotated[Settings, Depends(get_settings)],
     db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
 ) -> dict:
+    """
+    Recebe Webhooks da plataforma BuyGoods.
+
+    Este endpoint implementa o padrão "Inbox":
+    1. Valida o token da URL.
+    2. Recebe o JSON/Form bruto.
+    3. Salva imediatamente no banco de dados (`webhook_inbox`) sem processar.
+    4. Responde "OK" para a BuyGoods.
+
+    O processamento é feito depois por um Worker separado.
+
+    Args:
+        secret_token (str): Segredo na URL para autenticação.
+        request (Request): A requisição HTTP crua.
+        settings (Settings): Configurações injetadas.
+        db_repo (DatabaseRepository): Conexão com o banco injetada.
+
+    Returns:
+        dict: Status de enfileiramento e ID do registro na Inbox.
+    """
     verify_secret_token(secret_token, settings)
 
     try:
@@ -217,22 +278,23 @@ async def webhook_digistore24(
     processor: Annotated[EventProcessor, Depends(get_event_processor)],
 ) -> dict:
     """
-    Endpoint para receber webhooks da DigiStore24.
-    Aceita tanto GET quanto POST.
+    Recebe Webhooks da plataforma DigiStore24.
+
+    Diferente da BuyGoods, a DigiStore24 pode enviar dados via GET ou POST.
+    Este endpoint aceita ambos.
+    O processamento aqui é feito via `BackgroundTasks` do FastAPI
+    (processamento assíncrono leve), em vez de salvar numa Inbox.
 
     Args:
-        secret_token: Token de segurança na URL
-        request: Request do FastAPI
-        background_tasks: Gerenciador de tarefas em background
-        settings: Configurações da aplicação
-        normalizer: Serviço de normalização
-        processor: Processador de eventos
+        secret_token (str): Segredo na URL.
+        request (Request): A requisição HTTP.
+        background_tasks (BackgroundTasks): Ferramenta para agendar tarefas pós-resposta.
+        settings (Settings): Configurações.
+        normalizer (PayloadNormalizer): Serviço de normalização.
+        processor (EventProcessor): Serviço de processamento.
 
     Returns:
-        dict: Resposta de confirmação
-
-    Raises:
-        HTTPException: Se token for inválido ou erro 500
+        dict: Status de recebimento e ID do pedido (se disponível).
     """
     # Valida segurança
     verify_secret_token(secret_token, settings)
@@ -283,7 +345,20 @@ async def upload_spreadsheet(
     db_repo: DatabaseRepository = Depends(get_database_repository),
 ):
     """
-    Endpoint para upload manual de planilhas (CSV/Excel).
+    Recebe upload manual de planilhas (CSV/Excel) para importação retroativa.
+
+    Utilizado para processar vendas antigas ou recuperar dados perdidos.
+    O arquivo é salvo temporariamente no disco e uma tarefa em background
+    é iniciada para ler e importar linha a linha.
+
+    Args:
+        background_tasks (BackgroundTasks): Para agendar o processamento.
+        file (UploadFile): O arquivo enviado pelo usuário.
+        settings (Settings): Configurações.
+        db_repo (DatabaseRepository): Repositório do banco.
+
+    Returns:
+        dict: Confirmação de agendamento e ID temporário do arquivo.
     """
     # 1. Validação básica de extensão
     filename = file.filename.lower()
@@ -337,8 +412,21 @@ async def find_offer_in_funnel(
     token: str = Depends(get_api_key),
 ):
     """
-    Varre os diretórios do `domain` e busca o funnel_stage,
-    funnel_number e buy_url correspondentes ao `codename`
+    Ferramenta de Diagnóstico: Localizador de Ofertas no Site.
+
+    Varre as páginas de um domínio (baseado no mapa de estrutura)
+    procurando onde um determinado "Codename" de produto está sendo vendido.
+    Útil para descobrir qual URL (Página de Venda, Upsell 1, etc.)
+    corresponde a um código que chegou no webhook.
+
+    Args:
+        codename (str): O código do produto a ser buscado (ex: 'vis3').
+        domain (str): O domínio onde buscar (ex: 'visiumpro.com').
+        debug (bool): Se True, imprime logs detalhados de cada requisição no terminal.
+        token (str): Token de segurança (x-token).
+
+    Returns:
+        dict: Lista de URLs encontradas e em qual etapa do funil elas estão.
     """
     service = WebScannerService()
 

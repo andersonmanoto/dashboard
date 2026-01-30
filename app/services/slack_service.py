@@ -1,7 +1,3 @@
-"""
-Serviço para envio de notificações via Slack e log de erros no banco.
-"""
-
 from typing import Optional, Union
 
 from config import Settings
@@ -18,7 +14,14 @@ class SlackService:
 
     def __init__(self, settings: Settings, db_repo: DatabaseRepository):
         """
-        Inicializa cliente do Slack e repositório.
+        Inicializa o serviço de notificações.
+
+        Configura o cliente do Slack (WebClient) com o token do bot e
+        armazena as referências de canais e repositório de dados.
+
+        Args:
+            settings (Settings): Configurações globais (tokens, canais).
+            db_repo (DatabaseRepository): Repositório para logar erros críticos.
         """
         self.client = WebClient(token=settings.slack_bot_token)
         self.default_channel = settings.slack_default_channel
@@ -39,7 +42,23 @@ class SlackService:
         channel: Optional[str] = None,
     ) -> bool:
         """
-        Notifica quando codename não é encontrado e salva no banco.
+        Orquestra o tratamento de erro para produtos não mapeados.
+
+        1. Verifica se o codename está na blacklist (ignora se estiver).
+        2. Registra o erro na tabela `missing_codenames` do banco.
+        3. Envia um alerta visual formatado para o canal de monitoramento do Slack.
+
+        Args:
+            network: Rede de origem (ex: BuyGoods).
+            order_id: ID do pedido.
+            product: Nome do produto reportado.
+            codename: O código que falhou na busca.
+            account_id: ID da conta (opcional).
+            buy_url: URL de compra para auditoria (opcional).
+            channel: Canal específico para envio (opcional).
+
+        Returns:
+            bool: True se a mensagem foi enviada ao Slack, False caso contrário.
         """
         # Ignora codenames em blacklist
         if self._is_blacklisted(codename):
@@ -72,7 +91,12 @@ class SlackService:
     def _log_missing_codename_db(
         self, network, order_id, product, codename, account_id, buy_url
     ) -> None:
-        """Helper para registrar o erro no Supabase."""
+        """
+        Persiste o erro de codename no banco de dados para auditoria futura.
+
+        Cria um registro na tabela `missing_codenames` via repositório.
+        Captura exceções silenciosamente para não interromper o fluxo principal.
+        """
         try:
             network_val = (
                 network.value if isinstance(network, NetworkType) else str(network)
@@ -93,7 +117,12 @@ class SlackService:
             logger.error(f"Falha ao logar missing codename no DB: {e}")
 
     def _is_blacklisted(self, codename: Optional[str]) -> bool:
-        """Verifica se codename está na blacklist."""
+        """
+        Verifica se o codename deve ser ignorado.
+
+        Alguns códigos (ex: 'calls_', 'wc_')
+        não possuem correspondência no funil (checkout).
+        """
         if not codename:
             return False
 
@@ -111,7 +140,15 @@ class SlackService:
         account_id: Optional[str] = None,
         buy_url: Optional[str] = None,
     ) -> list[dict]:
-        """Constrói blocos formatados para mensagem Slack."""
+        """
+        Gera o layout da mensagem do Slack usando Block Kit.
+
+        Cria uma mensagem rica com seções, campos em negrito e links,
+        facilitando a leitura e ação rápida pela equipe de suporte.
+
+        Returns:
+            list[dict]: Lista de blocos JSON compatível com a API do Slack.
+        """
         codename_display = codename or "N/A"
         account_display = account_id or "N/A"
 
@@ -155,7 +192,15 @@ class SlackService:
 
     def _send_message(self, channel: str, text: str, blocks: list[dict]) -> bool:
         """
-        Envia mensagem para o Slack.
+        Dispara a mensagem final para a API do Slack.
+
+        Args:
+            channel (str): ID ou nome do canal (ex: #monitor-sites).
+            text (str): Texto de fallback (para notificações push).
+            blocks (list[dict]): Estrutura visual da mensagem.
+
+        Returns:
+            bool: True se enviado com sucesso (ok=True), False se der erro.
         """
         try:
             response = self.client.chat_postMessage(

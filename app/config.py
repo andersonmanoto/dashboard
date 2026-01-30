@@ -1,8 +1,3 @@
-"""
-Configurações centralizadas da aplicação.
-Usa pydantic-settings para validação e carregamento de variáveis de ambiente.
-"""
-
 import tempfile
 from functools import lru_cache
 
@@ -10,7 +5,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Configurações da aplicação carregadas de variáveis de ambiente."""
+    """
+    Define as configurações globais e segredos da aplicação.
+
+    As variáveis são carregadas automaticamente do arquivo .env ou das variáveis
+    de ambiente do sistema operacional. O Pydantic valida os tipos (str, bool, etc)
+    na inicialização.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
@@ -47,9 +48,12 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """
-    Retorna instância única (cached) das configurações.
+    Retorna uma instância única (cached) das configurações.
+
+    Utiliza `lru_cache` para evitar ler o arquivo .env a cada requisição,
+    mantendo as configurações em memória após o primeiro acesso.
 
     Returns:
-        Settings: Configurações da aplicação
+        Settings: Objeto contendo todas as configurações validadas.
     """
     return Settings()

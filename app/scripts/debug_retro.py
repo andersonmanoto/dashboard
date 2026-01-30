@@ -8,20 +8,45 @@ from loguru import logger
 from models.enums import ActionType, NetworkType
 from services.event_processor import EventProcessor
 
-from app.services.retro_service import SPREADSHEET_MAPPING, SpreadsheetRetro
+from models.enums import SPREADSHEET_MAPPING
+from app.services.retro_service import SpreadsheetRetro
 
 
 # Mock do EventProcessor para não precisar de banco de dados
 class MockProcessor(EventProcessor):
+    """
+    Simulador do processador de eventos para ambiente de debug.
+
+    Substitui a camada de persistência (Supabase) por um método "pass-through",
+    que apenas devolve o evento processado para ser impresso no terminal.
+    """
     def __init__(self):
+        """Inicializa o mock sem dependências de banco."""
         pass
 
     async def process_event(self, event):
-        # Apenas retorna o evento para inspeção visual
+        """
+        Simula o processamento retornando o próprio evento.
+
+        Args:
+            event (NormalizedEvent): O evento normalizado.
+
+        Returns:
+            NormalizedEvent: O mesmo evento, inalterado.
+        """
         return event
 
 
 async def debug_file(file_path: str):
+    """
+    Executa a simulação de importação de um arquivo.
+
+    Lê as primeiras 3 linhas do arquivo (CSV ou Excel), aplica as transformações
+    do `SpreadsheetRetro` e imprime o JSON resultante no console para validação.
+
+    Args:
+        file_path (str): Caminho para o arquivo local.
+    """
     if not os.path.exists(file_path):
         logger.error(f"Arquivo não encontrado: {file_path}")
         return

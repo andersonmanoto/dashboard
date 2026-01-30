@@ -1,34 +1,35 @@
-"""
-Serviço responsável por normalizar payloads de diferentes redes
-para um formato unificado.
-"""
-
 from typing import Any
 
 from loguru import logger
 from models.enums import DATE_FIELD_MAPPING, ActionType, NetworkType
 from models.schemas import NormalizedEvent, OrderDetails, ShippingDetails
-from utils.date_utils import parse_date, safe_float
+from utils.date_utils import parse_date
+from utils.formatters import safe_float
 
 
 class PayloadNormalizer:
-    """Normaliza payloads de diferentes redes para formato unificado."""
+    """
+    Padroniza dados brutos de webhooks para o formato interno do sistema.
+
+    Atua como uma fábrica que decide qual estratégia de normalização usar
+    com base na rede de origem (NetworkType).
+    """
 
     def normalize(
         self, network: NetworkType, payload: dict[str, Any]
     ) -> NormalizedEvent:
         """
-        Normaliza payload de acordo com a rede.
+        Converte o payload bruto em um evento normalizado.
 
         Args:
-            network: Rede de origem
-            payload: Dados brutos do webhook
+            network (NetworkType): A rede de onde veio o webhook.
+            payload (dict[str, Any]): O dicionário de dados recebido.
 
         Returns:
-            NormalizedEvent: Evento normalizado
+            NormalizedEvent: Objeto padronizado pronto para processamento.
 
         Raises:
-            ValueError: Se payload estiver inválido
+            ValueError: Se o payload estiver vazio, sem order_id ou de rede desconhecida.
         """
         if not payload:
             raise ValueError(f"Payload vazio recebido de {network}")
@@ -47,20 +48,30 @@ class PayloadNormalizer:
             raise ValueError(f"Rede desconhecida: {network}")
 
     def _extract_order_id(self, network: NetworkType, payload: dict) -> str | None:
-        """Extrai order_id do payload."""
+        """
+        Extrai o ID do pedido de forma agnóstica à rede.
+
+        Tenta buscar 'order_id_global' (comum em agregadores) ou 'order_id'.
+        """
         order_id = payload.get("order_id_global") or payload.get("order_id")
         return str(order_id) if order_id else None
 
     def _parse_is_test(self, payload: dict, field: str = "is_test") -> bool:
-        """Converte campo is_test para booleano."""
+        """
+        Converte as várias representações de booleano (1, 'true', 'yes') para bool.
+        """
         raw_value = payload.get(field, "0")
         return str(raw_value) in ("1", "true", "True", "yes")
 
     # ========== BUYGOODS ==========
 
     def _normalize_buygoods(self, payload: dict, order_id: str) -> NormalizedEvent:
-        """Normaliza payload da BuyGoods."""
+        """
+        Aplica regras de mapeamento específicas da BuyGoods.
 
+        Mapeia campos financeiros, calcula taxas de comissão do merchant
+        e constrói os objetos de detalhes do pedido.
+        """
         action_type = ActionType(payload.get("action_type", "sale"))
 
         # Determina campo de data baseado no action_type
@@ -139,7 +150,12 @@ class PayloadNormalizer:
         )
 
     def _get_buygoods_date_field(self, action_type: ActionType, payload: dict) -> str:
-        """Determina qual campo de data usar para BuyGoods."""
+        """
+        Seleciona o campo de data correto baseado no tipo de ação.
+
+        Ex: 'date_refunded' para reembolsos, 'transaction_date' para rebills,
+        ou 'rr_createdate' como padrão.
+        """
         mapping = DATE_FIELD_MAPPING.get(NetworkType.BUYGOODS, {})
 
         # Verifica se há campo específico para o action_type
@@ -153,7 +169,9 @@ class PayloadNormalizer:
     def _build_full_name(
         self, full_name: str | None, first_name: str | None, last_name: str | None
     ) -> str:
-        """Constrói nome completo do cliente."""
+        """
+        Constrói nome completo concatenando partes se necessário.
+        """
         if full_name:
             return full_name
 
@@ -163,8 +181,9 @@ class PayloadNormalizer:
     # ========== DIGISTORE24 ==========
 
     def _normalize_digistore24(self, payload: dict, order_id: str) -> NormalizedEvent:
-        """Normaliza payload da DigiStore24."""
-
+        """
+        Aplica regras de mapeamento específicas da DigiStore24.
+        """
         event_date, event_time = parse_date(
             payload.get("datetime_full", ""), NetworkType.DIGISTORE24
         )

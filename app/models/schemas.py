@@ -1,7 +1,3 @@
-"""
-Modelos Pydantic para validação e serialização de dados.
-"""
-
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
@@ -12,8 +8,12 @@ from .enums import ActionType, AffiliateStatus, NetworkType
 
 
 class OrderDetails(BaseModel):
-    """Detalhes do pedido."""
+    """
+    Estrutura para detalhes específicos do produto e oferta.
 
+    Armazena dados brutos vindos do webhook que ajudam a identificar
+    o item vendido, como SKUs, nomes externos e códigos de checkout.
+    """
     external_product_id: Optional[str] = None
     external_checkout_code: Optional[str] = None
     external_affiliate_id: Optional[str] = None
@@ -26,8 +26,9 @@ class OrderDetails(BaseModel):
 
 
 class ShippingDetails(BaseModel):
-    """Detalhes de envio."""
-
+    """
+    Dados de entrega e localização do cliente.
+    """
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
@@ -36,8 +37,13 @@ class ShippingDetails(BaseModel):
 
 
 class NormalizedEvent(BaseModel):
-    """Evento normalizado para persistência."""
+    """
+    Evento financeiro normalizado e pronto para persistência.
 
+    Este é o modelo principal do sistema. Ele converte os formatos heterogêneos
+    das diversas redes (BuyGoods, DigiStore) em uma estrutura padrão unificada.
+    Contém desde dados financeiros até informações de rastreamento (tracking).
+    """
     # Identificação
     network: NetworkType
     order_id: str
@@ -110,7 +116,12 @@ class NormalizedEvent(BaseModel):
     )
     @classmethod
     def ensure_float(cls, v: Any) -> float:
-        """Garante que valores numéricos sejam float."""
+        """
+        Converte strings vazias ou nulas para 0.0 em campos monetários.
+
+        Necessário pois algumas redes enviam strings vazias ("") em vez de 0
+        para valores numéricos.
+        """
         if v is None or v == "":
             return 0.0
         try:
@@ -122,8 +133,13 @@ class NormalizedEvent(BaseModel):
 
 
 class SalesStatus(BaseModel):
-    """Registro de mudança de status de venda."""
+    """
+    Registro granular de alterações no status financeiro.
 
+    Diferente da tabela de eventos (que é um log imutável), esta estrutura
+    alimenta a tabela `sales_status`, usada para calcular o "Status Atual"
+    de uma venda (ex: se ela foi reembolsada, sofreu chargeback, etc.).
+    """
     event_id: UUID
     order_id: str
     affiliate_id: Optional[UUID] = None
@@ -139,8 +155,12 @@ class SalesStatus(BaseModel):
 
 
 class CheckoutInfo(BaseModel):
-    """Informações de checkout."""
+    """
+    DTO (Data Transfer Object) para resultado de busca de checkouts.
 
+    Usado pelo repositório para retornar os dados encontrados na tabela
+    `checkouts` (vínculo entre código do produto e etapa do funil).
+    """
     checkout_id: UUID
     product_id: UUID
     funnel_stage: Optional[str] = None
@@ -148,8 +168,9 @@ class CheckoutInfo(BaseModel):
 
 
 class Affiliate(BaseModel):
-    """Modelo de afiliado."""
-
+    """
+    Representação de um Afiliado no sistema.
+    """
     id: Optional[UUID] = None
     network: NetworkType
     aff_id: str
@@ -160,8 +181,12 @@ class Affiliate(BaseModel):
 
 
 class MissingCodename(BaseModel):
-    """Log de codename não encontrado."""
+    """
+    Log de erro para produtos não mapeados (Missing Codenames).
 
+    Usado para registrar quando um webhook chega com um código de produto
+    (codename) que não existe no banco de dados, facilitando a auditoria.
+    """
     network: str
     order_id: str
     product_name: Optional[str] = None

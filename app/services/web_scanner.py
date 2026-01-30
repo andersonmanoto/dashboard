@@ -13,12 +13,36 @@ logger = logging.getLogger(__name__)
 
 
 class WebScannerService:
+    """
+    Serviço de Crawler/Scanner para localizar ofertas em páginas web.
+
+    Utiliza um mapa de estrutura pré-definido (JSON) para varrer URLs
+    de funis de vendas, buscando onde determinados "codenames" de produtos
+    estão linkados.
+    """
+
     def __init__(self):
+        """
+        Inicializa o serviço de scanner.
+
+        Carrega as configurações globais e define o limite de concorrência
+        para as requisições HTTP (para não derrubar o servidor alvo).
+        """
         settings = get_settings()
         self.map_file = Path(settings.structure_map_file)
         self.concurrency_limit = 20
 
     def _load_structure_map(self) -> dict:
+        """
+        Carrega o mapa de estrutura do site a partir do arquivo JSON.
+
+        O mapa contém a relação de domínios, funis e diretórios que devem
+        ser varridos. Se o arquivo não existir ou estiver corrompido,
+        retorna um dicionário vazio e loga o erro.
+
+        Returns:
+            dict: Estrutura do site carregada do JSON.
+        """
         if not self.map_file.exists():
             logger.error(f"Arquivo de mapa não encontrado em: {self.map_file}")
             return {}
@@ -30,6 +54,18 @@ class WebScannerService:
             return {}
 
     def _extract_stage_from_url(self, url: str) -> str:
+        """
+        Deduz o estágio do funil a partir da URL.
+
+        Geralmente o último segmento do caminho da URL indica a página
+        (ex: .../up1/ -> 'up1').
+
+        Args:
+            url (str): A URL completa sendo analisada.
+
+        Returns:
+            str: O nome do estágio (ex: 'up1', 'dtc', 'dw1').
+        """
         path = urlparse(url).path.strip("/")
         return path.split("/")[-1] if path else "home"
 
@@ -41,6 +77,23 @@ class WebScannerService:
         codename: str,
         debug: bool,
     ):
+        """
+        Acessa uma URL e busca links que contenham o codename alvo.
+
+        Faz o request HTTP, parseia o HTML (BeautifulSoup) e varre todas
+        as tags <a> procurando se o `codename` aparece em algum parâmetro
+        de query string (ex: ?product=CODENAME).
+
+        Args:
+            client (httpx.AsyncClient): Cliente HTTP assíncrono compartilhado.
+            semaphore (asyncio.Semaphore): Controle de concorrência.
+            url (str): URL da página a ser varrida.
+            codename (str): Código do produto procurado.
+            debug (bool): Se True, emite logs detalhados.
+
+        Returns:
+            list[dict]: Lista de ocorrências encontradas nesta página.
+        """
         found_data = []
         unique_links = set()
 
@@ -118,6 +171,22 @@ class WebScannerService:
         return found_data
 
     async def run_scan(self, codename: str, domain_filter: str, debug: bool = False):
+        """
+        Executa a varredura completa em busca de um codename.
+
+        1. Carrega o mapa de estrutura.
+        2. Gera todas as URLs possíveis para o domínio solicitado.
+        3. Dispara requisições assíncronas em paralelo (limitado pelo semáforo).
+        4. Agrega os resultados onde o codename foi encontrado.
+
+        Args:
+            codename (str): O código do produto (ex: 'vis3').
+            domain_filter (str): Domínio para restringir a busca (ex: 'visiumpro.com').
+            debug (bool): Ativa logs verbosos para depuração.
+
+        Returns:
+            list[dict]: Lista combinada de todos os links encontrados.
+        """
         structure_data = self._load_structure_map()
         urls_to_scan = []
 

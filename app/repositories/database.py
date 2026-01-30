@@ -16,17 +16,22 @@ from supabase import Client, create_client
 
 
 class DatabaseRepository:
-    """Repositório para acesso ao Supabase."""
+    """
+    Repositório central para operações no Supabase.
+
+    Gerencia afiliados, checkouts, logs de erro e o ciclo de vida
+    dos eventos na 'Inbox'.
+    """
 
     def __init__(self, settings: Settings):
         """
-        Inicializa conexão com Supabase.
+        Inicializa a conexão com o Supabase.
 
         Args:
-            settings: Configurações da aplicação
+            settings (Settings): Configurações contendo URL e Key do projeto.
 
         Raises:
-            ValueError: Se credenciais do Supabase estiverem ausentes
+            ValueError: Se as credenciais não estiverem presentes no .env.
         """
         if not settings.supabase_url or not settings.supabase_key:
             raise ValueError("Credenciais do Supabase não configuradas")
@@ -43,9 +48,18 @@ class DatabaseRepository:
         self, network: Union[NetworkType, str], aff_id: str
     ) -> Optional[Affiliate]:
         """
-        Busca afiliado por ID externo e rede.
-        Aceita network como Enum ou str (blindado contra erros de borda).
-        Usa cache em memória para otimizar importações em lote.
+        Busca um afiliado pelo seu ID na plataforma de origem.
+
+        Utiliza cache em memória (`lru_cache`) para evitar chamadas repetidas
+        ao banco durante processamentos em lote (bulk), já que os dados
+        de afiliados mudam pouco.
+
+        Args:
+            network (Union[NetworkType, str]): Rede (ex: BuyGoods).
+            aff_id (str): ID do afiliado na rede (ex: '12345').
+
+        Returns:
+            Optional[Affiliate]: Objeto Affiliate se encontrado, None caso contrário.
         """
         network_value = network.value if isinstance(network, NetworkType) else network
 
@@ -72,7 +86,13 @@ class DatabaseRepository:
 
     def create_affiliate(self, affiliate: Affiliate) -> Optional[Affiliate]:
         """
-        Cria novo afiliado.
+        Cadastra um novo afiliado no banco de dados.
+
+        Args:
+            affiliate (Affiliate): Objeto com os dados do afiliado.
+
+        Returns:
+            Optional[Affiliate]: O afiliado criado (com ID gerado) ou None se falhar.
         """
         try:
             data = affiliate.model_dump(
@@ -99,10 +119,18 @@ class DatabaseRepository:
         self, code: str, account_id: Optional[str] = None
     ) -> Optional[CheckoutInfo]:
         """
-        Busca checkout por código e conta
-            (Composite Key).
-        Resolve colisão de codenames
-            (ex: 'nat3u' que existe em 3 contas diferentes).
+        Busca informações de checkout baseadas no código do produto (codename).
+
+        A busca utiliza uma chave composta (checkout_code + account_id) para
+        resolver colisões onde o mesmo código (ex: 'nat3u') é usado em
+        contas diferentes para produtos diferentes.
+
+        Args:
+            code (str): Código do produto vindo no webhook.
+            account_id (Optional[str]): ID da conta na plataforma (para desambiguação).
+
+        Returns:
+            Optional[CheckoutInfo]: Dados do funil e produto vinculado.
         """
         try:
             # Inicia a query base
@@ -146,9 +174,17 @@ class DatabaseRepository:
         self, product_name: str
     ) -> Optional[CheckoutInfo]:
         """
-        Busca checkout fazendo match parcial pelo nome do produto.
-        Estratégia de contingência quando o código não é encontrado.
-        (Sem Cache propositalmente, pois é um fallback raro)
+        Busca fallback por nome do produto (Partial Match).
+
+        Acionado quando o `checkout_code` não é encontrado. Tenta localizar
+        o produto pelo nome (normalizado) para recuperar as informações do funil.
+        NÃO utiliza cache pois é uma operação de exceção/contingência.
+
+        Args:
+            product_name (str): Nome do produto vindo no webhook.
+
+        Returns:
+            Optional[CheckoutInfo]: Dados do checkout se houver match de nome.
         """
         if not product_name:
             return None
@@ -190,7 +226,15 @@ class DatabaseRepository:
             return None
 
     def _get_checkout_by_product_id(self, product_id: UUID) -> Optional[CheckoutInfo]:
-        """Helper para buscar checkout por product_id."""
+        """
+        Método auxiliar para recuperar dados de checkout dado um Product ID.
+
+        Args:
+            product_id (UUID): ID do produto no banco.
+
+        Returns:
+            Optional[CheckoutInfo]: Dados do checkout.
+        """
         try:
             response = (
                 self.client.table("checkouts")
@@ -221,8 +265,18 @@ class DatabaseRepository:
         self, event: NormalizedEvent, status: Optional[SalesStatus] = None
     ) -> Optional[dict]:
         """
-        Salva Evento e Status numa única transação via RPC.
-        Substitui upsert_event e create_sales_status.
+        Persiste o Evento e o Status Financeiro atomicamente.
+
+        Utiliza uma Stored Procedure (RPC) no Supabase (`save_event_transaction`)
+        para garantir que ou tudo é salvo ou nada é salvo, mantendo a integridade
+        entre a tabela de eventos (events) e a de status (sales_status).
+
+        Args:
+            event (NormalizedEvent): O evento principal normalizado.
+            status (Optional[SalesStatus]): O status financeiro (se aplicável).
+
+        Returns:
+            Optional[dict]: O registro salvo retornado pelo banco.
         """
         try:
             event_json = event.model_dump(mode="json", exclude_none=True)
@@ -261,7 +315,14 @@ class DatabaseRepository:
 
     def register_missing_codename(self, data: MissingCodename) -> None:
         """
-        Registra um codename não encontrado (ignora se já existir).
+        Registra falha na identificação de produto (Codename não encontrado).
+
+        Útil para auditoria e correção de funis. Permite duplicatas de codename
+        apenas se o `order_id` for diferente, garantindo contagem real de
+        ordens sem informação de checkout por erro de configuração.
+
+        Args:
+            data (MissingCodename): Dados do erro para log.
         """
         try:
             payload = data.model_dump(mode="json")
@@ -289,7 +350,13 @@ class DatabaseRepository:
 
     def get_missing_codenames(self, limit: int = 100) -> list[dict]:
         """
-        Retorna lista de codenames não resolvidos.
+        Recupera lista de erros de codename não resolvidos.
+
+        Args:
+            limit (int): Número máximo de registros a retornar.
+
+        Returns:
+            list[dict]: Lista de registros de erro.
         """
         try:
             response = (
@@ -307,8 +374,20 @@ class DatabaseRepository:
 
     def create_inbox_entry(self, network: str, payload: dict) -> str:
         """
-        Salva o webhook cru na tabela de entrada.
-        Retorna o ID do registro.
+        Registra um novo webhook cru na tabela Inbox.
+
+        Esta é a primeira etapa do processamento. O dado é salvo "as-is"
+        para garantir durabilidade antes de qualquer lógica.
+
+        Args:
+            network (str): Rede de origem (BuyGoods/DigiStore).
+            payload (dict): JSON completo recebido.
+
+        Returns:
+            str: O ID (UUID) do registro criado na inbox.
+
+        Raises:
+            Exception: Se falhar ao salvar, propaga erro para retornar 500 na API.
         """
         try:
             data = {"network": network, "payload": payload, "status": "pending"}
@@ -323,7 +402,13 @@ class DatabaseRepository:
 
     def fetch_pending_webhooks(self, limit: int = 10) -> list[dict]:
         """
-        Busca webhooks pendentes (FIFO).
+        Busca os próximos webhooks pendentes para processamento (FIFO).
+
+        Args:
+            limit (int): Tamanho do lote.
+
+        Returns:
+            list[dict]: Lista de registros da inbox com status 'pending'.
         """
         try:
             response = (
@@ -341,7 +426,12 @@ class DatabaseRepository:
 
     def update_inbox_status(self, inbox_id: str, status: str, error_msg: str = None):
         """
-        Atualiza o status do processamento.
+        Atualiza o estado de processamento de um item da Inbox.
+
+        Args:
+            inbox_id (str): ID do registro.
+            status (str): Novo status (processing, processed, failed).
+            error_msg (str, optional): Mensagem de erro em caso de falha.
         """
         try:
             data = {"status": status}

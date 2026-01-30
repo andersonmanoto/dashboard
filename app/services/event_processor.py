@@ -12,30 +12,57 @@ from models.enums import (
 from models.schemas import Affiliate, CheckoutInfo, NormalizedEvent, SalesStatus
 from repositories.database import DatabaseRepository
 from services.slack_service import SlackService
-from utils.date_utils import parse_date, safe_float
+from utils.date_utils import parse_date
+from utils.formatters import safe_float
 
 
 class EventProcessor:
-    """Processa e enriquece eventos antes de salvar."""
+    """
+    Enriquece eventos normalizados com dados do sistema (Checkouts, Afiliados).
+
+    Responsável por:
+    1. Vincular o evento a um afiliado existente (ou criar um novo).
+    2. Identificar a etapa do funil (Checkout) baseada no código do produto.
+    3. Calcular impactos financeiros (Loss, Net Revenue).
+    4. Persistir a transação final no banco de dados.
+    """
 
     def __init__(
         self, db_repo: DatabaseRepository, slack_service: Optional[SlackService] = None
     ):
+        """
+        Inicializa o processador.
+
+        Args:
+            db_repo (DatabaseRepository): Repositório para persistência.
+            slack_service (Optional[SlackService]): Serviço de notificações (pode ser
+                None em scripts de importação retroativa).
+        """
         self.db = db_repo
         self.slack = slack_service
 
     @staticmethod
     def _network_value(network):
-        """Garante valor serializável de network."""
+        """Converte Enum de rede para string serializável."""
         return network.value if isinstance(network, NetworkType) else network
 
     @staticmethod
     def _normalize_uuid(value) -> Optional[str]:
+        """Converte UUID para string, tratando Nones."""
         if not value:
             return None
         return str(value) if isinstance(value, UUID) else value
 
     async def process_event(self, event: NormalizedEvent) -> bool:
+        """
+        Executa o fluxo principal de processamento de um evento.
+
+        Args:
+            event (NormalizedEvent): O evento já normalizado.
+
+        Returns:
+            bool: True se processado e salvo com sucesso, False caso contrário.
+        """
         try:
             order_id = event.order_id
 
@@ -92,6 +119,12 @@ class EventProcessor:
             return False
 
     async def _enrich_affiliate(self, event: NormalizedEvent) -> None:
+        """
+        Localiza ou cria o afiliado vinculado ao evento.
+
+        Se o afiliado não existir no banco, ele é criado automaticamente
+        (Auto-provisioning) para garantir integridade referencial.
+        """
         external_aff_id = event.order_details.external_affiliate_id
         if not external_aff_id:
             return
@@ -123,8 +156,10 @@ class EventProcessor:
     async def _enrich_checkout(self, event: NormalizedEvent) -> None:
         """
         Enriquece o evento com dados de Checkout e Produto.
-        No fallback (busca por nome),
-        força funnel_stage="Purchase" e ignora checkout_id.
+
+        Tenta vincular o código do checkout (codename) a um produto e etapa
+        do funil. Se falhar, tenta buscar pelo nome do produto.
+        Em último caso, loga o erro no Slack e assume valores padrão (Purchase/1).
         """
         checkout_code = event.order_details.external_checkout_code
         account_id = event.payload.get("account_id") if event.payload else None
@@ -183,6 +218,13 @@ class EventProcessor:
                 event.funnel_number = 1
 
     def _adjust_event_by_action_type(self, event: NormalizedEvent) -> None:
+        """
+        Corrige datas e valores do evento baseado no tipo de ação.
+
+        Refunds e Rebills muitas vezes trazem a data da transação original
+        no campo principal. Este método move a data real do reembolso/recorrência
+        para o campo `event_date`.
+        """
         payload = event.payload or {}
         action_type = event.action_type
 
@@ -210,6 +252,13 @@ class EventProcessor:
                         logger.debug(f"Rebill data ajustada: {date} {time}")
 
     def _create_sales_status(self, event: NormalizedEvent, event_id: str) -> None:
+        """
+        (Legado/Auxiliar) Cria registro de status manualmente.
+
+        Nota: Atualmente o método principal usa `save_event_transaction` (RPC)
+        que faz isso atomicamente. Este método pode ser usado em contextos
+        onde a RPC não é aplicável.
+        """
         payload = event.payload or {}
         amount_affected = self._calculate_amount_affected(event)
 
@@ -238,6 +287,12 @@ class EventProcessor:
                 raise
 
     def _calculate_amount_affected(self, event: NormalizedEvent) -> float:
+        """
+        Calcula o valor financeiro afetado pela ação.
+
+        Para Vendas: É o valor total da venda.
+        Para Refunds/Chargebacks: É o valor devolvido/disputado (negativo ou loss).
+        """
         payload = event.payload or {}
         action_type = event.action_type
 

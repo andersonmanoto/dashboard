@@ -4,73 +4,50 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from loguru import logger
-from models.enums import ActionType, NetworkType
+from models.enums import ActionType, NetworkType, SPREADSHEET_MAPPING
 from models.schemas import NormalizedEvent, OrderDetails, ShippingDetails
 from repositories.database import DatabaseRepository
 from services.event_processor import EventProcessor
 
-# Mapeamento Unificado
-SPREADSHEET_MAPPING = {
-    # --- Identificadores ---
-    "Order ID": "order_id",
-    "External Order ID": "external_order_id",
-    "Account ID": "account_id",
-    # --- Datas Específicas ---
-    "Date Created": "created_date",  # Data da venda original
-    "rr_createdate": "created_date",  # Variação de nome
-    "Order Date": "created_date",  # Variação de nome
-    "Refund Date": "refund_date_raw",  # Coluna específica de refund
-    "Chargeback Date": "chargeback_date_raw",  # Coluna específica de chargeback
-    # --- Valores Financeiros ---
-    "Total Collected (Transaction Amount)": "total_amount",
-    "Amount": "total_amount",
-    "Affiliate Commission Amount": "aff_commission",
-    "Commission Amount": "aff_commission",
-    "Taxes": "tax_amount",
-    "Shipping Cost (Fulfillment)": "shipping_cost",
-    "Payment Processing Fees": "merchant_commission",
-    # --- Cliente ---
-    "Customer Name": "customer_name",
-    "Firstname": "customer_firstname",
-    "Lastname": "customer_lastname",
-    "Customer Email Address": "customer_email",
-    "Customer Phone": "customer_phone",
-    "Phone": "customer_phone",
-    # --- Endereço ---
-    "Address": "shipping_address",
-    "City": "shipping_city",
-    "State": "shipping_state",
-    "Zip": "shipping_zip",
-    "Country": "shipping_country",
-    # --- Detalhes do Produto ---
-    "Product Names": "product_name",
-    "Product Name": "product_name",
-    "Product Codenames": "product_codename",
-    "Product Codename": "product_codename",
-    "Affiliate ID": "aff_id",
-    "Affiliate Name": "aff_name",
-    # --- Status e Controle ---
-    "Status": "status",
-    "Was Canceled": "was_canceled",
-    "Type": "action_source",  # "refund", "chargeback"
-    "Chargeback Reason": "reason",
-    "Reason": "reason",
-    "Is Test": "is_test",
-}
-
 
 class SpreadsheetRetro:
     """
-    Serviço responsável por importar planilhas de vendas, refunds e chargebacks.
-    Seleciona a data correta baseada no tipo de evento.
+    Serviço de ingestão de dados históricos (Retroativos).
+
+    Responsável por ler planilhas (CSV/Excel), normalizar colunas heterogêneas
+    para o padrão interno e converter cada linha em um evento processável.
+    Suporta a importação de Vendas, Reembolsos e Chargebacks.
     """
 
     def __init__(self, processor: EventProcessor):
+        """
+        Inicializa o serviço de importação.
+
+        Args:
+            processor (EventProcessor): Instância do processador de eventos responsável
+                por salvar os dados e aplicar regras de negócio.
+        """
         self.processor = processor
 
     async def process_file(
         self, file_path: str, network: NetworkType = NetworkType.BUYGOODS
     ):
+        """
+        Lê e processa um arquivo de planilha completo.
+
+        Realiza o ciclo completo de ETL (Extract, Transform, Load):
+        1. Carrega o arquivo (suporta .csv e .xlsx).
+        2. Renomeia colunas para o padrão interno (SPREADSHEET_MAPPING).
+        3. Limpa e tipa os dados (floats, datas, strings).
+        4. Itera sobre as linhas, convertendo para eventos e persistindo via Processor.
+
+        Args:
+            file_path (str): Caminho absoluto do arquivo no disco.
+            network (NetworkType): Rede de origem dos dados (padrão: BuyGoods).
+
+        Raises:
+            FileNotFoundError: Se o arquivo não existir.
+        """
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
@@ -129,8 +106,19 @@ class SpreadsheetRetro:
         )
 
     def _clean_dataframe(self, df: pd.DataFrame):
-        """Realiza limpeza em massa no DataFrame."""
+        """
+        Aplica limpeza e tipagem em massa no DataFrame (Pandas).
 
+        Operações realizadas:
+        - Consolidação de nomes (First + Last Name).
+        - Limpeza de símbolos monetários ('$', ',') e conversão para float.
+        - Conversão de colunas de data para objetos datetime.
+        - Tratamento de nulos e espaços em strings.
+        - Conversão de flags booleanas (is_test, was_canceled).
+
+        Args:
+            df (pd.DataFrame): DataFrame bruto carregado do arquivo.
+        """
         # Consolida nome do cliente
         if "customer_name" not in df.columns and "customer_firstname" in df.columns:
             firstname = df["customer_firstname"].fillna("")
@@ -185,8 +173,19 @@ class SpreadsheetRetro:
 
     def _get_event_datetime(self, row: dict, action: ActionType) -> tuple[str, str]:
         """
-        Retorna a data e hora corretas com base na ação.
-        Prioridade: Data Específica da Ação -> Data de Criação -> Agora
+        Define a data e hora corretas do evento baseado na ação.
+
+        Lógica de prioridade:
+        1. Se for Refund/Chargeback, tenta usar a coluna específica dessa ação.
+        2. Se não houver data específica, usa a data de criação do pedido.
+        3. Se tudo falhar, usa a data/hora atual (now) como fallback de segurança.
+
+        Args:
+            row (dict): Linha do dataframe contendo os dados.
+            action (ActionType): O tipo de ação identificado para essa linha.
+
+        Returns:
+            tuple[str, str]: Par (Data YYYY-MM-DD, Hora HH:MM:SS).
         """
         target_dt = None
 
@@ -209,8 +208,20 @@ class SpreadsheetRetro:
     def _transform_row_to_event(
         self, row: dict, network: NetworkType
     ) -> NormalizedEvent:
-        """Converte uma linha limpa do DF para o schema NormalizedEvent."""
+        """
+        Converte uma linha de dados limpa em um objeto NormalizedEvent.
 
+        Mapeia os campos do dicionário para o schema Pydantic, define o
+        ActionType correto (Sale, Refund, Chargeback) e preenche os
+        detalhes financeiros e de produto.
+
+        Args:
+            row (dict): Dicionário representando uma linha da planilha.
+            network (NetworkType): Rede de origem.
+
+        Returns:
+            NormalizedEvent: Evento pronto para ser processado.
+        """
         # 1. Determina Ação
         action = ActionType.NEWORDER
 
@@ -299,7 +310,16 @@ class SpreadsheetRetro:
 # Helper para o retro em background
 async def run_retro_background(file_path: str, db_repo: DatabaseRepository):
     """
-    Função wrapper para rodar o retro em background e limpar o arquivo depois.
+    Tarefa de background para orquestrar a importação e limpeza.
+
+    Função wrapper projetada para ser chamada pelo FastAPI BackgroundTasks.
+    1. Instancia as dependências necessárias (EventProcessor, SpreadsheetRetro).
+    2. Executa o processamento do arquivo.
+    3. Garante a remoção do arquivo temporário do disco (cleanup), mesmo em caso de erro.
+
+    Args:
+        file_path (str): Caminho do arquivo temporário.
+        db_repo (DatabaseRepository): Repositório para injetar no processador.
     """
     path_obj = Path(file_path)
     try:

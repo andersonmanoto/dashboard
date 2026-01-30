@@ -14,7 +14,17 @@ RUNNING = True
 
 
 def handle_signal(signum, frame):
-    """Captura sinais de parada (Ctrl+C, Docker stop, Systemctl stop)"""
+    """
+    Captura sinais de parada do Sistema Operacional.
+
+    Permite o Graceful Shutdown do worker, garantindo que
+    as tarefas em andamento terminem antes de matar o processo.
+    Captura SIGINT (Ctrl+C) e SIGTERM (Docker stop).
+
+    Args:
+        signum (int): Número do sinal recebido.
+        frame (Any): Frame atual da stack (não utilizado).
+    """
     global RUNNING
     logger.warning("Sinal de parada recebido. Terminando tarefas pendentes...")
     RUNNING = False
@@ -27,7 +37,20 @@ signal.signal(signal.SIGTERM, handle_signal)
 
 async def process_single_webhook(db_repo, normalizer, processor, item):
     """
-    Função auxiliar para processar UM item de forma isolada.
+    Processa um único item da fila de entrada de forma isolada.
+
+    Fluxo de execução:
+    1. Marca o item como 'processing' no banco.
+    2. Identifica a rede (BuyGoods/DigiStore).
+    3. Normaliza o JSON bruto para o formato padrão do sistema.
+    4. Envia para o EventProcessor (regras de negócio).
+    5. Atualiza o status final (processed ou failed).
+
+    Args:
+        db_repo (DatabaseRepository): Repositório para atualizar status.
+        normalizer (PayloadNormalizer): Serviço de normalização.
+        processor (EventProcessor): Processador de eventos.
+        item (dict): O registro cru vindo da tabela `webhook_inbox`.
     """
     inbox_id = item["id"]
     try:
@@ -59,6 +82,15 @@ async def process_single_webhook(db_repo, normalizer, processor, item):
 
 
 async def run_worker():
+    """
+    Loop principal do Worker.
+
+    Inicializa as dependências (Banco, Slack, Processors) e entra em
+    um loop infinito (controlado por RUNNING) que:
+    1. Busca um lote de webhooks pendentes (FIFO).
+    2. Dispara o processamento de todos eles em paralelo (`asyncio.gather`).
+    3. Aguarda 5 segundos se não houver trabalho.
+    """
     logger.info("Worker Async V2 iniciado. Aguardando webhooks...")
 
     settings = get_settings()
