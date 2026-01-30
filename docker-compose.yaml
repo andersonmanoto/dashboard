@@ -10,8 +10,6 @@ services:
       - PYTHONPATH=/app:/app/app
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     logging:
       driver: "json-file"
@@ -28,8 +26,6 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app:/app/app
-    volumes:
-      - .:/app
     command: python -m app.worker
     logging:
       driver: "json-file"
