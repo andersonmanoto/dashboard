@@ -1,20 +1,15 @@
 from typing import Optional
 from uuid import UUID
-from loguru import logger
 
-from models.schemas import (
-    NormalizedEvent,
-    SalesStatus,
-    CheckoutInfo,
-    Affiliate
-)
+from loguru import logger
 from models.enums import (
+    LOSS_ACTIONS,
+    TRACKABLE_ACTIONS,
     ActionType,
     AffiliateStatus,
-    TRACKABLE_ACTIONS,
-    LOSS_ACTIONS,
-    NetworkType
+    NetworkType,
 )
+from models.schemas import Affiliate, CheckoutInfo, NormalizedEvent, SalesStatus
 from repositories.database import DatabaseRepository
 from services.slack_service import SlackService
 from utils.date_utils import parse_date, safe_float
@@ -41,23 +36,22 @@ class EventProcessor:
         if not value:
             return None
         return str(value) if isinstance(value, UUID) else value
-    
 
     async def process_event(self, event: NormalizedEvent) -> bool:
         try:
             order_id = event.order_id
-            
+
             # 1. Ignora cancelamentos
             if event.action_type == ActionType.CANCEL:
                 logger.info(
-                    f"action_type: CANCEL (Order: {order_id}). Ignorando evento."
+                    f"action_type: CANCEL (Order: {order_id})."
                 )
                 return False
 
             # 2. Enriquecimento de Dados
             await self._enrich_affiliate(event)
             await self._enrich_checkout(event)
-            
+
             # Ajustes de datas para Refund/Rebill
             self._adjust_event_by_action_type(event)
 
@@ -70,12 +64,12 @@ class EventProcessor:
                     f"Evento de TESTE detectado (Order: {order_id}). "
                     f"Status financeiro será ignorado."
                 )
-            
+
             # Apenas ações rastreáveis geram sales_status
             elif event.action_type in TRACKABLE_ACTIONS:
                 payload = event.payload or {}
                 amount_affected = self._calculate_amount_affected(event)
-                
+
                 sales_status_obj = SalesStatus(
                     event_id=UUID('00000000-0000-0000-0000-000000000000'),
                     order_id=order_id,
@@ -98,9 +92,10 @@ class EventProcessor:
             return True
 
         except Exception as e:
-            logger.exception(f"Erro fatal ao processar evento {event.order_id}: {e}")
+            logger.exception(
+                f"Erro fatal ao processar evento {event.order_id}: {e}"
+            )
             return False
-
 
     async def _enrich_affiliate(self, event: NormalizedEvent) -> None:
         external_aff_id = event.order_details.external_affiliate_id
@@ -138,11 +133,11 @@ class EventProcessor:
         if affiliate and affiliate.id:
             event.affiliate_id = affiliate.id
 
-
     async def _enrich_checkout(self, event: NormalizedEvent) -> None:
         """
         Enriquece o evento com dados de Checkout e Produto.
-        No fallback (busca por nome), força funnel_stage="Purchase" e ignora checkout_id.
+        No fallback (busca por nome),
+        força funnel_stage="Purchase" e ignora checkout_id.
         """
         checkout_code = event.order_details.external_checkout_code
         account_id = event.payload.get("account_id") if event.payload else None
@@ -171,7 +166,9 @@ class EventProcessor:
 
                 if self.slack:
                     # URL de Compra
-                    buy_url = event.payload.get("buy_url") if event.payload else None
+                    buy_url = (
+                        event.payload.get("buy_url") if event.payload else None
+                    )
 
                     self.slack.notify_codename_not_found(
                         network=self._network_value(event.network),
@@ -205,7 +202,6 @@ class EventProcessor:
                 event.funnel_stage = "Purchase"
                 event.funnel_number = 1
 
-
     def _adjust_event_by_action_type(self, event: NormalizedEvent) -> None:
         payload = event.payload or {}
         action_type = event.action_type
@@ -234,7 +230,6 @@ class EventProcessor:
                         logger.debug(
                             f"Rebill data ajustada: {date} {time}"
                         )
-
 
     def _create_sales_status(
         self,
@@ -268,7 +263,6 @@ class EventProcessor:
                 )
             else:
                 raise
-
 
     def _calculate_amount_affected(self, event: NormalizedEvent) -> float:
         payload = event.payload or {}

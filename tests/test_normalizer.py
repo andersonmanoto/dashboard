@@ -1,12 +1,13 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../app')))
 
 import pytest
-from services.normalizer import PayloadNormalizer
-from models.enums import NetworkType, ActionType
+from models.enums import ActionType, NetworkType
 from models.schemas import NormalizedEvent
+from services.normalizer import PayloadNormalizer
+
 
 @pytest.fixture
 def normalizer():
@@ -77,7 +78,11 @@ PAYLOAD_BUYGOODS_REAL = {
     "flag_sms_sent": "0",
     "order_date_eu": "22/01/2026",
     "order_details": "Reduburn 1 Bottle New",
-    "payment_terms": "&#36;79.00<br>+ &#36;9.90 Shipping & Handling<br>+ &#36;7.9 Taxes",
+    "payment_terms": (
+        "&#36;79.00<br>"
+        "+ &#36;9.90 Shipping & Handling<br>"
+        "+ &#36;7.9 Taxes"
+    ),
     "product_price": "79.00",
     "referrer_self": "",
     "rr_createdate": "2026-01-01 16:12:59",
@@ -167,34 +172,34 @@ def test_normalize_buygoods_real_payload(normalizer):
 
     assert isinstance(event, NormalizedEvent)
     assert event.network == NetworkType.BUYGOODS
-    
+
     # Valida IDs críticos
     assert event.order_id == "96ZZZZZZ"  # order_id_global
     assert event.action_type == ActionType.NEWORDER # payload tem "neworder"
-    
+
     # Valida conversão de data (usa rr_createdate como fallback padrão)
     # Payload: "2026-01-01 16:12:59"
     assert event.event_date == "2026-01-01"
     assert event.event_time == "16:12:59"
-    
+
     # Valida valores financeiros
     assert event.sale_total == 96.80 # total_clean
     assert event.shipping_cost == 9.90
     assert event.tax_amount == 7.9
     assert event.merchant_commission == 7.78
-    
+
     # Valida cálculo de taxa (7.78 / 96.80 = 0.0803...) -> Arredonda para 0.08
-    assert event.merchant_commission_rate == 0.08 
-    
+    assert event.merchant_commission_rate == 0.08
+
     # Valida concatenação do nome (Tamara + Giblin)
     assert event.customer_name == "Tamara Giblin"
     assert event.customer_email == "louigi272@gmail.com"
-    
+
     # Valida detalhes do pedido
     assert event.order_details.external_checkout_code == "abc9d" # product_codename
     assert event.order_details.product_name == "ABC 6 Bottles"
     assert event.order_details.external_affiliate_id == "42"
-    
+
     # Flags
     assert event.is_test is False
 

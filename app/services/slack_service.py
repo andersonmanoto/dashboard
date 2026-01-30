@@ -2,18 +2,19 @@
 Serviço para envio de notificações via Slack e log de erros no banco.
 """
 from typing import Optional, Union
-from loguru import logger
-from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 
 from config import Settings
+from loguru import logger
 from models.enums import NetworkType
 from models.schemas import MissingCodename
 from repositories.database import DatabaseRepository
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+
 
 class SlackService:
     """Gerencia notificações via Slack e log de erros."""
-    
+
     def __init__(self, settings: Settings, db_repo: DatabaseRepository):
         """
         Inicializa cliente do Slack e repositório.
@@ -23,9 +24,9 @@ class SlackService:
         self.monitor_channel = settings.slack_monitor_channel
         self.blacklist_prefixes = settings.codename_blacklist_prefixes
         self.db = db_repo  # Injeção do repositório
-        
+
         logger.info("Cliente do Slack inicializado com sucesso")
-    
+
     def notify_codename_not_found(
         self,
         network: Union[NetworkType, str],
@@ -46,12 +47,12 @@ class SlackService:
                 f"(order_id={order_id})"
             )
             return False
-        
+
         # 1. Salva no Banco de Dados
         self._log_missing_codename_db(
             network, order_id, product, codename, account_id, buy_url
         )
-        
+
         # 2. Prepara mensagem Slack
         blocks = self._build_codename_not_found_blocks(
             network=network,
@@ -61,7 +62,7 @@ class SlackService:
             account_id=account_id,
             buy_url=buy_url
         )
-        
+
         # 3. Envia para Slack
         target_channel = channel or self.monitor_channel
         return self._send_message(
@@ -69,24 +70,24 @@ class SlackService:
             text="Codename não encontrado",
             blocks=blocks
         )
-    
+
     def _log_missing_codename_db(
-        self, 
-        network, 
-        order_id, 
-        product, 
-        codename, 
-        account_id, 
+        self,
+        network,
+        order_id,
+        product,
+        codename,
+        account_id,
         buy_url
     ) -> None:
         """Helper para registrar o erro no Supabase."""
         try:
             network_val = (
-                network.value 
-                if isinstance(network, NetworkType) 
+                network.value
+                if isinstance(network, NetworkType)
                 else str(network)
             )
-            
+
             entry = MissingCodename(
                 network=network_val,
                 order_id=order_id,
@@ -95,9 +96,9 @@ class SlackService:
                 account_id=account_id,
                 buy_url=buy_url
             )
-            
+
             self.db.register_missing_codename(entry)
-            
+
         except Exception as e:
             logger.error(f"Falha ao logar missing codename no DB: {e}")
 
@@ -105,13 +106,13 @@ class SlackService:
         """Verifica se codename está na blacklist."""
         if not codename:
             return False
-        
+
         codename_lower = codename.lower()
         return any(
-            codename_lower.startswith(prefix) 
+            codename_lower.startswith(prefix)
             for prefix in self.blacklist_prefixes
         )
-    
+
     def _build_codename_not_found_blocks(
         self,
         network: Union[NetworkType, str],
@@ -124,13 +125,13 @@ class SlackService:
         """Constrói blocos formatados para mensagem Slack."""
         codename_display = codename or "N/A"
         account_display = account_id or "N/A"
-        
+
         network_name = (
-            network.value 
-            if isinstance(network, NetworkType) 
+            network.value
+            if isinstance(network, NetworkType)
             else str(network)
         )
-        
+
         fields = [
             {
                 "type": "mrkdwn",
@@ -172,12 +173,15 @@ class SlackService:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "Codename não encontrado. Registrado em 'missing_codenames'."
+                        "text": (
+                            "Codename não encontrado. "
+                            "Registrado em 'missing_codenames'."
+                        )
                     }
                 ]
             }
         ]
-    
+
     def _send_message(
         self,
         channel: str,
@@ -194,7 +198,7 @@ class SlackService:
                 blocks=blocks
             )
             return response["ok"]
-            
+
         except SlackApiError as e:
             logger.error(
                 f"Erro ao enviar mensagem para Slack: "
