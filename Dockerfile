@@ -13,13 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN useradd -m appuser
+RUN useradd -m morpheus
 
 COPY . .
 
-RUN chown -R appuser:appuser /app
+RUN chown -R morpheus:morpheus /app
 
-USER appuser
+USER morpheus
 
 EXPOSE 8000
 
