@@ -1,6 +1,7 @@
 """
 Funções utilitárias para manipulação de datas.
 """
+
 from datetime import datetime
 
 from loguru import logger

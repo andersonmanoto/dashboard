@@ -20,6 +20,7 @@ class MockProcessor(EventProcessor):
         # Apenas retorna o evento para inspeção visual
         return event
 
+
 async def debug_file(file_path: str):
     if not os.path.exists(file_path):
         logger.error(f"Arquivo não encontrado: {file_path}")
@@ -44,47 +45,49 @@ async def debug_file(file_path: str):
     # --- 2. CLEAN ---
     importer._clean_dataframe(df)
 
-    records = df.to_dict(orient='records')
+    records = df.to_dict(orient="records")
     logger.info(f"Encontrados {len(records)} registros. Mostrando os primeiros 3...")
 
     # --- 3. TRANSFORM & PRINT ---
-    for i, row in enumerate(records[:3]): # Mostra apenas os 3 primeiros para não poluir
+    for i, row in enumerate(
+        records[:3]
+    ):  # Mostra apenas os 3 primeiros para não poluir
         try:
             event = importer._transform_row_to_event(row, NetworkType.BUYGOODS)
 
             # Converte para dict e serializa datas para string para imprimir bonito
             event_dict = event.model_dump()
 
-            print(f"\n--- EVENTO {i+1} ({event.action_type}) ---")
+            print(f"\n--- EVENTO {i + 1} ({event.action_type}) ---")
             print(json.dumps(event_dict, indent=2, default=str))
 
             # Validações Rápidas de Integridade
             if event.action_type == ActionType.REFUND:
-                if not event_dict.get('payload', {}).get('date_refunded'):
-                     logger.warning("ALERTA: Refund sem 'date_refunded' no payload!")
+                if not event_dict.get("payload", {}).get("date_refunded"):
+                    logger.warning("ALERTA: Refund sem 'date_refunded' no payload!")
                 else:
-                    date_refunded = event_dict['payload']['date_refunded']
+                    date_refunded = event_dict["payload"]["date_refunded"]
                     logger.success(f"Data Refund OK: {date_refunded}")
 
             elif event.action_type == ActionType.CHARGEBACK:
-                if not event_dict.get('payload', {}).get('date_chargedback'):
+                if not event_dict.get("payload", {}).get("date_chargedback"):
                     logger.warning(
                         "ALERTA: Chargeback sem 'date_chargedback' no payload!"
                     )
                 else:
-                    date = event_dict['payload']['date_chargedback']
+                    date = event_dict["payload"]["date_chargedback"]
                     logger.success(f"Data Chargeback OK: {date}")
 
             if event.action_type in [ActionType.REFUND, ActionType.CHARGEBACK]:
-                payload = event_dict.get('payload', {})
-                affected_value = (
-                    payload.get('total_amount_charged')
-                    or payload.get('refund_amount')
+                payload = event_dict.get("payload", {})
+                affected_value = payload.get("total_amount_charged") or payload.get(
+                    "refund_amount"
                 )
                 logger.info(f"Valor afetado (loss): {affected_value}")
 
         except Exception as e:
             logger.error(f"Erro ao transformar linha {i}: {e}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -1,6 +1,7 @@
 """
 Modelos Pydantic para validação e serialização de dados.
 """
+
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
@@ -12,6 +13,7 @@ from .enums import ActionType, AffiliateStatus, NetworkType
 
 class OrderDetails(BaseModel):
     """Detalhes do pedido."""
+
     external_product_id: Optional[str] = None
     external_checkout_code: Optional[str] = None
     external_affiliate_id: Optional[str] = None
@@ -25,6 +27,7 @@ class OrderDetails(BaseModel):
 
 class ShippingDetails(BaseModel):
     """Detalhes de envio."""
+
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
@@ -96,9 +99,15 @@ class NormalizedEvent(BaseModel):
     # Payload original
     payload: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator('sale_total', 'product_price', 'aff_commission',
-                     'tax_amount', 'merchant_commission', 'shipping_cost',
-                     mode='before')
+    @field_validator(
+        "sale_total",
+        "product_price",
+        "aff_commission",
+        "tax_amount",
+        "merchant_commission",
+        "shipping_cost",
+        mode="before",
+    )
     @classmethod
     def ensure_float(cls, v: Any) -> float:
         """Garante que valores numéricos sejam float."""
@@ -114,6 +123,7 @@ class NormalizedEvent(BaseModel):
 
 class SalesStatus(BaseModel):
     """Registro de mudança de status de venda."""
+
     event_id: UUID
     order_id: str
     affiliate_id: Optional[UUID] = None
@@ -130,6 +140,7 @@ class SalesStatus(BaseModel):
 
 class CheckoutInfo(BaseModel):
     """Informações de checkout."""
+
     checkout_id: UUID
     product_id: UUID
     funnel_stage: Optional[str] = None
@@ -138,6 +149,7 @@ class CheckoutInfo(BaseModel):
 
 class Affiliate(BaseModel):
     """Modelo de afiliado."""
+
     id: Optional[UUID] = None
     network: NetworkType
     aff_id: str
@@ -149,6 +161,7 @@ class Affiliate(BaseModel):
 
 class MissingCodename(BaseModel):
     """Log de codename não encontrado."""
+
     network: str
     order_id: str
     product_name: Optional[str] = None

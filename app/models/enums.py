@@ -1,17 +1,20 @@
 """
 Enums e constantes usados na aplicação.
 """
+
 from enum import Enum
 
 
 class NetworkType(str, Enum):
     """Redes suportadas pelo sistema."""
+
     BUYGOODS = "BuyGoods"
     DIGISTORE24 = "DigiStore24"
 
 
 class ActionType(str, Enum):
     """Tipos de ação em eventos."""
+
     SALE = "sale"
     NEWORDER = "neworder"
     UPSELL = "upsell"
@@ -23,6 +26,7 @@ class ActionType(str, Enum):
 
 class AffiliateStatus(str, Enum):
     """Status de afiliados."""
+
     ACTIVE = "active"
     INACTIVE = "inactive"
 
@@ -34,7 +38,7 @@ TRACKABLE_ACTIONS = {
     ActionType.NEWORDER,
     ActionType.SALE,
     ActionType.UPSELL,
-    ActionType.REBILL
+    ActionType.REBILL,
 }
 
 # Actions que representam perdas financeiras
@@ -46,6 +50,6 @@ DATE_FIELD_MAPPING = {
         ActionType.CHARGEBACK: "date_chargedback",
         ActionType.REFUND: "date_refunded",
         ActionType.REBILL: "transaction_date",
-        "default": "rr_createdate"
+        "default": "rr_createdate",
     }
 }

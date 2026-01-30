@@ -1,7 +1,7 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../app')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../app")))
 
 import pytest
 from models.enums import ActionType, NetworkType
@@ -12,6 +12,7 @@ from services.normalizer import PayloadNormalizer
 @pytest.fixture
 def normalizer():
     return PayloadNormalizer()
+
 
 # ========== DADOS DE EXEMPLO (MOCKS REAIS) ==========
 
@@ -79,9 +80,7 @@ PAYLOAD_BUYGOODS_REAL = {
     "order_date_eu": "22/01/2026",
     "order_details": "Reduburn 1 Bottle New",
     "payment_terms": (
-        "&#36;79.00<br>"
-        "+ &#36;9.90 Shipping & Handling<br>"
-        "+ &#36;7.9 Taxes"
+        "&#36;79.00<br>+ &#36;9.90 Shipping & Handling<br>+ &#36;7.9 Taxes"
     ),
     "product_price": "79.00",
     "referrer_self": "",
@@ -149,7 +148,7 @@ PAYLOAD_BUYGOODS_REAL = {
     "customer_emailaddress": "louigi272@gmail.com",
     "paypal_native_agreement": "",
     "storecheckedoutcarts_id": "11619",
-    "total_amount_charged_in_currency": "0.00"
+    "total_amount_charged_in_currency": "0.00",
 }
 
 PAYLOAD_DIGISTORE_SALE = {
@@ -162,8 +161,9 @@ PAYLOAD_DIGISTORE_SALE = {
     "first_name": "Maria",
     "last_name": "Pereira",
     "product_id": "12345",
-    "is_test_payment": "true"
+    "is_test_payment": "true",
 }
+
 
 # ========== TESTES BUYGOODS (ATUALIZADO) ==========
 def test_normalize_buygoods_real_payload(normalizer):
@@ -175,7 +175,7 @@ def test_normalize_buygoods_real_payload(normalizer):
 
     # Valida IDs críticos
     assert event.order_id == "96ZZZZZZ"  # order_id_global
-    assert event.action_type == ActionType.NEWORDER # payload tem "neworder"
+    assert event.action_type == ActionType.NEWORDER  # payload tem "neworder"
 
     # Valida conversão de data (usa rr_createdate como fallback padrão)
     # Payload: "2026-01-01 16:12:59"
@@ -183,7 +183,7 @@ def test_normalize_buygoods_real_payload(normalizer):
     assert event.event_time == "16:12:59"
 
     # Valida valores financeiros
-    assert event.sale_total == 96.80 # total_clean
+    assert event.sale_total == 96.80  # total_clean
     assert event.shipping_cost == 9.90
     assert event.tax_amount == 7.9
     assert event.merchant_commission == 7.78
@@ -196,7 +196,7 @@ def test_normalize_buygoods_real_payload(normalizer):
     assert event.customer_email == "louigi272@gmail.com"
 
     # Valida detalhes do pedido
-    assert event.order_details.external_checkout_code == "abc9d" # product_codename
+    assert event.order_details.external_checkout_code == "abc9d"  # product_codename
     assert event.order_details.product_name == "ABC 6 Bottles"
     assert event.order_details.external_affiliate_id == "42"
 

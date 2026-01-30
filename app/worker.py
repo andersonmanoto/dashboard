@@ -29,17 +29,13 @@ async def process_single_webhook(db_repo, normalizer, processor, item):
     """
     Função auxiliar para processar UM item de forma isolada.
     """
-    inbox_id = item['id']
+    inbox_id = item["id"]
     try:
         # Executa operações de banco (síncronas) em uma thread separada
-        await asyncio.to_thread(
-            db_repo.update_inbox_status,
-            inbox_id,
-            "processing"
-        )
+        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, "processing")
 
-        network_str = item['network']
-        payload = item['payload']
+        network_str = item["network"]
+        payload = item["payload"]
 
         # Normalização
         if network_str == NetworkType.BUYGOODS.value:
@@ -55,19 +51,11 @@ async def process_single_webhook(db_repo, normalizer, processor, item):
         status = "processed" if success else "processed"
         msg = None if success else "Ignored/Duplicate"
 
-        await asyncio.to_thread(
-            db_repo.update_inbox_status,
-            inbox_id, status,
-            msg
-        )
+        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, status, msg)
 
     except Exception as e:
         logger.error(f"Falha no webhook {inbox_id}: {e}")
-        await asyncio.to_thread(
-            db_repo.update_inbox_status,
-            inbox_id, "failed",
-            str(e)
-        )
+        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, "failed", str(e))
 
 
 async def run_worker():
@@ -82,10 +70,7 @@ async def run_worker():
     while RUNNING:
         try:
             # 1. Busca Pendentes (thread separada)
-            pendings = await asyncio.to_thread(
-                db_repo.fetch_pending_webhooks,
-                limit=10
-            )
+            pendings = await asyncio.to_thread(db_repo.fetch_pending_webhooks, limit=10)
 
             if not pendings:
                 # Sleep não bloqueante
@@ -108,6 +93,7 @@ async def run_worker():
             await asyncio.sleep(5)
 
     logger.info("Worker finalizado.")
+
 
 if __name__ == "__main__":
     asyncio.run(run_worker())

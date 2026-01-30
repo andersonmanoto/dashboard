@@ -11,9 +11,7 @@ from services.retro_service import SpreadsheetRetro
 
 async def main():
     if len(sys.argv) < 2:
-        logger.error(
-            "Uso: python scripts/run_import.py <caminho_do_arquivo.csv>"
-        )
+        logger.error("Uso: python scripts/run_import.py <caminho_do_arquivo.csv>")
         return
 
     file_path = sys.argv[1]
@@ -34,13 +32,11 @@ async def main():
         logger.info(f"Iniciando importação do arquivo: {file_path}")
 
         # Agora usamos await pois o importer chama métodos async do processor
-        await importer.process_file(
-            file_path,
-            network=NetworkType.BUYGOODS
-        )
+        await importer.process_file(file_path, network=NetworkType.BUYGOODS)
 
     except Exception as e:
         logger.exception(f"Erro fatal na execução do script: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

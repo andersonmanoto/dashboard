@@ -15,60 +15,49 @@ SPREADSHEET_MAPPING = {
     "Order ID": "order_id",
     "External Order ID": "external_order_id",
     "Account ID": "account_id",
-
     # --- Datas Específicas ---
-    "Date Created": "created_date",     # Data da venda original
-    "rr_createdate": "created_date",    # Variação de nome
-    "Order Date": "created_date",       # Variação de nome
-
-    "Refund Date": "refund_date_raw",       # Coluna específica de refund
-    "Chargeback Date": "chargeback_date_raw", # Coluna específica de chargeback
-
+    "Date Created": "created_date",  # Data da venda original
+    "rr_createdate": "created_date",  # Variação de nome
+    "Order Date": "created_date",  # Variação de nome
+    "Refund Date": "refund_date_raw",  # Coluna específica de refund
+    "Chargeback Date": "chargeback_date_raw",  # Coluna específica de chargeback
     # --- Valores Financeiros ---
     "Total Collected (Transaction Amount)": "total_amount",
     "Amount": "total_amount",
-
     "Affiliate Commission Amount": "aff_commission",
     "Commission Amount": "aff_commission",
-
     "Taxes": "tax_amount",
     "Shipping Cost (Fulfillment)": "shipping_cost",
     "Payment Processing Fees": "merchant_commission",
-
     # --- Cliente ---
     "Customer Name": "customer_name",
     "Firstname": "customer_firstname",
     "Lastname": "customer_lastname",
-
     "Customer Email Address": "customer_email",
     "Customer Phone": "customer_phone",
     "Phone": "customer_phone",
-
     # --- Endereço ---
     "Address": "shipping_address",
     "City": "shipping_city",
     "State": "shipping_state",
     "Zip": "shipping_zip",
     "Country": "shipping_country",
-
     # --- Detalhes do Produto ---
     "Product Names": "product_name",
     "Product Name": "product_name",
-
     "Product Codenames": "product_codename",
     "Product Codename": "product_codename",
-
     "Affiliate ID": "aff_id",
     "Affiliate Name": "aff_name",
-
     # --- Status e Controle ---
     "Status": "status",
     "Was Canceled": "was_canceled",
-    "Type": "action_source",           # "refund", "chargeback"
+    "Type": "action_source",  # "refund", "chargeback"
     "Chargeback Reason": "reason",
     "Reason": "reason",
-    "Is Test": "is_test"
+    "Is Test": "is_test",
 }
+
 
 class SpreadsheetRetro:
     """
@@ -80,9 +69,7 @@ class SpreadsheetRetro:
         self.processor = processor
 
     async def process_file(
-        self,
-        file_path: str,
-        network: NetworkType = NetworkType.BUYGOODS
+        self, file_path: str, network: NetworkType = NetworkType.BUYGOODS
     ):
         path = Path(file_path)
         if not path.exists():
@@ -113,7 +100,7 @@ class SpreadsheetRetro:
         skipped_count = 0
 
         # Converte para dict (NaN dá ruim pro json)
-        records = df.replace({np.nan: None}).to_dict(orient='records')
+        records = df.replace({np.nan: None}).to_dict(orient="records")
 
         for row in records:
             try:
@@ -145,48 +132,45 @@ class SpreadsheetRetro:
         """Realiza limpeza em massa no DataFrame."""
 
         # Consolida nome do cliente
-        if (
-            'customer_name' not in df.columns
-            and 'customer_firstname' in df.columns
-        ):
-            firstname = df['customer_firstname'].fillna('')
-            lastname = df.get('customer_lastname', '').fillna('')
-            df['customer_name'] = (firstname + ' ' + lastname).str.strip()
+        if "customer_name" not in df.columns and "customer_firstname" in df.columns:
+            firstname = df["customer_firstname"].fillna("")
+            lastname = df.get("customer_lastname", "").fillna("")
+            df["customer_name"] = (firstname + " " + lastname).str.strip()
 
         # Remove '$' e converte para float
         money_cols = [
-            'total_amount',
-            'aff_commission',
-            'tax_amount',
-            'shipping_cost',
-            'merchant_commission'
+            "total_amount",
+            "aff_commission",
+            "tax_amount",
+            "shipping_cost",
+            "merchant_commission",
         ]
         for col in money_cols:
             if col in df.columns:
                 df[col] = (
                     df[col]
                     .astype(str)
-                    .str.replace('$', '', regex=False)
-                    .str.replace(',', '', regex=False)
+                    .str.replace("$", "", regex=False)
+                    .str.replace(",", "", regex=False)
                 )
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
         # Trata todas as colunas de data possíveis
-        date_cols = ['created_date', 'refund_date_raw', 'chargeback_date_raw']
+        date_cols = ["created_date", "refund_date_raw", "chargeback_date_raw"]
         for col in date_cols:
             if col in df.columns:
                 # Converte para datetime
-                df[f'{col}_dt'] = pd.to_datetime(df[col], errors='coerce')
+                df[f"{col}_dt"] = pd.to_datetime(df[col], errors="coerce")
 
         # Limpa Strings
         string_cols = [
-            'order_id',
-            'customer_name',
-            'customer_email',
-            'product_name',
-            'product_codename',
-            'action_source',
-            'reason'
+            "order_id",
+            "customer_name",
+            "customer_email",
+            "product_name",
+            "product_codename",
+            "action_source",
+            "reason",
         ]
 
         for col in string_cols:
@@ -194,13 +178,10 @@ class SpreadsheetRetro:
                 df[col] = df[col].fillna("").astype(str).str.strip()
 
         # Normaliza boleanos
-        bool_cols = ['is_test', 'was_canceled']
+        bool_cols = ["is_test", "was_canceled"]
         for col in bool_cols:
             if col in df.columns:
-                df[col] = (
-                     pd.to_numeric(df[col], errors='coerce')
-                     .fillna(0).astype(bool)
-                )
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(bool)
 
     def _get_event_datetime(self, row: dict, action: ActionType) -> tuple[str, str]:
         """
@@ -210,38 +191,36 @@ class SpreadsheetRetro:
         target_dt = None
 
         if action == ActionType.REFUND:
-            target_dt = row.get('refund_date_raw_dt')
+            target_dt = row.get("refund_date_raw_dt")
         elif action == ActionType.CHARGEBACK:
-            target_dt = row.get('chargeback_date_raw_dt')
+            target_dt = row.get("chargeback_date_raw_dt")
 
         # Fallback 1:
         # Se não achou data específica (ou é neworder), tenta data de criação
         if pd.isnull(target_dt):
-            target_dt = row.get('created_date_dt')
+            target_dt = row.get("created_date_dt")
 
         # Fallback 2: Data atual (segurança)
         if pd.isnull(target_dt):
             target_dt = datetime.now()
 
-        return target_dt.strftime('%Y-%m-%d'), target_dt.strftime('%H:%M:%S')
+        return target_dt.strftime("%Y-%m-%d"), target_dt.strftime("%H:%M:%S")
 
     def _transform_row_to_event(
-            self,
-            row: dict,
-            network: NetworkType
+        self, row: dict, network: NetworkType
     ) -> NormalizedEvent:
         """Converte uma linha limpa do DF para o schema NormalizedEvent."""
 
         # 1. Determina Ação
         action = ActionType.NEWORDER
 
-        if row.get('was_canceled'):
+        if row.get("was_canceled"):
             action = ActionType.REFUND
 
-        action_source = row.get('action_source', '').lower()
-        if 'refund' in action_source:
+        action_source = row.get("action_source", "").lower()
+        if "refund" in action_source:
             action = ActionType.REFUND
-        elif 'chargeback' in action_source:
+        elif "chargeback" in action_source:
             action = ActionType.CHARGEBACK
 
         # 2. Determina Data
@@ -250,72 +229,70 @@ class SpreadsheetRetro:
         # 3. Payload Extra
         payload = row.copy()
         # Remove objetos datetime do payload para ser JSON serializable
-        keys_to_remove = [k for k in payload.keys() if k.endswith('_dt')]
+        keys_to_remove = [k for k in payload.keys() if k.endswith("_dt")]
         for k in keys_to_remove:
             del payload[k]
 
-        if row.get('reason'):
-            payload['comments'] = row.get('reason')
+        if row.get("reason"):
+            payload["comments"] = row.get("reason")
 
         if action == ActionType.REFUND:
-            payload['date_refunded'] = f"{event_date} {event_time}"
+            payload["date_refunded"] = f"{event_date} {event_time}"
             # Injeta refund_amount para o processador calcular o prejuízo
-            payload['refund_amount'] = row.get('total_amount')
+            payload["refund_amount"] = row.get("total_amount")
 
         elif action == ActionType.CHARGEBACK:
-            payload['date_chargedback'] = f"{event_date} {event_time}"
+            payload["date_chargedback"] = f"{event_date} {event_time}"
             # Injeta total_amount_charged para calcular o prejuízo
-            payload['total_amount_charged'] = row.get('total_amount')
+            payload["total_amount_charged"] = row.get("total_amount")
 
         elif action == ActionType.NEWORDER:
-            payload['rr_createdate'] = f"{event_date} {event_time}"
-            payload['total_clean'] = row.get('total_amount')
+            payload["rr_createdate"] = f"{event_date} {event_time}"
+            payload["total_clean"] = row.get("total_amount")
 
         # Fallback genérico para total_clean
-        if 'total_clean' not in payload and row.get('total_amount'):
-            payload['total_clean'] = row.get('total_amount')
+        if "total_clean" not in payload and row.get("total_amount"):
+            payload["total_clean"] = row.get("total_amount")
 
         # Se algum campo numérico obrigatório for None/NaN, força 0.0
-        sale_total = row.get('total_amount')
+        sale_total = row.get("total_amount")
         if sale_total is None or pd.isna(sale_total):
             sale_total = 0.0
 
         order_details = OrderDetails(
-            product_name=row.get('product_name'),
-            external_checkout_code=row.get('product_codename'),
-            external_affiliate_id=str(row.get('aff_id')),
-            external_affiliate_name=row.get('aff_name')
+            product_name=row.get("product_name"),
+            external_checkout_code=row.get("product_codename"),
+            external_affiliate_id=str(row.get("aff_id")),
+            external_affiliate_name=row.get("aff_name"),
         )
 
         shipping_details = ShippingDetails(
-            address=row.get('shipping_address'),
-            city=row.get('shipping_city'),
-            state=row.get('shipping_state'),
-            zip=str(row.get('shipping_zip')),
-            country=row.get('shipping_country')
+            address=row.get("shipping_address"),
+            city=row.get("shipping_city"),
+            state=row.get("shipping_state"),
+            zip=str(row.get("shipping_zip")),
+            country=row.get("shipping_country"),
         )
 
         return NormalizedEvent(
             network=network,
-            order_id=str(row.get('order_id')),
-            account_id=str(
-                row.get('account_id')
-            ) if row.get('account_id') else None,
+            order_id=str(row.get("order_id")),
+            account_id=str(row.get("account_id")) if row.get("account_id") else None,
             action_type=action,
             event_date=event_date,
             event_time=event_time,
             sale_total=float(sale_total),
-            aff_commission=float(row.get('aff_commission') or 0.0),
-            tax_amount=float(row.get('tax_amount') or 0.0),
-            shipping_cost=float(row.get('shipping_cost') or 0.0),
-            merchant_commission=float(row.get('merchant_commission') or 0.0),
-            customer_name=row.get('customer_name'),
-            customer_email=row.get('customer_email'),
-            customer_phone=str(row.get('customer_phone', '')),
-            is_test=bool(row.get('is_test', False)),
+            aff_commission=float(row.get("aff_commission") or 0.0),
+            tax_amount=float(row.get("tax_amount") or 0.0),
+            shipping_cost=float(row.get("shipping_cost") or 0.0),
+            merchant_commission=float(row.get("merchant_commission") or 0.0),
+            customer_name=row.get("customer_name"),
+            customer_email=row.get("customer_email"),
+            customer_phone=str(row.get("customer_phone", "")),
+            is_test=bool(row.get("is_test", False)),
             order_details=order_details,
             shipping_details=shipping_details,
-            payload=payload
+            payload=payload,
         )
 
 

@@ -11,6 +11,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+
 class WebScannerService:
     def __init__(self):
         settings = get_settings()
@@ -22,7 +23,7 @@ class WebScannerService:
             logger.error(f"Arquivo de mapa não encontrado em: {self.map_file}")
             return {}
         try:
-            with open(self.map_file, 'r', encoding='utf-8') as f:
+            with open(self.map_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Erro ao ler JSON: {e}")
@@ -33,12 +34,12 @@ class WebScannerService:
         return path.split("/")[-1] if path else "home"
 
     async def _check_url(
-            self,
-            client: httpx.AsyncClient,
-            semaphore: asyncio.Semaphore,
-            url: str,
-            codename: str,
-            debug: bool
+        self,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+        url: str,
+        codename: str,
+        debug: bool,
     ):
         found_data = []
         unique_links = set()
@@ -61,8 +62,8 @@ class WebScannerService:
                         )
                     return []
 
-                soup = BeautifulSoup(response.text, 'html.parser')
-                all_links = soup.find_all('a', href=True)
+                soup = BeautifulSoup(response.text, "html.parser")
+                all_links = soup.find_all("a", href=True)
 
                 if debug:
                     logger.warning(
@@ -70,7 +71,7 @@ class WebScannerService:
                     )
 
                 for link in all_links:
-                    href = link['href']
+                    href = link["href"]
 
                     if href in unique_links:
                         continue
@@ -97,11 +98,13 @@ class WebScannerService:
                                     f"[DEBUG] MATCH! Link encontrado em {url}: {href}"
                                 )
 
-                            found_data.append({
-                                "source_url": url,
-                                "stage": self._extract_stage_from_url(url),
-                                "found_link": href
-                            })
+                            found_data.append(
+                                {
+                                    "source_url": url,
+                                    "stage": self._extract_stage_from_url(url),
+                                    "found_link": href,
+                                }
+                            )
                         # else:
                         #    if debug: logger.warning(f"   [DEBUG] Ignorado: {href}")
 
@@ -123,7 +126,11 @@ class WebScannerService:
                 continue
 
             for funnel_name, directories in funnels.items():
-                base_funnel_url = f"https://{domain}" if funnel_name == "fnn1" else f"https://{domain}/{funnel_name}"
+                base_funnel_url = (
+                    f"https://{domain}"
+                    if funnel_name == "fnn1"
+                    else f"https://{domain}/{funnel_name}"
+                )
 
                 for directory in directories:
                     urls_to_scan.append(f"{base_funnel_url}/{directory}/")

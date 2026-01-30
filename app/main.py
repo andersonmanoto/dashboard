@@ -1,6 +1,7 @@
 """
 API FastAPI para receber e processar webhooks de redes de afiliados.
 """
+
 from contextlib import asynccontextmanager
 from json import JSONDecodeError
 from pathlib import Path
@@ -44,13 +45,13 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Webhook Dashboard encerrado")
 
+
 # Configuração da aplicação
 app = FastAPI(
     title="Tiger Offers - Webhook Dashboard",
-    description="API para normalizar e processar "
-                "webhooks de redes de afiliados",
+    description="API para normalizar e processar webhooks de redes de afiliados",
     version="2.2.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # ========== HELPERS ==========
@@ -70,8 +71,7 @@ async def get_api_key(api_key_header: str = Security(api_key_header)):
     if not settings.scanner_secret_token:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro de segurança: "
-                   "Token do scanner não configurado no servidor."
+            detail="Erro de segurança: Token do scanner não configurado no servidor.",
         )
 
     # 2. Validação: Compara o token recebido com o token secreto
@@ -81,7 +81,7 @@ async def get_api_key(api_key_header: str = Security(api_key_header)):
     # 3. Se chegou aqui, a senha está errada ou o header não foi enviado
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Acesso Negado: Token inválido ou ausente."
+        detail="Acesso Negado: Token inválido ou ausente.",
     )
 
 
@@ -100,14 +100,13 @@ def verify_secret_token(secret_token: str, settings: Settings) -> None:
         logger.critical("WEBHOOK_SECRET não configurado no servidor!")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Configuration Error"
+            detail="Configuration Error",
         )
 
     if secret_token != settings.webhook_secret:
         logger.warning(f"Acesso negado. Token inválido: {secret_token}")
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso Proibido"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Acesso Proibido"
         )
 
 
@@ -132,7 +131,7 @@ async def process_webhook_background(
     normalizer: PayloadNormalizer,
     processor: EventProcessor,
     network: NetworkType,
-    payload: dict
+    payload: dict,
 ) -> None:
     """
     Processa webhook em background task.
@@ -155,12 +154,12 @@ async def process_webhook_background(
     except Exception as e:
         logger.exception(f"Erro no processamento ({network}): {e}")
 
+
 # ========== HELPERS - SECURITY ==========
 
 
 async def verify_upload_key(
-    x_api_key: str = Header(None),
-    settings: Settings = Depends(get_settings)
+    x_api_key: str = Header(None), settings: Settings = Depends(get_settings)
 ) -> None:
     """
     Verifica a chave de API para uploads no header 'x-api-key'.
@@ -169,16 +168,15 @@ async def verify_upload_key(
         logger.critical("UPLOAD_API_KEY não configurada no servidor!")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Configuration Error"
+            detail="Configuration Error",
         )
 
     if x_api_key != settings.upload_api_key:
-        logger.warning(f"Tentativa de upload não autorizada. "
-                       f"Key inválida: {x_api_key}")
+        logger.warning(f"Tentativa de upload não autorizada. Key inválida: {x_api_key}")
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Credenciais inválidas"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Credenciais inválidas"
         )
+
 
 # ========== ENDPOINTS ==========
 
@@ -188,9 +186,8 @@ async def webhook_buygoods(
     secret_token: str,
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
-    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)]
+    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
 ) -> dict:
-
     verify_secret_token(secret_token, settings)
 
     try:
@@ -198,8 +195,7 @@ async def webhook_buygoods(
 
         # Apenas salva e responde rápido
         inbox_id = db_repo.create_inbox_entry(
-            network=NetworkType.BUYGOODS.value,
-            payload=payload
+            network=NetworkType.BUYGOODS.value, payload=payload
         )
 
         logger.info(f"BuyGoods: Webhook salvo na inbox. ID: {inbox_id}")
@@ -210,17 +206,15 @@ async def webhook_buygoods(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@app.get("/digistore24/{secret_token}",
-         operation_id="webhook_digistore24_get")
-@app.post("/digistore24/{secret_token}",
-          operation_id="webhook_digistore24_post")
+@app.get("/digistore24/{secret_token}", operation_id="webhook_digistore24_get")
+@app.post("/digistore24/{secret_token}", operation_id="webhook_digistore24_post")
 async def webhook_digistore24(
     secret_token: str,
     request: Request,
     background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
     normalizer: Annotated[PayloadNormalizer, Depends(get_payload_normalizer)],
-    processor: Annotated[EventProcessor, Depends(get_event_processor)]
+    processor: Annotated[EventProcessor, Depends(get_event_processor)],
 ) -> dict:
     """
     Endpoint para receber webhooks da DigiStore24.
@@ -255,8 +249,7 @@ async def webhook_digistore24(
         action = payload.get("transaction_type", "sale")
 
         logger.info(
-            f"DigiStore24: Recebido Order {order_id} ({action}) "
-            f"via {request.method}"
+            f"DigiStore24: Recebido Order {order_id} ({action}) via {request.method}"
         )
 
         # Agenda processamento em background
@@ -265,7 +258,7 @@ async def webhook_digistore24(
             normalizer,
             processor,
             NetworkType.DIGISTORE24,
-            payload
+            payload,
         )
 
         return {"status": "received", "id": order_id}
@@ -274,7 +267,7 @@ async def webhook_digistore24(
         logger.exception(f"Erro: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal Server Error"
+            detail="Internal Server Error",
         )
 
 
@@ -289,13 +282,12 @@ async def upload_spreadsheet(
     settings: Settings = Depends(get_settings),
     db_repo: DatabaseRepository = Depends(get_database_repository),
 ):
-
     """
     Endpoint para upload manual de planilhas (CSV/Excel).
     """
     # 1. Validação básica de extensão
     filename = file.filename.lower()
-    if not filename.endswith(('.csv', '.xlsx', '.xls')):
+    if not filename.endswith((".csv", ".xlsx", ".xls")):
         raise HTTPException(400, "Formato inválido. Use .csv ou .xlsx")
 
     # 2. Salvar arquivo temporariamente no disco
@@ -305,8 +297,7 @@ async def upload_spreadsheet(
         try:
             temp_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            logger.error(f"Falha ao criar diretório temporário "
-                         f"{temp_dir}: {e}")
+            logger.error(f"Falha ao criar diretório temporário {temp_dir}: {e}")
             raise HTTPException(500, "Erro de configuração de servidor")
 
     temp_filename = f"import_{uuid4()}_{file.filename}"
@@ -321,15 +312,13 @@ async def upload_spreadsheet(
 
         # 3. Agendar processamento em Background
         background_tasks.add_task(
-            run_retro_background,
-            str(temp_path.absolute()),
-            db_repo
+            run_retro_background, str(temp_path.absolute()), db_repo
         )
 
         return {
             "status": "queued",
             "message": "Arquivo recebido. O processamento iniciará em breve.",
-            "file_id": temp_filename
+            "file_id": temp_filename,
         }
 
     except Exception as e:
@@ -345,7 +334,7 @@ async def find_offer_in_funnel(
     codename: str = Query(..., description="Ex: vis3"),
     domain: str = Query(..., description="Ex: visiumpro.com)"),
     debug: bool = Query(False, description="Logs no terminal"),
-    token: str = Depends(get_api_key)
+    token: str = Depends(get_api_key),
 ):
     """
     Varre os diretórios do `domain` e busca o funnel_stage,
@@ -355,9 +344,7 @@ async def find_offer_in_funnel(
 
     # Passando o debug para o serviço
     results = await service.run_scan(
-        codename=codename,
-        domain_filter=domain,
-        debug=debug
+        codename=codename, domain_filter=domain, debug=debug
     )
 
     if not results:
@@ -366,12 +353,12 @@ async def find_offer_in_funnel(
             "codename": codename,
             "domain": domain,
             "debug_mode": debug,
-            "data": []
+            "data": [],
         }
 
     return {
         "message": "Scan finalizado.",
         "total_found": len(results),
         "debug_mode": debug,
-        "data": results
+        "data": results,
     }

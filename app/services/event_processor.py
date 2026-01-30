@@ -19,9 +19,7 @@ class EventProcessor:
     """Processa e enriquece eventos antes de salvar."""
 
     def __init__(
-        self,
-        db_repo: DatabaseRepository,
-        slack_service: Optional[SlackService] = None
+        self, db_repo: DatabaseRepository, slack_service: Optional[SlackService] = None
     ):
         self.db = db_repo
         self.slack = slack_service
@@ -43,9 +41,7 @@ class EventProcessor:
 
             # 1. Ignora cancelamentos
             if event.action_type == ActionType.CANCEL:
-                logger.info(
-                    f"action_type: CANCEL (Order: {order_id})."
-                )
+                logger.info(f"action_type: CANCEL (Order: {order_id}).")
                 return False
 
             # 2. Enriquecimento de Dados
@@ -71,7 +67,7 @@ class EventProcessor:
                 amount_affected = self._calculate_amount_affected(event)
 
                 sales_status_obj = SalesStatus(
-                    event_id=UUID('00000000-0000-0000-0000-000000000000'),
+                    event_id=UUID("00000000-0000-0000-0000-000000000000"),
                     order_id=order_id,
                     affiliate_id=event.affiliate_id,
                     product_id=event.product_id,
@@ -80,7 +76,7 @@ class EventProcessor:
                     status_reason=payload.get("comments"),
                     status_date=event.event_date,
                     status_time=event.event_time,
-                    amount_affected=amount_affected
+                    amount_affected=amount_affected,
                 )
 
             # 4. Envia o Evento e o Status (se houver) para o banco via RPC
@@ -92,9 +88,7 @@ class EventProcessor:
             return True
 
         except Exception as e:
-            logger.exception(
-                f"Erro fatal ao processar evento {event.order_id}: {e}"
-            )
+            logger.exception(f"Erro fatal ao processar evento {event.order_id}: {e}")
             return False
 
     async def _enrich_affiliate(self, event: NormalizedEvent) -> None:
@@ -104,30 +98,23 @@ class EventProcessor:
 
         network = self._network_value(event.network)
 
-        affiliate = self.db.get_affiliate_by_external_id(
-            network,
-            external_aff_id
-        )
+        affiliate = self.db.get_affiliate_by_external_id(network, external_aff_id)
 
         if not affiliate:
-            aff_name = (
-                event.order_details.external_affiliate_name
-                or "Tiger Offers"
-            )
+            aff_name = event.order_details.external_affiliate_name or "Tiger Offers"
 
             new_affiliate = Affiliate(
                 network=network,
                 aff_id=external_aff_id,
                 aff_name=aff_name,
-                status=AffiliateStatus.ACTIVE
+                status=AffiliateStatus.ACTIVE,
             )
 
             try:
                 affiliate = self.db.create_affiliate(new_affiliate)
             except Exception:
                 affiliate = self.db.get_affiliate_by_external_id(
-                    network,
-                    external_aff_id
+                    network, external_aff_id
                 )
 
         if affiliate and affiliate.id:
@@ -147,10 +134,7 @@ class EventProcessor:
 
         # 1. Tentativa de busca pelo Código (Match Exato)
         if checkout_code:
-            checkout_info = self.db.get_checkout_by_code(
-                checkout_code,
-                account_id
-            )
+            checkout_info = self.db.get_checkout_by_code(checkout_code, account_id)
 
             if checkout_info:
                 is_exact_match = True
@@ -166,9 +150,7 @@ class EventProcessor:
 
                 if self.slack:
                     # URL de Compra
-                    buy_url = (
-                        event.payload.get("buy_url") if event.payload else None
-                    )
+                    buy_url = event.payload.get("buy_url") if event.payload else None
 
                     self.slack.notify_codename_not_found(
                         network=self._network_value(event.network),
@@ -176,16 +158,14 @@ class EventProcessor:
                         product=event.order_details.product_name or "N/A",
                         codename=checkout_code,
                         account_id=event.account_id,
-                        buy_url=buy_url
+                        buy_url=buy_url,
                     )
 
         # 2. Fallback por nome do produto
         if not checkout_info:
             product_name = event.order_details.product_name
             if product_name:
-                checkout_info = self.db.find_checkout_by_product_name(
-                    product_name
-                )
+                checkout_info = self.db.find_checkout_by_product_name(product_name)
 
         # 3. Condições do checkout_code
         if checkout_info:
@@ -227,15 +207,9 @@ class EventProcessor:
                     if date:
                         event.event_date = date
                         event.event_time = time
-                        logger.debug(
-                            f"Rebill data ajustada: {date} {time}"
-                        )
+                        logger.debug(f"Rebill data ajustada: {date} {time}")
 
-    def _create_sales_status(
-        self,
-        event: NormalizedEvent,
-        event_id: str
-    ) -> None:
+    def _create_sales_status(self, event: NormalizedEvent, event_id: str) -> None:
         payload = event.payload or {}
         amount_affected = self._calculate_amount_affected(event)
 
@@ -249,7 +223,7 @@ class EventProcessor:
             status_reason=payload.get("comments"),
             status_date=event.event_date,
             status_time=event.event_time,
-            amount_affected=amount_affected
+            amount_affected=amount_affected,
         )
 
         try:
@@ -258,8 +232,7 @@ class EventProcessor:
             error_str = str(e).lower()
             if "23503" in error_str or "foreign key" in error_str:
                 logger.info(
-                    f"Status ignorado - evento pai não persistido: "
-                    f"{event.order_id}"
+                    f"Status ignorado - evento pai não persistido: {event.order_id}"
                 )
             else:
                 raise

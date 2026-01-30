@@ -2,6 +2,7 @@
 Configurações centralizadas da aplicação.
 Usa pydantic-settings para validação e carregamento de variáveis de ambiente.
 """
+
 import tempfile
 from functools import lru_cache
 
@@ -12,10 +13,7 @@ class Settings(BaseSettings):
     """Configurações da aplicação carregadas de variáveis de ambiente."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"
+        env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )
 
     # API

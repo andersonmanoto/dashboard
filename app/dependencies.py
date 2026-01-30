@@ -2,6 +2,7 @@
 Funções de dependency injection para FastAPI.
 Gerencia instâncias de serviços e repositórios.
 """
+
 from typing import Annotated
 
 from config import Settings, get_settings
@@ -13,7 +14,7 @@ from services.slack_service import SlackService
 
 
 def get_database_repository(
-    settings: Annotated[Settings, Depends(get_settings)]
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> DatabaseRepository:
     """
     Retorna instância singleton do repositório de banco de dados.
@@ -29,7 +30,7 @@ def get_database_repository(
 
 def get_slack_service(
     settings: Annotated[Settings, Depends(get_settings)],
-    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)]
+    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
 ) -> SlackService:
     """
     Retorna instância singleton do serviço Slack.
@@ -55,7 +56,7 @@ def get_payload_normalizer() -> PayloadNormalizer:
 
 def get_event_processor(
     db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
-    slack_service: Annotated[SlackService, Depends(get_slack_service)]
+    slack_service: Annotated[SlackService, Depends(get_slack_service)],
 ) -> EventProcessor:
     """
     Retorna instância do processador de eventos.
