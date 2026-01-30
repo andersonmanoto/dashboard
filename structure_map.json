@@ -242,5 +242,22 @@
             "up2",
             "up3"
         ]
+    },
+    "buylipobliss.com": {
+        "fnn1": [
+            "dtc-2b",
+            "dtc1",
+            "dw1-1b",
+            "dw1-3b",
+            "dw1-6b",
+            "dw2",
+            "gift",
+            "info",
+            "tks",
+            "up1-1b",
+            "up1-3b",
+            "up1-6b",
+            "up2"
+        ]
     }
 }

@@ -194,9 +194,8 @@ class DatabaseRepository:
                 db_name = product.get("name", "").lower().replace(" ", "")
                 if db_name and db_name in clean_input:
                     logger.info(
-                        "Match por nome: '%s' -> '%s'",
-                        product_name,
-                        product["name"],
+                        f"Match por nome: '{product_name}' "
+                        f"-> '{product['name']}'"
                     )
 
                     # Busca checkout vinculado
@@ -293,7 +292,7 @@ class DatabaseRepository:
         Registra um codename não encontrado (ignora se já existir).
         """
         try:
-            payload = data.model_dump(mode='json', exclude_none=True)
+            payload = data.model_dump(mode='json')
 
             # Upsert com ignore_duplicates para respeitar
             # a constraint unique_codename_account
@@ -302,7 +301,7 @@ class DatabaseRepository:
                 .table("missing_codenames")
                 .upsert(
                     payload,
-                    on_conflict="codename,account_id",
+                    on_conflict="order_id,codename,account_id",
                     ignore_duplicates=True,
                 )
                 .execute()
