@@ -12,6 +12,11 @@ services:
     volumes:
       - .:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "10"
 
   worker:
     build: .
@@ -24,3 +29,8 @@ services:
     volumes:
       - .:/app
     command: python -m app.worker
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "5"
