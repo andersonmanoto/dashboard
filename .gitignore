@@ -5,3 +5,4 @@ venv/
 .idea/
 .vscode/
 *.log
+docker-compose.override.yaml
