@@ -176,6 +176,7 @@ class Affiliate(BaseModel):
     aff_id: str
     aff_name: str
     status: AffiliateStatus = AffiliateStatus.ACTIVE
+    tear_id: Optional[UUID] = None
 
     model_config = ConfigDict(use_enum_values=True)
 

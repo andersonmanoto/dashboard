@@ -41,6 +41,30 @@ class DatabaseRepository:
         )
         logger.info("Conexão com Supabase estabelecida")
 
+    @lru_cache(maxsize=1)
+    def get_default_tear_id(self) -> Optional[UUID]:
+        """
+        Busca o ID do Tear padrão (Number 0).
+        """
+        try:
+            response = (
+                self.client.table("tears")
+                .select("id")
+                .eq("tear_number", 0)
+                .limit(1)
+                .execute()
+            )
+
+            if response.data:
+                return UUID(response.data[0]["id"])
+            
+            logger.warning("ALERTA: Tear Number 0 não encontrado no banco!")
+            return None
+
+        except Exception as e:
+            logger.error(f"Erro ao buscar default tear id: {e}")
+            return None
+
     # ========== AFFILIATES ==========
 
     @lru_cache(maxsize=1000)

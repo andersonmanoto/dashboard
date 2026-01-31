@@ -136,19 +136,23 @@ class EventProcessor:
         if not affiliate:
             aff_name = event.order_details.external_affiliate_name or "Tiger Offers"
 
+            # 1. Busca o ID do Tear 0
+            default_tear_id = self.db.get_default_tear_id()
+
+            # 2. Cria o objeto com o tear_id preenchido
             new_affiliate = Affiliate(
                 network=network,
                 aff_id=external_aff_id,
                 aff_name=aff_name,
                 status=AffiliateStatus.ACTIVE,
+                tear_id=default_tear_id
             )
 
             try:
                 affiliate = self.db.create_affiliate(new_affiliate)
             except Exception:
-                affiliate = self.db.get_affiliate_by_external_id(
-                    network, external_aff_id
-                )
+                # Fallback em caso de race condition
+                affiliate = self.db.get_affiliate_by_external_id(network, external_aff_id)
 
         if affiliate and affiliate.id:
             event.affiliate_id = affiliate.id
