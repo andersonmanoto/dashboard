@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_key: str
 
+    # Redis
+    redis_host: str = "redis"
+    redis_port: int = 6379
+
     # Web Scanner
     scanner_secret_token: str
     structure_map_file: str = "structure_map.json"

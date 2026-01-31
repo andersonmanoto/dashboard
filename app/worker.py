@@ -1,66 +1,33 @@
-import asyncio
-import signal
-
-from config import get_settings
+from arq.connections import RedisSettings
 from loguru import logger
-from models.enums import NetworkType
-from repositories.database import DatabaseRepository
-from services.event_processor import EventProcessor
-from services.normalizer import PayloadNormalizer
-from services.slack_service import SlackService
 
-# Controle de loop
-RUNNING = True
+from app.config import get_settings
+from app.models.enums import NetworkType
+from app.repositories.database import DatabaseRepository
+from app.services.event_processor import EventProcessor
+from app.services.normalizer import PayloadNormalizer
+from app.services.slack_service import SlackService
 
 
-def handle_signal(signum, frame):
+async def task_process_webhook(
+    ctx, network_str: str, payload: dict, inbox_id: str | None = None
+):
     """
-    Captura sinais de parada do Sistema Operacional.
-
-    Permite o Graceful Shutdown do worker, garantindo que
-    as tarefas em andamento terminem antes de matar o processo.
-    Captura SIGINT (Ctrl+C) e SIGTERM (Docker stop).
-
-    Args:
-        signum (int): Número do sinal recebido.
-        frame (Any): Frame atual da stack (não utilizado).
+    Job executado pelo Redis quando chega um webhook.
     """
-    global RUNNING
-    logger.warning("Sinal de parada recebido. Terminando tarefas pendentes...")
-    RUNNING = False
+    logger.info(f"Job Iniciado | Network: {network_str} | Inbox ID: {inbox_id}")
 
+    # Recupera serviços do contexto (injetados no startup)
+    db_repo: DatabaseRepository = ctx["db_repo"]
+    processor: EventProcessor = ctx["processor"]
+    normalizer: PayloadNormalizer = ctx["normalizer"]
 
-# Registra os sinais do Linux
-signal.signal(signal.SIGINT, handle_signal)
-signal.signal(signal.SIGTERM, handle_signal)
-
-
-async def process_single_webhook(db_repo, normalizer, processor, item):
-    """
-    Processa um único item da fila de entrada de forma isolada.
-
-    Fluxo de execução:
-    1. Marca o item como 'processing' no banco.
-    2. Identifica a rede (BuyGoods/DigiStore).
-    3. Normaliza o JSON bruto para o formato padrão do sistema.
-    4. Envia para o EventProcessor (regras de negócio).
-    5. Atualiza o status final (processed ou failed).
-
-    Args:
-        db_repo (DatabaseRepository): Repositório para atualizar status.
-        normalizer (PayloadNormalizer): Serviço de normalização.
-        processor (EventProcessor): Processador de eventos.
-        item (dict): O registro cru vindo da tabela `webhook_inbox`.
-    """
-    inbox_id = item["id"]
     try:
-        # Executa operações de banco (síncronas) em uma thread separada
-        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, "processing")
+        # 1. Marca como processando no banco (se tiver ID)
+        if inbox_id:
+            db_repo.update_inbox_status(inbox_id, "processing")
 
-        network_str = item["network"]
-        payload = item["payload"]
-
-        # Normalização
+        # 2. Converte string para Enum
         if network_str == NetworkType.BUYGOODS.value:
             network = NetworkType.BUYGOODS
         elif network_str == NetworkType.DIGISTORE24.value:
@@ -68,64 +35,65 @@ async def process_single_webhook(db_repo, normalizer, processor, item):
         else:
             raise ValueError(f"Rede desconhecida: {network_str}")
 
+        # 3. Normaliza
         normalized_event = normalizer.normalize(network, payload)
+
+        # 4. Processa (Regras de Negócio)
         success = await processor.process_event(normalized_event)
 
-        status = "processed" if success else "processed"
-        msg = None if success else "Ignored/Duplicate"
+        # 5. Atualiza Status Final
+        if inbox_id:
+            status = "processed" if success else "processed_with_ignored"
+            msg = None if success else "Ignored/Duplicate/Cancel"
+            db_repo.update_inbox_status(inbox_id, status, msg)
 
-        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, status, msg)
+        logger.info(f"Job Finalizado | Order: {normalized_event.order_id}")
 
     except Exception as e:
-        logger.error(f"Falha no webhook {inbox_id}: {e}")
-        await asyncio.to_thread(db_repo.update_inbox_status, inbox_id, "failed", str(e))
+        logger.error(f"Falha no Job {inbox_id}: {e}")
+        if inbox_id:
+            db_repo.update_inbox_status(inbox_id, "failed", str(e))
+
+        # Raise para o ARQ tentar novamente (Retry)
+        # raise e
 
 
-async def run_worker():
-    """
-    Loop principal do Worker.
-
-    Inicializa as dependências (Banco, Slack, Processors) e entra em
-    um loop infinito (controlado por RUNNING) que:
-    1. Busca um lote de webhooks pendentes (FIFO).
-    2. Dispara o processamento de todos eles em paralelo (`asyncio.gather`).
-    3. Aguarda 5 segundos se não houver trabalho.
-    """
-    logger.info("Worker Async V2 iniciado. Aguardando webhooks...")
-
+async def startup(ctx):
+    """Executado uma vez quando o container worker inicia."""
+    logger.info("Inicializando Worker ARQ...")
     settings = get_settings()
+
+    # Inicializa conexões e serviços
     db_repo = DatabaseRepository(settings)
     slack = SlackService(settings, db_repo)
-    normalizer = PayloadNormalizer()
-    processor = EventProcessor(db_repo, slack_service=slack)
 
-    while RUNNING:
-        try:
-            # 1. Busca Pendentes (thread separada)
-            pendings = await asyncio.to_thread(db_repo.fetch_pending_webhooks, limit=10)
+    # Injeta no contexto global do worker
+    ctx["db_repo"] = db_repo
+    ctx["normalizer"] = PayloadNormalizer()
+    ctx["processor"] = EventProcessor(db_repo, slack_service=slack)
 
-            if not pendings:
-                # Sleep não bloqueante
-                await asyncio.sleep(5)
-                continue
-
-            logger.info(f"Processo em paralelo de {len(pendings)} webhooks...")
-
-            # Lista de Tarefas (thread)
-            tasks = [
-                process_single_webhook(db_repo, normalizer, processor, item)
-                for item in pendings
-            ]
-
-            # O gather espera todos terminarem.
-            await asyncio.gather(*tasks)
-
-        except Exception as main_e:
-            logger.exception(f"Erro no loop do worker: {main_e}")
-            await asyncio.sleep(5)
-
-    logger.info("Worker finalizado.")
+    logger.info("⚡ Worker pronto e conectado ao Redis.")
 
 
-if __name__ == "__main__":
-    asyncio.run(run_worker())
+async def shutdown(ctx):
+    logger.info("Desligando Worker...")
+
+
+class WorkerSettings:
+    """Configuração lida pelo comando 'arq app.worker.WorkerSettings'"""
+
+    settings = get_settings()
+
+    redis_settings = RedisSettings(host=settings.redis_host, port=settings.redis_port)
+
+    on_startup = startup
+    on_shutdown = shutdown
+
+    # Lista de funções habilitadas
+    functions = [task_process_webhook]
+
+    # Concorrência: Processa até 20 webhooks simultâneos
+    max_jobs = 20
+
+    # Timeout: Mata o job se demorar mais de 60s
+    job_timeout = 60
