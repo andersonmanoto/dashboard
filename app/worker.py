@@ -72,7 +72,7 @@ async def startup(ctx):
     ctx["normalizer"] = PayloadNormalizer()
     ctx["processor"] = EventProcessor(db_repo, slack_service=slack)
 
-    logger.info("⚡ Worker pronto e conectado ao Redis.")
+    logger.info("Worker pronto e conectado ao Redis.")
 
 
 async def shutdown(ctx):
