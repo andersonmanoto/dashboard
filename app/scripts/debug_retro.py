@@ -20,6 +20,7 @@ class MockProcessor(EventProcessor):
     Substitui a camada de persistência (Supabase) por um método "pass-through",
     que apenas devolve o evento processado para ser impresso no terminal.
     """
+
     def __init__(self):
         """Inicializa o mock sem dependências de banco."""
         pass

@@ -145,14 +145,16 @@ class EventProcessor:
                 aff_id=external_aff_id,
                 aff_name=aff_name,
                 status=AffiliateStatus.ACTIVE,
-                tear_id=default_tear_id
+                tear_id=default_tear_id,
             )
 
             try:
                 affiliate = self.db.create_affiliate(new_affiliate)
             except Exception:
                 # Fallback em caso de race condition
-                affiliate = self.db.get_affiliate_by_external_id(network, external_aff_id)
+                affiliate = self.db.get_affiliate_by_external_id(
+                    network, external_aff_id
+                )
 
         if affiliate and affiliate.id:
             event.affiliate_id = affiliate.id

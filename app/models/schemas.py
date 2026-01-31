@@ -14,6 +14,7 @@ class OrderDetails(BaseModel):
     Armazena dados brutos vindos do webhook que ajudam a identificar
     o item vendido, como SKUs, nomes externos e códigos de checkout.
     """
+
     external_product_id: Optional[str] = None
     external_checkout_code: Optional[str] = None
     external_affiliate_id: Optional[str] = None
@@ -29,6 +30,7 @@ class ShippingDetails(BaseModel):
     """
     Dados de entrega e localização do cliente.
     """
+
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
@@ -44,6 +46,7 @@ class NormalizedEvent(BaseModel):
     das diversas redes (BuyGoods, DigiStore) em uma estrutura padrão unificada.
     Contém desde dados financeiros até informações de rastreamento (tracking).
     """
+
     # Identificação
     network: NetworkType
     order_id: str
@@ -140,6 +143,7 @@ class SalesStatus(BaseModel):
     alimenta a tabela `sales_status`, usada para calcular o "Status Atual"
     de uma venda (ex: se ela foi reembolsada, sofreu chargeback, etc.).
     """
+
     event_id: UUID
     order_id: str
     affiliate_id: Optional[UUID] = None
@@ -161,6 +165,7 @@ class CheckoutInfo(BaseModel):
     Usado pelo repositório para retornar os dados encontrados na tabela
     `checkouts` (vínculo entre código do produto e etapa do funil).
     """
+
     checkout_id: UUID
     product_id: UUID
     funnel_stage: Optional[str] = None
@@ -171,6 +176,7 @@ class Affiliate(BaseModel):
     """
     Representação de um Afiliado no sistema.
     """
+
     id: Optional[UUID] = None
     network: NetworkType
     aff_id: str
@@ -188,6 +194,7 @@ class MissingCodename(BaseModel):
     Usado para registrar quando um webhook chega com um código de produto
     (codename) que não existe no banco de dados, facilitando a auditoria.
     """
+
     network: str
     order_id: str
     product_name: Optional[str] = None

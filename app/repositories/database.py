@@ -57,7 +57,7 @@ class DatabaseRepository:
 
             if response.data:
                 return UUID(response.data[0]["id"])
-            
+
             logger.warning("ALERTA: Tear Number 0 não encontrado no banco!")
             return None
 

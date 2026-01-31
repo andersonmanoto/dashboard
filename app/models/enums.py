@@ -7,6 +7,7 @@ class NetworkType(str, Enum):
 
     Identifica a origem do webhook ou do arquivo importado.
     """
+
     BUYGOODS = "BuyGoods"
     DIGISTORE24 = "DigiStore24"
 
@@ -18,6 +19,7 @@ class ActionType(str, Enum):
     Normaliza os diferentes status que as plataformas enviam (ex: sale, refund, rebill)
     para um formato único interno, facilitando o processamento de regras de negócio.
     """
+
     SALE = "sale"
     NEWORDER = "neworder"
     UPSELL = "upsell"
@@ -31,6 +33,7 @@ class AffiliateStatus(str, Enum):
     """
     Status de operação de um afiliado no sistema.
     """
+
     ACTIVE = "active"
     INACTIVE = "inactive"
 
