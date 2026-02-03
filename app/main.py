@@ -184,35 +184,30 @@ async def webhook_buygoods(
 
 
 @app.get("/digistore24/{secret_token}")
-@app.post("/digistore24/{secret_token}")
 async def webhook_digistore24(
     secret_token: str,
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict:
     """
-    Recebe Webhooks da DigiStore24 (Redis Direct).
-
-    Envia diretamente para a fila do Redis.
-    Aceita tanto GET quanto POST conforme documentação da DS24.
+    Recebe Postbacks da DigiStore24 via GET.
+    
+    O payload vem nos Query Parameters da URL.
+    Enfileira diretamente no Redis para processamento assíncrono.
     """
     verify_secret_token(secret_token, settings)
 
     try:
-        # Extrai payload
-        if request.method == "GET":
-            payload = dict(request.query_params)
-        else:
-            payload = await extract_payload(request)
+        # Extrai os parâmetros da URL como um dicionário Python
+        payload = dict(request.query_params)
 
         order_id = payload.get("order_id")
         action = payload.get("transaction_type", "sale")
 
-        logger.info(
-            f"DigiStore24: Recebido Order {order_id} ({action}) via {request.method}"
-        )
+        logger.info(f"DigiStore24: Recebido Order {order_id} ({action}) via GET")
 
-        # Enfileira no Redis (inbox_id=None pois não salvamos na inbox nesta rota)
+        # Enfileira no Redis
+        # Note: inbox_id=None pois não salvamos na tabela 'webhook_inbox' para DS24
         await request.app.state.redis_pool.enqueue_job(
             "task_process_webhook",
             network_str=NetworkType.DIGISTORE24.value,

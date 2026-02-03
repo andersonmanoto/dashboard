@@ -183,24 +183,59 @@ class PayloadNormalizer:
     def _normalize_digistore24(self, payload: dict, order_id: str) -> NormalizedEvent:
         """
         Aplica regras de mapeamento específicas da DigiStore24.
+        
+        Realiza a tradução de status (ex: 'payment' -> 'neworder') e prepara
+        os identificadores de produto para o processador.
         """
+        # 1. Parse de Data
         event_date, event_time = parse_date(
             payload.get("datetime_full", ""), NetworkType.DIGISTORE24
         )
 
+        # 2. Nome do Cliente
         customer_name = self._build_full_name(
             None, payload.get("first_name"), payload.get("last_name")
         )
 
-        # DigiStore pode ter campo específico is_test_payment
-        is_test = self._parse_is_test(
-            payload, "is_test_payment"
-        ) or self._parse_is_test(payload)
+        # 3. Flags (Teste e Upsell)
+        # Verifica campo específico ou flag genérica
+        is_test = self._parse_is_test(payload, "is_test_payment") or self._parse_is_test(payload)
+        
+        # A DigiStore marca upsell se 'order_type' for 'upsell' OU se 'upsell_no' for diferente de 0
+        is_upsell = (
+            payload.get("order_type") == "upsell" 
+            or str(payload.get("upsell_no", "0")) != "0"
+        )
+
+        # 4. Tradução de ActionType (Lógica Unificada V2)
+        raw_type = payload.get("transaction_type", "sale").lower()
+        
+        if raw_type == "payment":
+            # REGRA DEFINIDA: Payment sempre entra como NEWORDER.
+            # A distinção de Upsell é feita exclusivamente pelo campo booleano is_upsell.
+            action_type = ActionType.NEWORDER
+                
+        elif raw_type == "refund":
+            action_type = ActionType.REFUND
+            
+        elif raw_type == "chargeback":
+            action_type = ActionType.CHARGEBACK
+            
+        elif raw_type == "rebill":
+            action_type = ActionType.REBILL
+            
+        else:
+            # Fallback de segurança
+            logger.warning(f"DigiStore: Tipo desconhecido '{raw_type}'. Assumindo NEWORDER.")
+            action_type = ActionType.NEWORDER
+
+        # 5. Identificadores de Produto
+        product_id = payload.get("product_id")
 
         return NormalizedEvent(
             network=NetworkType.DIGISTORE24,
             order_id=order_id,
-            action_type=ActionType(payload.get("transaction_type", "sale")),
+            action_type=action_type,
             event_date=event_date,
             event_time=event_time,
             # Cliente
@@ -218,11 +253,12 @@ class PayloadNormalizer:
             sub_tiger_4=payload.get("sid4"),
             sub_tiger_5=payload.get("sid5"),
             # Flags
-            is_upsell=payload.get("order_type") == "upsell",
+            is_upsell=is_upsell,
             is_test=is_test,
             # Detalhes
             order_details=OrderDetails(
-                external_product_id=payload.get("product_id"),
+                external_product_id=product_id,
+                external_checkout_code=product_id,
                 external_affiliate_id=payload.get("affiliate_id"),
                 external_affiliate_name=payload.get("affiliate_name"),
                 product_name=payload.get("product_name"),
