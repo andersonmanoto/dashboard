@@ -1,7 +1,7 @@
 services:
   api:
     build: .
-    image: dashhook/api:2.3.0
+    image: localhost/dashhook/api:2.3.0
     container_name: dashhook-api
     restart: always
     env_file:
@@ -17,7 +17,7 @@ services:
 
   worker:
     build: .
-    image: dashhook/worker:2.3.0
+    image: localhost/dashhook/worker:2.3.0
     container_name: dashhook-worker
     restart: always
     env_file:
