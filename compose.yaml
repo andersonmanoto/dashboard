@@ -12,11 +12,6 @@ services:
     ports:
       - "8000:8000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "10"
     depends_on:
       - redis
 
@@ -31,28 +26,18 @@ services:
       - PYTHONPATH=/app:/app/app
       - REDIS_HOST=redis
     command: arq app.worker.WorkerSettings
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "5"
     depends_on:
       - redis
 
   redis:
-    image: redis:7-alpine
+    image: docker.io/library/redis:7-alpine
     container_name: dashhook-redis
     restart: always
     ports:
       - "6379:6379"
     command: redis-server --save 60 1 --loglevel warning
     volumes:
-      - redis_data:/data
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "5"
+      - ${REDIS_VOLUME:-redis_data}:/data:Z
 
 volumes:
   redis_data:
