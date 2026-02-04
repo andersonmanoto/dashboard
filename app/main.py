@@ -191,7 +191,7 @@ async def webhook_digistore24(
 ) -> dict:
     """
     Recebe Postbacks da DigiStore24 via GET.
-    
+
     O payload vem nos Query Parameters da URL.
     Enfileira diretamente no Redis para processamento assíncrono.
     """

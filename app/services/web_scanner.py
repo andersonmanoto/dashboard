@@ -4,10 +4,11 @@ import paramiko
 from loguru import logger
 from app.config import get_settings
 
+
 class WebScannerService:
     """
     Serviço de Scanner Remoto via SSH.
-    
+
     Substitui o crawler local por uma chamada RPC (Remote Procedure Call)
     via SSH que executa um script Python no servidor de destino.
     """
@@ -29,26 +30,26 @@ class WebScannerService:
             # 1. Conexão
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
+
             if debug:
                 logger.info(f"Conectando SSH em {self.host}:{self.port}...")
-                
+
             ssh.connect(
                 self.host,
                 port=self.port,
                 username=self.username,
                 password=self.password,
-                timeout=10
+                timeout=10,
             )
 
             # 2. Comando
             cmd = f"python3 {self.script_path} '{domain}' '{codename}'"
-            
+
             if debug:
                 logger.info(f"Executando comando remoto: {cmd}")
 
             stdin, stdout, stderr = ssh.exec_command(cmd)
-            
+
             # Lê saídas
             output = stdout.read().decode().strip()
             error_log = stderr.read().decode().strip()
@@ -79,7 +80,7 @@ class WebScannerService:
     async def run_scan(self, codename: str, domain_filter: str, debug: bool = False):
         """
         Executa o scan de forma assíncrona (Non-blocking).
-        
+
         Mantém a assinatura do método original para não quebrar o app/main.py.
         """
         if not domain_filter:
@@ -87,8 +88,8 @@ class WebScannerService:
 
         # Offload da operação bloqueante de I/O (SSH) para uma thread separada
         return await asyncio.to_thread(
-            self._execute_ssh_command, 
-            domain=domain_filter, 
-            codename=codename, 
-            debug=debug
+            self._execute_ssh_command,
+            domain=domain_filter,
+            codename=codename,
+            debug=debug,
         )
