@@ -39,7 +39,11 @@ class Settings(BaseSettings):
 
     # Web Scanner
     scanner_secret_token: str
-    structure_map_file: str = "structure_map.json"
+    ssh_host: str
+    ssh_username: str
+    ssh_password: str
+    ssh_port: int = 65002
+    remote_script_path: str = "/home/u463185610/scripts/get_codenames"
 
     # Slack
     slack_bot_token: str
