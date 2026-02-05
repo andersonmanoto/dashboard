@@ -125,7 +125,11 @@ class DatabaseRepository:
                 exclude_none=True,
             )
 
-            response = self.client.table("affiliates").insert(data).execute()
+            response = (
+                self.client.table("affiliates")
+                .upsert(data, on_conflict="aff_id, network") 
+                .execute()
+            )
 
             if response.data:
                 return Affiliate(**response.data[0])
@@ -133,7 +137,7 @@ class DatabaseRepository:
             return None
 
         except Exception as e:
-            logger.error(f"Erro ao criar afiliado: {e}")
+            logger.error(f"Erro ao criar/atualizar afiliado: {e}")
             return None
 
     # ========== CHECKOUTS ==========
