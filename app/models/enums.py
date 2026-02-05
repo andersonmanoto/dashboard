@@ -33,10 +33,26 @@ class AffiliateStatus(str, Enum):
     """
     Status de operação de um afiliado no sistema.
     """
-
     ACTIVE = "active"
     INACTIVE = "inactive"
 
+    @classmethod
+    def _missing_(cls, value):
+        """
+        Se vier 'ativo' do banco, converte para 'active'.
+        Isso evita o erro de validação do Pydantic.
+        """
+        if isinstance(value, str):
+            # Normaliza para minúsculo
+            normalized = value.lower().strip()
+            
+            # Mapeia Português -> Inglês
+            if normalized == "ativo":
+                return cls.ACTIVE
+            if normalized == "inativo":
+                return cls.INACTIVE
+                
+        return super()._missing_(value)
 
 # Actions que geram entrada na tabela sales_status
 TRACKABLE_ACTIONS = {
