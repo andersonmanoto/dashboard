@@ -3,7 +3,7 @@ services:
     build: .
     image: localhost/dashhook/api:2.3.0
     container_name: dashhook-api
-    restart: always
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -14,12 +14,13 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     depends_on:
       - redis
+    stop_grace_period: 20s
 
   worker:
     build: .
     image: localhost/dashhook/worker:2.3.0
     container_name: dashhook-worker
-    restart: always
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -28,16 +29,24 @@ services:
     command: arq app.worker.WorkerSettings
     depends_on:
       - redis
+    stop_grace_period: 30s
 
   redis:
     image: docker.io/library/redis:7-alpine
     container_name: dashhook-redis
-    restart: always
+    restart: unless-stopped
     ports:
       - "6379:6379"
-    command: redis-server --save 60 1 --loglevel warning
+    command:
+      [
+        "redis-server",
+        "--save", "60", "1",
+        "--loglevel", "warning",
+        "--shutdown-timeout", "30"
+      ]
     volumes:
       - ${REDIS_VOLUME:-redis_data}:/data:Z
+    stop_grace_period: 40s
 
 volumes:
   redis_data:
