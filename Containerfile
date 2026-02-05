@@ -8,19 +8,18 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m morpheus
 
 COPY requirements.txt .
-RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
 
-RUN useradd -m morpheus
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --default-timeout=1000 --no-cache-dir pandas numpy cryptography bcrypt paramiko && \
+    pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
 
-COPY . .
-
-RUN chown -R morpheus:morpheus /app
+COPY --chown=morpheus:morpheus . .
 
 USER morpheus
-
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
