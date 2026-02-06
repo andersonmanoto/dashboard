@@ -142,7 +142,6 @@ class DatabaseRepository:
 
     # ========== CHECKOUTS ==========
 
-    @lru_cache(maxsize=1000)
     def get_checkout_by_code(
         self, code: str, account_id: Optional[str] = None
     ) -> Optional[CheckoutInfo]:
@@ -160,34 +159,45 @@ class DatabaseRepository:
         Returns:
             Optional[CheckoutInfo]: Dados do funil e produto vinculado.
         """
+        # Cria o dicionário de cache na instância se não existir
+        if not hasattr(self, "_checkout_cache"):
+            self._checkout_cache = {}
+
+        # Gera a chave única
+        cache_key = f"{code}:{account_id}"
+
+        # Tenta pegar do cache
+        if cache_key in self._checkout_cache:
+            return self._checkout_cache[cache_key]
+
         try:
-            # Inicia a query base
+            # Se não tá no cache, busca no banco
             query = (
                 self.client.table("checkouts")
                 .select("id, product_id, funnel_stage, funnel_number, account_id")
                 .eq("checkout_code", code)
             )
 
-            # Busca pelo account_id
             if account_id:
                 query = query.eq("account_id", str(account_id))
 
-            # Executa e pega o que deu match (checkout_code + account_id)
             response = query.limit(1).execute()
 
             if not response.data:
-                # Se não achou com a conta específica,
-                # retorna None para evitar atribuição errada.
                 return None
 
             row = response.data[0]
 
-            return CheckoutInfo(
+            result = CheckoutInfo(
                 checkout_id=row["id"],
                 product_id=row["product_id"],
                 funnel_stage=row.get("funnel_stage"),
                 funnel_number=row.get("funnel_number"),
             )
+            
+            # Só salva no cache se achou
+            self._checkout_cache[cache_key] = result
+            return result
 
         except Exception:
             logger.exception(
@@ -195,7 +205,6 @@ class DatabaseRepository:
                 code,
                 account_id,
             )
-
             return None
 
     def find_checkout_by_product_name(
