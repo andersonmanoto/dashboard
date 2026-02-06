@@ -20,7 +20,7 @@ ssh root@webhook.tigeroffers.com
 # Instalar pacotes essenciais
 dnf install -y podman podman-compose nginx git policycoreutils-python-utils
 
-# (Opcional) Instalar Certbot para SSL
+# Instalar Certbot para SSL
 dnf install -y certbot python3-certbot-nginx
 ```
 
