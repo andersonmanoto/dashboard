@@ -12,6 +12,7 @@ Acesse o servidor via SSH utilizando o usuário `root`.
 ssh root@webhook.tigeroffers.com
 # Ou alternativamente pelo IP:
 # ssh root@31.97.6.214
+```
 
 ## Pré-requisitos do Servidor
 
@@ -24,19 +25,6 @@ dnf install -y certbot python3-certbot-nginx
 ```
 
 ## 2. Configuração do Usuário: dashboard# 🚀 Guia de Deploy: Podman Rootless + Systemd (Quadlets)
-
-Este documento descreve o processo passo a passo para configurar e atualizar o ambiente de produção no **AlmaLinux 9** utilizando **Podman Rootless** (sem privilégios de root) gerenciado nativamente pelo **Systemd**.
-
----
-
-## 1. Acesso ao Servidor
-
-Acesse o servidor via SSH utilizando o usuário `root`.
-
-```bash
-ssh root@webhook.tigeroffers.com
-# Ou alternativamente pelo IP:
-# ssh root@31.97.6.214
 
 Por segurança, não rodamos os containers como root. Criamos um usuário dedicado e configuramos o sistema para manter os serviços dele rodando mesmo após o logout.
 
@@ -51,7 +39,7 @@ loginctl enable-linger dashboard
 usermod -aG systemd-journal dashboard
 ```
 
-## 3. Instalação do Código (Como usuário dashboard)
+## 3. Instalação do Código (Como usuário `dashboard`)
 
 Agora, saia do root e logue como o usuário da aplicação: `su - dashboard`
 
