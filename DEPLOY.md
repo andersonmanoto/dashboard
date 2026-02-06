@@ -1,17 +1,22 @@
-🚀 Guia de Deploy: Podman Rootless + Systemd (Quadlets)
+# 🚀 Guia de Deploy: Podman Rootless + Systemd (Quadlets)
+
 Este guia descreve como configurar o ambiente de produção no AlmaLinux 9 (ou RHEL/Rocky 9) utilizando Podman no modo Rootless (sem root) gerenciado nativamente pelo Systemd.
 
-Pré-requisitos do Servidor
-Bash
+## Pré-requisitos do Servidor
+
+```bash
 # Instalar pacotes essenciais
 dnf install -y podman podman-compose nginx git policycoreutils-python-utils
 
 # (Opcional) Instalar Certbot para SSL
 dnf install -y certbot python3-certbot-nginx
-1. Configuração do Usuário (Root)
+```
+
+## 1. Configuração do Usuário (Root)
+
 Por segurança, não rodamos os containers como root. Criamos um usuário dedicado e configuramos o sistema para manter os serviços dele rodando mesmo após o logout.
 
-Bash
+```bash
 # 1. Criar o usuário
 useradd dashboard
 
@@ -20,10 +25,13 @@ loginctl enable-linger dashboard
 
 # 3. Permitir que o usuário leia logs do sistema
 usermod -aG systemd-journal dashboard
-2. Instalação do Código (Como usuário dashboard)
-Agora, saia do root e logue como o usuário da aplicação: su - dashboard
+```
 
-Bash
+## 2. Instalação do Código (Como usuário dashboard)
+
+Agora, saia do root e logue como o usuário da aplicação: `su - dashboard`
+
+```bash
 # 1. Clonar o repositório
 git clone https://github.com/andersonmanoto/dashboard.git /opt/dashboard
 # (Se der erro de permissão na pasta /opt, peça ao root para dar chown dashboard:dashboard /opt/dashboard)
@@ -33,33 +41,45 @@ cd /opt/dashboard
 # 2. Configurar variáveis de ambiente
 cp .env.example .env
 nano .env # Edite com as credenciais reais de produção
-3. Configuração dos Quadlets (Systemd)
-O Podman moderno usa arquivos .container para gerar serviços Systemd automaticamente.
+```
+
+## 3. Configuração dos Quadlets (Systemd)
+
+O Podman moderno usa arquivos `.container` para gerar serviços Systemd automaticamente.
 
 Crie o diretório de configuração:
 
-Bash
+```bash
 mkdir -p ~/.config/containers/systemd/
 cd ~/.config/containers/systemd/
+```
+
 Crie os 5 arquivos abaixo dentro desta pasta:
 
-3.1. Rede (tiger.network)
-Ini, TOML
+### 3.1. Rede (`tiger.network`)
+
+```ini
 [Unit]
 Description=Rede Tiger Dashboard
 
 [Network]
 NetworkName=tiger_network
 Driver=bridge
-3.2. Volume (redis_data.volume)
-Ini, TOML
+```
+
+### 3.2. Volume (`redis_data.volume`)
+
+```ini
 [Unit]
 Description=Volume Persistente Redis
 
 [Volume]
 VolumeName=redis_data
-3.3. Banco de Dados (dashhook-redis.container)
-Ini, TOML
+```
+
+### 3.3. Banco de Dados (`dashhook-redis.container`)
+
+```ini
 [Unit]
 Description=Redis Container
 After=network-online.target
@@ -75,8 +95,11 @@ Exec=redis-server --save 60 1 --loglevel warning --shutdown-timeout 30
 
 [Install]
 WantedBy=default.target
-3.4. API (dashhook-api.container)
-Ini, TOML
+```
+
+### 3.4. API (`dashhook-api.container`)
+
+```ini
 [Unit]
 Description=Dashboard API
 After=dashhook-redis.service
@@ -94,8 +117,11 @@ Exec=uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 [Install]
 WantedBy=default.target
-3.5. Worker (dashhook-worker.container)
-Ini, TOML
+```
+
+### 3.5. Worker (`dashhook-worker.container`)
+
+```ini
 [Unit]
 Description=Dashboard Worker
 After=dashhook-redis.service
@@ -112,10 +138,13 @@ Exec=arq app.worker.WorkerSettings
 
 [Install]
 WantedBy=default.target
-4. Build e Start (Como usuário dashboard)
+```
+
+## 4. Build e Start (Como usuário dashboard)
+
 Com os arquivos de configuração prontos, vamos construir as imagens e iniciar o sistema.
 
-Bash
+```bash
 # 1. Construir as imagens locais
 cd /opt/dashboard
 
@@ -137,12 +166,15 @@ systemctl --user enable --now dashhook-worker
 
 # 5. Verificar status
 systemctl --user status dashhook-api
-5. Configuração do Proxy Nginx (Como ROOT)
+```
+
+## 5. Configuração do Proxy Nginx (Como ROOT)
+
 O container roda na porta 8000. O Nginx expõe na 80/443 com SSL.
 
-Arquivo: /etc/nginx/conf.d/webhook.conf
+**Arquivo:** `/etc/nginx/conf.d/webhook.conf`
 
-Nginx
+```nginx
 server {
     listen 80;
     server_name webhook.seu-dominio.com;
@@ -171,10 +203,13 @@ server {
         proxy_set_header Connection "upgrade";
     }
 }
-🔄 Fluxo de Atualização (CI/CD Manual)
-Quando você fizer alterações no código e der git pull, siga estes passos para atualizar sem downtime:
+```
 
-Bash
+## 🔄 Fluxo de Atualização (CI/CD Manual)
+
+Quando você fizer alterações no código e der `git pull`, siga estes passos para atualizar sem downtime:
+
+```bash
 # 1. Baixar código novo
 cd /opt/dashboard
 git pull origin main
@@ -190,8 +225,11 @@ systemctl --user restart dashhook-worker
 
 # 4. Limpar lixo (opcional)
 podman image prune -f
-🛠 Comandos Úteis
-Bash
+```
+
+## 🛠 Comandos Úteis
+
+```bash
 # Ver logs da API em tempo real
 journalctl --user -fu dashhook-api
 
@@ -203,3 +241,4 @@ journalctl --user -fu dashhook-redis
 
 # Parar tudo
 systemctl --user stop dashhook-api dashhook-worker dashhook-redis
+```
