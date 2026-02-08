@@ -193,17 +193,16 @@ async def webhook_digistore24(
     secret_token: str,
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
+    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
 ) -> dict:
     """
     Recebe Postbacks da DigiStore24 via GET.
-
-    O payload vem nos Query Parameters da URL.
-    Enfileira diretamente no Redis para processamento assíncrono.
+    Agora salva na Inbox antes de enfileirar (Segurança Máxima).
     """
     verify_secret_token(secret_token, settings)
 
     try:
-        # Extrai os parâmetros da URL como um dicionário Python
+        # Extrai os parâmetros da URL
         payload = dict(request.query_params)
 
         order_id = payload.get("order_id")
@@ -211,13 +210,18 @@ async def webhook_digistore24(
 
         logger.info(f"DigiStore24: Recebido Order {order_id} ({action}) via GET")
 
-        # Enfileira no Redis
-        # Note: inbox_id=None pois não salvamos na tabela 'webhook_inbox' para DS24
+        # 2. NOVO: Salva no Banco PRIMEIRO
+        inbox_id = db_repo.create_inbox_entry(
+            network=NetworkType.DIGISTORE24.value, 
+            payload=payload
+        )
+
+        # 3. ATUALIZADO: Passa o inbox_id para o Redis
         await request.app.state.redis_pool.enqueue_job(
             "task_process_webhook",
             network_str=NetworkType.DIGISTORE24.value,
             payload=payload,
-            inbox_id=None,
+            inbox_id=inbox_id,
         )
 
         return {"status": "received", "id": order_id}
