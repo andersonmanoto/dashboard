@@ -210,13 +210,13 @@ async def webhook_digistore24(
 
         logger.info(f"DigiStore24: Recebido Order {order_id} ({action}) via GET")
 
-        # 2. NOVO: Salva no Banco PRIMEIRO
+        # 2. Salva no Banco PRIMEIRO
         inbox_id = db_repo.create_inbox_entry(
             network=NetworkType.DIGISTORE24.value, 
             payload=payload
         )
 
-        # 3. ATUALIZADO: Passa o inbox_id para o Redis
+        # 3. Passa o inbox_id para o Redis
         await request.app.state.redis_pool.enqueue_job(
             "task_process_webhook",
             network_str=NetworkType.DIGISTORE24.value,
