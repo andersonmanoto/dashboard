@@ -20,6 +20,7 @@ from fastapi import (
     status,
 )
 from fastapi.security import APIKeyHeader
+from starlette.requests import ClientDisconnect
 from loguru import logger
 
 from app.config import Settings, get_settings
@@ -177,6 +178,10 @@ async def webhook_buygoods(
 
         logger.info(f"BuyGoods: Salvo na Inbox e enfileirado no Redis. ID: {inbox_id}")
         return {"status": "queued", "inbox_id": inbox_id}
+    
+    except ClientDisconnect:
+        logger.warning("BuyGoods: Cliente desconectou antes de enviar o payload completo.")
+        return {"status": "incomplete", "message": "Client disconnected"}
 
     except Exception as e:
         logger.exception(f"Erro ao processar webhook BuyGoods: {e}")
