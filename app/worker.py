@@ -39,8 +39,18 @@ async def task_process_webhook(
 
         logger.info(f"Job finalizado | Order={normalized_event.order_id}")
 
+    except ValueError as e:
+        logger.warning(
+            f"Job abortado (Dados Inválidos) | Inbox={inbox_id} | Motivo: {e}"
+        )
+
+        if inbox_id:
+            db_repo.update_inbox_status(inbox_id, "failed", str(e))
+
+        return
+
     except Exception as e:
-        logger.exception(f"Falha no Job | Inbox={inbox_id}")
+        logger.exception(f"Falha Crítica no Job | Inbox={inbox_id}")
 
         if inbox_id:
             db_repo.update_inbox_status(inbox_id, "failed", str(e))
