@@ -127,7 +127,7 @@ class DatabaseRepository:
 
             response = (
                 self.client.table("affiliates")
-                .upsert(data, on_conflict="aff_id, network") 
+                .upsert(data, on_conflict="aff_id, network")
                 .execute()
             )
 
@@ -194,7 +194,7 @@ class DatabaseRepository:
                 funnel_stage=row.get("funnel_stage"),
                 funnel_number=row.get("funnel_number"),
             )
-            
+
             # Só salva no cache se achou
             self._checkout_cache[cache_key] = result
             return result
@@ -478,3 +478,16 @@ class DatabaseRepository:
             self.client.table("webhook_inbox").update(data).eq("id", inbox_id).execute()
         except Exception as e:
             logger.error(f"Erro ao atualizar inbox {inbox_id}: {e}")
+
+    def check_connection(self) -> bool:
+        """
+        Verifica se a conexão com o Supabase está ativa (Ping).
+        Retorna True se conseguir ler a tabela de afiliados.
+        """
+        try:
+            # Query ultra-leve: Select ID limit 1
+            self.client.table("affiliates").select("id").limit(1).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Health Check DB falhou: {e}")
+            return False
