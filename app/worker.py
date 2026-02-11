@@ -64,6 +64,8 @@ async def startup(ctx):
 
     db_repo = DatabaseRepository(settings)
     slack = SlackService(settings, db_repo)
+    # Carrega as Networks do banco no cache
+    db_repo.load_networks_cache()
 
     ctx["db_repo"] = db_repo
     ctx["normalizer"] = PayloadNormalizer()
