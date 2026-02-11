@@ -49,6 +49,7 @@ class NormalizedEvent(BaseModel):
 
     # Identificação
     network: NetworkType
+    network_id: Optional[UUID] = None
     order_id: str
     action_type: ActionType
     account_id: Optional[str] = None
@@ -149,6 +150,7 @@ class SalesStatus(BaseModel):
     affiliate_id: Optional[UUID] = None
     product_id: Optional[UUID] = None
     network: NetworkType
+    network_id: Optional[UUID] = None
     status_type: ActionType
     status_reason: Optional[str] = None
     status_date: Optional[str] = None

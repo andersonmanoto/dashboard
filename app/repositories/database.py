@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 from uuid import UUID
 
 from config import Settings
@@ -19,19 +19,16 @@ class DatabaseRepository:
     """
     Repositório central para operações no Supabase.
 
-    Gerencia afiliados, checkouts, logs de erro e o ciclo de vida
-    dos eventos na 'Inbox'.
+    Gerencia afiliados, checkouts, logs de erro, networks normalizadas
+    e o ciclo de vida dos eventos na 'Inbox'.
     """
+
+    # Cache: "BuyGoods" -> "uuid-do-banco"
+    _networks_cache: Dict[str, str] = {}
 
     def __init__(self, settings: Settings):
         """
         Inicializa a conexão com o Supabase.
-
-        Args:
-            settings (Settings): Configurações contendo URL e Key do projeto.
-
-        Raises:
-            ValueError: Se as credenciais não estiverem presentes no .env.
         """
         if not settings.supabase_url or not settings.supabase_key:
             raise ValueError("Credenciais do Supabase não configuradas")
@@ -40,6 +37,80 @@ class DatabaseRepository:
             settings.supabase_url, settings.supabase_key
         )
         logger.info("Conexão com Supabase estabelecida")
+
+    def load_networks_cache(self) -> None:
+        """
+        Carrega todas as redes do banco para a memória na inicialização.
+        Chamado pelo lifespan no main.py.
+        """
+        try:
+            # Busca ID e Nome de todas as redes
+            response = self.client.table("networks").select("id, name").execute()
+
+            if response.data:
+                # Limpa e popula o cache
+                DatabaseRepository._networks_cache.clear()
+                for row in response.data:
+                    name = row["name"]
+                    uid = row["id"]
+                    DatabaseRepository._networks_cache[name] = uid
+
+                logger.info(
+                    f"Cache de Networks carregado: {len(DatabaseRepository._networks_cache)} redes."
+                )
+        except Exception as e:
+            logger.error(f"Erro ao carregar cache de networks: {e}")
+
+    def get_network_id(self, network_name: Union[str, NetworkType]) -> Optional[str]:
+        """
+        Busca o UUID da rede. Se não existir no cache/banco, CRIA automaticamente.
+        """
+        # 1. Normaliza input (Enum -> str)
+        name = (
+            network_name.value
+            if isinstance(network_name, NetworkType)
+            else str(network_name)
+        )
+
+        # 2. Tenta Cache (Rápido - O(1))
+        if name in DatabaseRepository._networks_cache:
+            return DatabaseRepository._networks_cache[name]
+
+        # 3. Se não tá no cache, tenta criar (Auto-provisioning)
+        try:
+            logger.warning(f"Rede nova detectada: '{name}'. Criando registro...")
+
+            # Tenta inserir (Upsert para garantir unicidade)
+            response = (
+                self.client.table("networks")
+                .upsert({"name": name}, on_conflict="name")
+                .execute()
+            )
+
+            if response.data:
+                new_id = response.data[0]["id"]
+                DatabaseRepository._networks_cache[name] = new_id
+                return new_id
+
+            # Fallback: Se upsert não retornou dados, busca o ID
+            response = (
+                self.client.table("networks")
+                .select("id")
+                .eq("name", name)
+                .single()
+                .execute()
+            )
+
+            if response.data:
+                existing_id = response.data["id"]
+                DatabaseRepository._networks_cache[name] = existing_id
+                return existing_id
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Erro crítico ao resolver network_id para '{name}': {e}")
+            return None
 
     @lru_cache(maxsize=1)
     def get_default_tear_id(self) -> Optional[UUID]:
@@ -65,25 +136,12 @@ class DatabaseRepository:
             logger.error(f"Erro ao buscar default tear id: {e}")
             return None
 
-    # ========== AFFILIATES ==========
-
     @lru_cache(maxsize=1000)
     def get_affiliate_by_external_id(
         self, network: Union[NetworkType, str], aff_id: str
     ) -> Optional[Affiliate]:
         """
         Busca um afiliado pelo seu ID na plataforma de origem.
-
-        Utiliza cache em memória (`lru_cache`) para evitar chamadas repetidas
-        ao banco durante processamentos em lote (bulk), já que os dados
-        de afiliados mudam pouco.
-
-        Args:
-            network (Union[NetworkType, str]): Rede (ex: BuyGoods).
-            aff_id (str): ID do afiliado na rede (ex: '12345').
-
-        Returns:
-            Optional[Affiliate]: Objeto Affiliate se encontrado, None caso contrário.
         """
         network_value = network.value if isinstance(network, NetworkType) else network
 
@@ -111,12 +169,6 @@ class DatabaseRepository:
     def create_affiliate(self, affiliate: Affiliate) -> Optional[Affiliate]:
         """
         Cadastra um novo afiliado no banco de dados.
-
-        Args:
-            affiliate (Affiliate): Objeto com os dados do afiliado.
-
-        Returns:
-            Optional[Affiliate]: O afiliado criado (com ID gerado) ou None se falhar.
         """
         try:
             data = affiliate.model_dump(
@@ -140,38 +192,21 @@ class DatabaseRepository:
             logger.error(f"Erro ao criar/atualizar afiliado: {e}")
             return None
 
-    # ========== CHECKOUTS ==========
-
     def get_checkout_by_code(
         self, code: str, account_id: Optional[str] = None
     ) -> Optional[CheckoutInfo]:
         """
         Busca informações de checkout baseadas no código do produto (codename).
-
-        A busca utiliza uma chave composta (checkout_code + account_id) para
-        resolver colisões onde o mesmo código (ex: 'nat3u') é usado em
-        contas diferentes para produtos diferentes.
-
-        Args:
-            code (str): Código do produto vindo no webhook.
-            account_id (Optional[str]): ID da conta na plataforma (para desambiguação).
-
-        Returns:
-            Optional[CheckoutInfo]: Dados do funil e produto vinculado.
         """
-        # Cria o dicionário de cache na instância se não existir
         if not hasattr(self, "_checkout_cache"):
             self._checkout_cache = {}
 
-        # Gera a chave única
         cache_key = f"{code}:{account_id}"
 
-        # Tenta pegar do cache
         if cache_key in self._checkout_cache:
             return self._checkout_cache[cache_key]
 
         try:
-            # Se não tá no cache, busca no banco
             query = (
                 self.client.table("checkouts")
                 .select("id, product_id, funnel_stage, funnel_number, account_id")
@@ -195,7 +230,6 @@ class DatabaseRepository:
                 funnel_number=row.get("funnel_number"),
             )
 
-            # Só salva no cache se achou
             self._checkout_cache[cache_key] = result
             return result
 
@@ -212,25 +246,13 @@ class DatabaseRepository:
     ) -> Optional[CheckoutInfo]:
         """
         Busca fallback por nome do produto (Partial Match).
-
-        Acionado quando o `checkout_code` não é encontrado. Tenta localizar
-        o produto pelo nome (normalizado) para recuperar as informações do funil.
-        NÃO utiliza cache pois é uma operação de exceção/contingência.
-
-        Args:
-            product_name (str): Nome do produto vindo no webhook.
-
-        Returns:
-            Optional[CheckoutInfo]: Dados do checkout se houver match de nome.
         """
         if not product_name:
             return None
 
         try:
-            # Normaliza nome do input
             clean_input = product_name.lower().replace(" ", "")
 
-            # Busca todos os produtos
             products_response = (
                 self.client.table("products").select("id, name").execute()
             )
@@ -238,22 +260,18 @@ class DatabaseRepository:
             if not products_response.data:
                 return None
 
-            # Ordena por tamanho (maior primeiro) para evitar falsos positivos
             products = sorted(
                 products_response.data,
                 key=lambda x: len(x.get("name", "")),
                 reverse=True,
             )
 
-            # Busca match
             for product in products:
                 db_name = product.get("name", "").lower().replace(" ", "")
                 if db_name and db_name in clean_input:
                     logger.info(
                         f"Match por nome: '{product_name}' -> '{product['name']}'"
                     )
-
-                    # Busca checkout vinculado
                     return self._get_checkout_by_product_id(product["id"])
 
             return None
@@ -263,15 +281,6 @@ class DatabaseRepository:
             return None
 
     def _get_checkout_by_product_id(self, product_id: UUID) -> Optional[CheckoutInfo]:
-        """
-        Método auxiliar para recuperar dados de checkout dado um Product ID.
-
-        Args:
-            product_id (UUID): ID do produto no banco.
-
-        Returns:
-            Optional[CheckoutInfo]: Dados do checkout.
-        """
         try:
             response = (
                 self.client.table("checkouts")
@@ -296,26 +305,23 @@ class DatabaseRepository:
             logger.error(f"Erro ao buscar checkout por product_id: {e}")
             return None
 
-    # ========== TRANSACTIONS (RPC) ==========
-
     def save_event_transaction(
         self, event: NormalizedEvent, status: Optional[SalesStatus] = None
     ) -> Optional[dict]:
         """
         Persiste o Evento e o Status Financeiro atomicamente.
-
-        Utiliza uma Stored Procedure (RPC) no Supabase (`save_event_transaction`)
-        para garantir que ou tudo é salvo ou nada é salvo, mantendo a integridade
-        entre a tabela de eventos (events) e a de status (sales_status).
-
-        Args:
-            event (NormalizedEvent): O evento principal normalizado.
-            status (Optional[SalesStatus]): O status financeiro (se aplicável).
-
-        Returns:
-            Optional[dict]: O registro salvo retornado pelo banco.
+        AGORA: Resolve o nome da rede para UUID antes de enviar ao banco.
         """
         try:
+            # 1. Resolve Network ID para o Evento
+            # Busca no cache ou cria se não existir
+            event.network_id = self.get_network_id(event.network)
+
+            # 2. Resolve Network ID para o Status (se houver)
+            if status:
+                status.network_id = event.network_id
+
+            # Serializa para JSON
             event_json = event.model_dump(mode="json", exclude_none=True)
 
             status_json = None
@@ -324,7 +330,6 @@ class DatabaseRepository:
                     mode="json", exclude={"event_id"}, exclude_none=True
                 )
 
-            # Chama a função no Supabase
             response = self.client.rpc(
                 "save_event_transaction",
                 {"event_data": event_json, "status_data": status_json},
@@ -337,7 +342,8 @@ class DatabaseRepository:
                 )
 
                 logger.info(
-                    f"Transação OK | Order: {event.order_id} | Event ID: {event_id}"
+                    f"Transação OK | Order: {event.order_id} |"
+                    f"NetID: {event.network_id} | DB_ID: {event_id}"
                 )
 
                 return saved_data
@@ -348,24 +354,13 @@ class DatabaseRepository:
             logger.error(f"Erro na transação RPC: {e}")
             raise e
 
-    # ========== MISSING CODENAMES ==========
-
     def register_missing_codename(self, data: MissingCodename) -> None:
         """
-        Registra falha na identificação de produto (Codename não encontrado).
-
-        Útil para auditoria e correção de funis. Permite duplicatas de codename
-        apenas se o `order_id` for diferente, garantindo contagem real de
-        ordens sem informação de checkout por erro de configuração.
-
-        Args:
-            data (MissingCodename): Dados do erro para log.
+        Registra falha na identificação de produto.
         """
         try:
             payload = data.model_dump(mode="json")
 
-            # Upsert com ignore_duplicates para respeitar
-            # a constraint unique_codename_account
             response = (
                 self.client.table("missing_codenames")
                 .upsert(
@@ -376,8 +371,6 @@ class DatabaseRepository:
                 .execute()
             )
 
-            # Se response.data vier preenchido,
-            # significa que houve inserção/atualização
             if response.data:
                 saved_id = response.data[0].get("id")
                 logger.info(f"Missing Codename salvo: {data.codename} | ID: {saved_id}")
@@ -386,15 +379,6 @@ class DatabaseRepository:
             logger.error(f"Erro ao salvar missing_codename: {e}")
 
     def get_missing_codenames(self, limit: int = 100) -> list[dict]:
-        """
-        Recupera lista de erros de codename não resolvidos.
-
-        Args:
-            limit (int): Número máximo de registros a retornar.
-
-        Returns:
-            list[dict]: Lista de registros de erro.
-        """
         try:
             response = (
                 self.client.table("missing_codenames")
@@ -412,19 +396,6 @@ class DatabaseRepository:
     def create_inbox_entry(self, network: str, payload: dict) -> str:
         """
         Registra um novo webhook cru na tabela Inbox.
-
-        Esta é a primeira etapa do processamento. O dado é salvo "as-is"
-        para garantir durabilidade antes de qualquer lógica.
-
-        Args:
-            network (str): Rede de origem (BuyGoods/DigiStore).
-            payload (dict): JSON completo recebido.
-
-        Returns:
-            str: O ID (UUID) do registro criado na inbox.
-
-        Raises:
-            Exception: Se falhar ao salvar, propaga erro para retornar 500 na API.
         """
         try:
             data = {"network": network, "payload": payload, "status": "pending"}
@@ -438,15 +409,6 @@ class DatabaseRepository:
             raise e
 
     def fetch_pending_webhooks(self, limit: int = 10) -> list[dict]:
-        """
-        Busca os próximos webhooks pendentes para processamento (FIFO).
-
-        Args:
-            limit (int): Tamanho do lote.
-
-        Returns:
-            list[dict]: Lista de registros da inbox com status 'pending'.
-        """
         try:
             response = (
                 self.client.table("webhook_inbox")
@@ -462,14 +424,6 @@ class DatabaseRepository:
             return []
 
     def update_inbox_status(self, inbox_id: str, status: str, error_msg: str = None):
-        """
-        Atualiza o estado de processamento de um item da Inbox.
-
-        Args:
-            inbox_id (str): ID do registro.
-            status (str): Novo status (processing, processed, failed).
-            error_msg (str, optional): Mensagem de erro em caso de falha.
-        """
         try:
             data = {"status": status}
             if error_msg:
@@ -481,11 +435,9 @@ class DatabaseRepository:
 
     def check_connection(self) -> bool:
         """
-        Verifica se a conexão com o Supabase está ativa (Ping).
-        Retorna True se conseguir ler a tabela de afiliados.
+        Verifica se a conexão com o Supabase está ativa.
         """
         try:
-            # Query ultra-leve: Select ID limit 1
             self.client.table("affiliates").select("id").limit(1).execute()
             return True
         except Exception as e:
