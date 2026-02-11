@@ -315,7 +315,9 @@ class DatabaseRepository:
         try:
             # 1. Resolve Network ID para o Evento
             # Busca no cache ou cria se não existir
-            event.network_id = self.get_network_id(event.network)
+            net_id_str = self.get_network_id(event.network)
+            if net_id_str:
+                event.network_id = UUID(net_id_str)
 
             # 2. Resolve Network ID para o Status (se houver)
             if status:
