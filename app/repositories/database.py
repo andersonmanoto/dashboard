@@ -36,7 +36,7 @@ class DatabaseRepository:
         self.client: Client = create_client(
             settings.supabase_url, settings.supabase_key
         )
-        logger.info("Conexão com Supabase estabelecida")
+        # logger.info("Conexão com Supabase estabelecida")
 
     def load_networks_cache(self) -> None:
         """
