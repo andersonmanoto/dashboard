@@ -171,6 +171,11 @@ class DatabaseRepository:
         Cadastra um novo afiliado no banco de dados.
         """
         try:
+            # Resolve o nome da rede para UUID usando o cache
+            net_id_str = self.get_network_id(affiliate.network)
+            if net_id_str:
+                affiliate.network_id = UUID(net_id_str)
+
             data = affiliate.model_dump(
                 mode="json",
                 exclude={"id"},

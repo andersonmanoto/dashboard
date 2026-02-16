@@ -181,6 +181,7 @@ class Affiliate(BaseModel):
 
     id: Optional[UUID] = None
     network: NetworkType
+    network_id: Optional[UUID] = None
     aff_id: str
     aff_name: str
     status: AffiliateStatus = AffiliateStatus.ACTIVE
