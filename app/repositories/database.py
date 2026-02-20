@@ -146,11 +146,12 @@ class DatabaseRepository:
         network_value = network.value if isinstance(network, NetworkType) else network
 
         try:
+            net_id_str = self.get_network_id(network)
             response = (
                 self.client.table("affiliates")
                 .select("*")
                 .eq("aff_id", aff_id)
-                .eq("network", network_value)
+                .eq("network_id", net_id_str)
                 .limit(1)
                 .execute()
             )
@@ -178,13 +179,13 @@ class DatabaseRepository:
 
             data = affiliate.model_dump(
                 mode="json",
-                exclude={"id"},
+                exclude={"id", "network"},
                 exclude_none=True,
             )
 
             response = (
                 self.client.table("affiliates")
-                .upsert(data, on_conflict="aff_id, network")
+                .upsert(data, on_conflict="aff_id, network_id")
                 .execute()
             )
 
