@@ -157,7 +157,9 @@ class DatabaseRepository:
             )
 
             if response.data:
-                return Affiliate(**response.data[0])
+                row_data = response.data[0]
+                row_data["network"] = network_value
+                return Affiliate(**row_data)
 
             return None
 
@@ -190,7 +192,9 @@ class DatabaseRepository:
             )
 
             if response.data:
-                return Affiliate(**response.data[0])
+                row_data = response.data[0]
+                row_data["network"] = affiliate.network
+                return Affiliate(**row_data)
 
             return None
 
