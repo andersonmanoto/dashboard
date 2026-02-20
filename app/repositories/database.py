@@ -136,7 +136,6 @@ class DatabaseRepository:
             logger.error(f"Erro ao buscar default tear id: {e}")
             return None
 
-    @lru_cache(maxsize=1000)
     def get_affiliate_by_external_id(
         self, network: Union[NetworkType, str], aff_id: str
     ) -> Optional[Affiliate]:
