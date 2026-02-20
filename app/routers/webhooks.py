@@ -2,6 +2,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from starlette.requests import ClientDisconnect
 from loguru import logger
+import asyncio
 
 from app.config import Settings, get_settings
 from app.dependencies import (
@@ -29,8 +30,10 @@ async def webhook_buygoods(
         payload = await extract_payload(request)
 
         # 1. Salva na Inbox
-        inbox_id = db_repo.create_inbox_entry(
-            network=NetworkType.BUYGOODS.value, payload=payload
+        inbox_id = await asyncio.to_thread(
+            db_repo.create_inbox_entry, 
+            NetworkType.BUYGOODS.value, 
+            payload
         )
 
         # 2. Enfileira no Redis

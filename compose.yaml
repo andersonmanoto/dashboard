@@ -11,7 +11,7 @@ services:
       - REDIS_HOST=redis
     ports:
       - "8000:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
     depends_on:
       - redis
     stop_grace_period: 20s

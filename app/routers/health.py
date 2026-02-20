@@ -1,6 +1,7 @@
 import time
 from fastapi import APIRouter, Depends, Response, status, Request
 from loguru import logger
+import asyncio
 from app.dependencies import get_database_repository
 from app.repositories.database import DatabaseRepository
 
@@ -44,7 +45,8 @@ async def health_check(
         logger.error(f"Health Check Redis: {e}")
 
     # 2. Verifica Supabase
-    if db_repo.check_connection():
+    is_connected = await asyncio.to_thread(db_repo.check_connection)
+    if is_connected:
         status_data["services"]["database"] = "healthy"
     else:
         status_data["services"]["database"] = "unhealthy"
