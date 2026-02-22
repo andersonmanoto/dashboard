@@ -200,6 +200,8 @@ class EventProcessor:
                         codename=checkout_code,
                         account_id=event.account_id,
                         buy_url=buy_url,
+                        aff_id=event.order_details.external_affiliate_id,
+                        aff_name=event.order_details.external_affiliate_name,
                     )
 
         # 2. Fallback por nome do produto

@@ -40,6 +40,8 @@ class SlackService:
         account_id: Optional[str] = None,
         buy_url: Optional[str] = None,
         channel: Optional[str] = None,
+        aff_id: Optional[str] = None,
+        aff_name: Optional[str] = None,
     ) -> bool:
         """
         Orquestra o tratamento de erro para produtos não mapeados.
@@ -80,6 +82,8 @@ class SlackService:
             codename=codename,
             account_id=account_id,
             buy_url=buy_url,
+            aff_id=aff_id,
+            aff_name=aff_name,
         )
 
         # 3. Envia para Slack
@@ -139,6 +143,8 @@ class SlackService:
         codename: Optional[str],
         account_id: Optional[str] = None,
         buy_url: Optional[str] = None,
+        aff_id: Optional[str] = None,
+        aff_name: Optional[str] = None,
     ) -> list[dict]:
         """
         Gera o layout da mensagem do Slack usando Block Kit.
@@ -164,6 +170,12 @@ class SlackService:
         if account_id:
             fields.append(
                 {"type": "mrkdwn", "text": f"*Account ID:*\n`{account_display}`"}
+            )
+        
+        if aff_id or aff_name:
+            affiliate_display = f"{aff_name or 'N/A'} (ID: {aff_id or 'N/A'})"
+            fields.append(
+                {"type": "mrkdwn", "text": f"*Affiliate:*\n`{affiliate_display}`"}
             )
 
         if buy_url:
