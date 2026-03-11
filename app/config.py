@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     redis_host: str = "redis"
     redis_port: int = 6379
 
+    # Resend (Email)
+    resend_api_key: str = ""
+    email_from: str = "reports@dash.tigeroffers.com"
+
     # Web Scanner
     scanner_secret_token: str
     ssh_host: str

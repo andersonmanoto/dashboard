@@ -31,9 +31,7 @@ async def webhook_buygoods(
 
         # 1. Salva na Inbox
         inbox_id = await asyncio.to_thread(
-            db_repo.create_inbox_entry, 
-            NetworkType.BUYGOODS.value, 
-            payload
+            db_repo.create_inbox_entry, NetworkType.BUYGOODS.value, payload
         )
 
         # 2. Enfileira no Redis

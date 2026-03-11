@@ -30,6 +30,21 @@ services:
     depends_on:
       - redis
     stop_grace_period: 30s
+  
+  report_worker:
+    build: .
+    image: localhost/dashhook/api:2.3.0
+    container_name: dashhook-report-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app:/app/app
+      - REDIS_HOST=redis
+    command: arq app.report_worker.ReportWorkerSettings
+    depends_on:
+      - redis
+    stop_grace_period: 30s
 
   redis:
     image: docker.io/library/redis:7-alpine

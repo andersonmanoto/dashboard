@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ report_title }}</title>
+    <style>
+        /* 1. Page Settings (WeasyPrint Magic) */
+        @page {
+            size: A4 portrait;
+            margin: 2cm;
+            
+            /* Automatically adds page number in the right footer */
+            @bottom-right {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 9pt;
+                color: #7f8c8d;
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            }
+        }
+
+        /* 2. Base Typography and Colors */
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #2c3e50;
+            line-height: 1.4;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* 3. Report Header - Layout Profissional */
+        .header {
+            display: flex;         /* Coloca logo e títulos lado a lado */
+            align-items: center;   /* Centraliza verticalmente o logo com o texto */
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        /* Ajuste do Logo */
+        .logo {
+            max-height: 120px;      /* Tamanho de destaque */
+            margin-right: 30px;    /* Espaço entre a imagem e o texto */
+            flex-shrink: 0;        /* Garante que o logo não mude de tamanho */
+            object-fit: contain;
+        }
+
+        /* Bloco de títulos à direita do logo */
+        .header-titles {
+            flex-grow: 1;
+        }
+
+        .header-titles h1 {
+            margin: 0;
+            color: #c0392b;        /* Vermelho Alerta */
+            font-size: 22px;
+            text-transform: uppercase;
+            line-height: 1.2;
+        }
+
+        .header-titles p {
+            margin: 5px 0 0 0;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+
+        /* 4. Summary Boxes (Totals) */
+        .summary {
+            display: table;
+            width: 100%;
+            margin-bottom: 30px;
+        }
+        .summary-box {
+            display: table-cell;
+            width: 33.33%;
+            text-align: center;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border: 1px solid #ecf0f1;
+        }
+        .summary-box h3 {
+            margin: 0;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #95a5a6;
+            letter-spacing: 1px;
+        }
+        .summary-box p {
+            margin: 10px 0 0 0;
+            font-size: 22px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        /* 5. Data Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        th, td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #ecf0f1;
+            text-align: left;
+        }
+        th {
+            background-color: #34495e;
+            color: #ffffff;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+        }
+        tr:nth-child(even) {
+            background-color: #fafbfc; /* Subtle zebra effect */
+        }
+        
+        /* 6. Utilities */
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        
+        .badge-danger {
+            background-color: #e74c3c;
+            color: white;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <img src="assets/tigeroffers.png" alt="Tiger Offers Logo" class="logo">
+        
+        <div class="header-titles">
+            <h1>{{ report_title }}</h1>
+            <p>Analyzed period: <strong>{{ period_start }}</strong> to <strong>{{ period_end }}</strong></p>
+        </div>
+    </div>
+
+    <div class="summary">
+        <div class="summary-box">
+            <h3>Total Occurrences</h3>
+            <p>{{ total_transactions }}</p>
+        </div>
+        <div class="summary-box">
+            <h3>Affected Sales Volume</h3>
+            <p>$ {{ "{:,.2f}".format(total_affected_revenue) }}</p>
+        </div>
+        <div class="summary-box">
+            <h3>Fees Paid (Loss)</h3>
+            <p style="color: #c0392b;">$ {{ "{:,.2f}".format(total_fees_paid) }}</p>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Order ID</th>
+                <th>Product</th>
+                <th>Affiliate</th>
+                <th class="text-right">Sale Total</th>
+                <th class="text-right">Fee ($)</th>
+                <th class="text-center">Rate (%)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tx in transactions %}
+            <tr>
+                <td>{{ tx.event_date }}</td>
+                <td><strong>{{ tx.order_id }}</strong></td>
+                
+                <td>{{ tx.products.name if tx.products else 'Unknown' }}</td>
+                <td>{{ tx.affiliates.aff_name if tx.affiliates else 'Unknown' }}</td>
+                
+                <td class="text-right">$ {{ "{:,.2f}".format(tx.sale_total) }}</td>
+                <td class="text-right">$ {{ "{:,.2f}".format(tx.merchant_commission) }}</td>
+                
+                <td class="text-center">
+                    <span class="badge-danger">
+                        {{ "{:.1f}".format(tx.merchant_commission_rate * 100) }}%
+                    </span>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="7" class="text-center" style="padding: 30px; color: #7f8c8d;">
+                    No transactions with fees higher than 7% were found during this period. 🎉
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</body>
+</html>

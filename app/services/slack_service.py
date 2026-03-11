@@ -171,7 +171,7 @@ class SlackService:
             fields.append(
                 {"type": "mrkdwn", "text": f"*Account ID:*\n`{account_display}`"}
             )
-        
+
         if aff_id or aff_name:
             affiliate_display = f"{aff_name or 'N/A'} (ID: {aff_id or 'N/A'})"
             fields.append(

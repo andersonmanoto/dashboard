@@ -454,3 +454,49 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Health Check DB falhou: {e}")
             return False
+
+    def get_high_fee_transactions(self, filters: dict) -> list[dict]:
+        """
+        Busca transações com taxas de processamento acima de 7% (0.07).
+        Usa select("*") combinado com joins automáticos para flexibilidade no template.
+        """
+        try:
+            period = filters.get("period", {})
+            start_date = period.get("start_date")
+            end_date = period.get("end_date")
+
+            product_id = filters.get("product_id")
+            network_id = filters.get("network_id")
+
+            # 1. Select Dinâmico: Traz TODAS as colunas de 'events' (*)
+            # e já faz o JOIN (Inner/Left) para trazer o nome do produto e do afiliado.
+            query = self.client.table("events").select(
+                "*, affiliates(aff_name, aff_id), products(name)"
+            )
+
+            # 2. Filtros Obrigatórios
+            query = query.gte("event_date", start_date)
+            query = query.lte("event_date", end_date)
+            query = query.gt("merchant_commission_rate", 0.07)  # Maior que 7%
+            query = query.eq("is_test", False)
+
+            # Só trazemos vendas/rebills, ignoramos refunds/chargebacks na query base
+            query = query.in_("action_type", ["SALE", "neworder", "rebill"])
+
+            # 3. Filtros Opcionais
+            if product_id:
+                query = query.in_("product_id", product_id)
+            if network_id:
+                query = query.eq("network_id", network_id)
+
+            # logger.debug(f"Query Filtros - Products: {product_id} | Network: {network_id}")
+
+            # 4. Ordenação: Maior taxa primeiro, para chamar logo à atenção!
+            query = query.order("merchant_commission_rate", desc=True)
+
+            response = query.execute()
+            return response.data if response.data else []
+
+        except Exception as e:
+            logger.error(f"Erro ao buscar transações de alta taxa: {e}")
+            raise e

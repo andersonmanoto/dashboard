@@ -8,6 +8,15 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    # --- Dependências do WeasyPrint ---
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libjpeg-dev \
+    libopenjp2-7-dev \
+    libffi-dev \
+    # --- Fontes essenciais para o PDF ---
+    fonts-liberation \
+    fonts-dejavu \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m morpheus
 
