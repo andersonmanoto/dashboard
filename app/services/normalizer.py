@@ -91,7 +91,7 @@ class PayloadNormalizer:
         merchant_commission = safe_float(payload.get("merchant_commission"))
         total_clean = safe_float(payload.get("total_clean"))
         merchant_rate = (
-            round(merchant_commission / total_clean, 2) if total_clean > 0 else 0.0
+            round(merchant_commission / total_clean, 4) if total_clean > 0 else 0.0
         )
 
         return NormalizedEvent(
