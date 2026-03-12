@@ -31,6 +31,9 @@ async def request_fee_audit_report(request: Request, payload: ReportRequest):
     Solicita a geração do relatório.
     Envia a lista completa de IDs de uma vez para gerar um único e-mail com múltiplos anexos.
     """
+    # Log do Payload para debug
+    logger.info(f"Payload recebido para auditoria: {payload.model_dump()}")
+
     try:
         redis_pool = getattr(request.app.state, "redis_pool", None)
 
