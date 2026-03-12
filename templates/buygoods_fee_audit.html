@@ -67,7 +67,7 @@
         .summary {
             display: table;
             width: 100%;
-            margin-bottom: 30px;
+            margin-bottom: 22px;
         }
         .summary-box {
             display: table-cell;
@@ -127,15 +127,28 @@
         }
 
         .product-group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+
             background-color: #f8f9fa;
             border-left: 5px solid #DA610F;
             padding: 10px 15px;
+
             font-size: 14px;
             font-weight: bold;
             color: #34495e;
-            margin-bottom: 5px;
+
+            margin-top: 15px;
+            margin-bottom: 6px;
+
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+        .agreed-rate-inline {
+            font-size: 11px;
+            color: #7f8c8d;
+            font-weight: normal;
         }
         
         /* Ajuste para a tabela não ter margem superior colada no header do grupo */
@@ -177,25 +190,29 @@
 
     {% for group_name, items in grouped_transactions.items() %}
     <div class="product-group-header">
-        {{ group_name }}
+        <span>{{ group_name }}</span>
+
+        <span class="agreed-rate-inline">
+            Agreed rate: {{ "{:.1f}".format(agreed_rate_percent) }}%
+        </span>
     </div>
     <table>
         <thead>
             <tr>
-                <th style="width: 20%;">Date</th>
-                <th style="width: 20%;">Order ID</th>
-                <th style="width: 20%;" class="text-right">Gross Sale</th>
-                <th style="width: 20%;" class="text-right">Fee ($)</th>
+                <th style="width: 20%;" class="text-center">Date</th>
+                <th style="width: 20%;" class="text-center">Order ID</th>
+                <th style="width: 20%;" class="text-center">Gross Sale</th>
+                <th style="width: 20%;" class="text-center">Fee ($)</th>
                 <th style="width: 20%;" class="text-center">Rate (%)</th>
             </tr>
         </thead>
         <tbody>
             {% for tx in items %}
             <tr>
-                <td>{{ tx.event_date }}</td>
-                <td><strong>{{ tx.order_id }}</strong></td>
-                <td class="text-right">$ {{ "{:,.2f}".format(tx.sale_total) }}</td>
-                <td class="text-right">$ {{ "{:,.2f}".format(tx.merchant_commission) }}</td>
+                <td class="text-center">{{ tx.event_date }}</td>
+                <td class="text-center"><strong>{{ tx.order_id }}</strong></td>
+                <td class="text-center">$ {{ "{:,.2f}".format(tx.sale_total) }}</td>
+                <td class="text-center">$ {{ "{:,.2f}".format(tx.merchant_commission) }}</td>
                 <td class="text-center">
                     <span class="badge-danger">
                         {{ "{:.1f}".format(tx.merchant_commission_rate * 100) }}%

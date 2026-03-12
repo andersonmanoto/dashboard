@@ -1,6 +1,7 @@
 import asyncio
 import io
 from pathlib import Path
+from datetime import datetime
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from weasyprint import HTML
 import resend
@@ -9,186 +10,195 @@ from loguru import logger
 from app.config import Settings
 from app.repositories.database import DatabaseRepository
 
-
 class ReportService:
     """
     Serviço dedicado à geração de PDFs e envio de e-mails.
-    Isolado do tráfego financeiro por ser intensivo em CPU.
+    Lógica de auditoria baseada na taxa dinâmica por Network.
     """
 
     def __init__(self, settings: Settings, db_repo: DatabaseRepository):
         self.settings = settings
         self.db = db_repo
+        self.template_dir = Path(__file__).parent.parent.parent / "templates"
 
-        template_dir = Path(__file__).parent.parent.parent / "templates"
-
-        # Configura a API do Resend
         resend.api_key = self.settings.resend_api_key
 
-        # Configura o Jinja2 para ler da pasta app/templates
         self.jinja_env = Environment(
-            loader=FileSystemLoader(str(template_dir)),
+            loader=FileSystemLoader(str(self.template_dir)),
             autoescape=select_autoescape(["html", "xml"]),
         )
 
-    def _fetch_data(self, filters: dict) -> dict:
-        transactions = self.db.get_high_fee_transactions(filters)
-
-        grouped_data = {}
-        total_revenue = 0
-        total_fees = 0
-
-        # Nome padrão caso não venha nada
-        product_label = "General"
-
-        for tx in transactions:
-            total_revenue += tx.get("sale_total", 0)
-            total_fees += tx.get("merchant_commission", 0)
-
-            product_name = (
-                tx.get("products", {}).get("name")
-                if tx.get("products")
-                else "Unknown Product"
-            )
-            account_id = tx.get("account_id") or "N/A"
-            group_key = f"{product_name} ({account_id})"
-
-            product_label = product_name
-
-            if group_key not in grouped_data:
-                grouped_data[group_key] = []
-
-            grouped_data[group_key].append(tx)
-
-        return {
-            "report_title": "Excessive Fee Analysis: BuyGoods",
-            "period_start": filters["period"]["start_date"],
-            "period_end": filters["period"]["end_date"],
-            "total_transactions": len(transactions),
-            "total_affected_revenue": total_revenue,
-            "total_fees_paid": total_fees,
-            "product_label": product_label,
-            "grouped_transactions": grouped_data,
-        }
-
-    def _render_html(
-        self, data: dict, template_name: str = "buygoods_fee_audit.html"
-    ) -> str:
-        """Injeta os dados no template HTML usando Jinja2."""
-        template = self.jinja_env.get_template(template_name)
-        return template.render(**data)
-
-    def _generate_pdf_bytes(self, html_string: str) -> bytes:
-        """
-        [CPU BOUND] - Converte a string HTML num PDF em bytes na memória RAM.
-        """
-        pdf_buffer = io.BytesIO()
-
-        # 1. Calculamos o caminho base (o mesmo que usámos no Jinja)
-        template_dir = Path(__file__).parent.parent.parent / "templates"
-
-        # 2. Passamos o base_url para o WeasyPrint achar as imagens!
-        HTML(string=html_string, base_url=str(template_dir)).write_pdf(pdf_buffer)
-
-        pdf_bytes = pdf_buffer.getvalue()
-        pdf_buffer.close()
-        return pdf_bytes
-    
     def _fetch_grouped_data(self, filters: dict) -> dict:
-        """
-        Busca as transações no banco e as agrupa por Produto (Account ID).
-        """
         transactions = self.db.get_high_fee_transactions(filters)
-        
+
         grouped = {}
         for tx in transactions:
-            # Pega o nome do produto através do relacionamento 'products' no Supabase
-            p_name = tx.get("products", {}).get("name") if tx.get("products") else "Unknown Product"
+            # 1. Captura a taxa dinâmica
+            network_tax = tx.get("networks", {}).get("tax")
+            agreed_tax = float(network_tax) if network_tax is not None else 0.07
+            tx["agreed_tax"] = agreed_tax
+
+            # --------------------------------------------------------
+            # A MÁGICA ACONTECE AQUI: FILTRO DINÂMICO
+            # Se a taxa cobrada na transação for menor ou igual à taxa
+            # cadastrada na network, ignoramos esta transação!
+            # --------------------------------------------------------
+            actual_rate = tx.get("merchant_commission_rate", 0)
+            if actual_rate <= agreed_tax:
+                continue
+
+            # 2. Formatação da data da transação: MM-DD-YYYY
+            raw_date = tx.get("event_date")
+            formatted_date = "N/A"
+            if raw_date:
+                try:
+                    date_str = str(raw_date).split()[0]
+                    dt = datetime.strptime(date_str, "%Y-%m-%d")
+                    formatted_date = dt.strftime("%m-%d-%Y")
+                except Exception as e:
+                    logger.warning(f"Erro ao formatar data {raw_date}: {e}")
+                    formatted_date = str(raw_date)
+
+            tx["event_date"] = formatted_date
+
+            # 3. Lógica de Agrupamento
+            p_name = tx.get("products", {}).get("name") or "Unknown Product"
             acc_id = tx.get("account_id") or "N/A"
             key = f"{p_name} ({acc_id})"
-            
+
             if key not in grouped:
                 grouped[key] = []
             grouped[key].append(tx)
-        
+
         return grouped
 
+    def _generate_pdf_bytes(self, html_string: str) -> bytes:
+        """Converte HTML para PDF usando WeasyPrint."""
+        pdf_buffer = io.BytesIO()
+        HTML(string=html_string, base_url=str(self.template_dir)).write_pdf(pdf_buffer)
+        return pdf_buffer.getvalue()
+
     async def generate_and_send_report(
-        self, 
-        user_email: str, 
-        filters: dict, 
-        template_name: str = "buygoods_fee_audit.html"
+        self,
+        user_email: str,
+        filters: dict,
+        template_name: str = "buygoods_fee_audit.html",
     ):
         """
-        Gera múltiplos PDFs (um por produto) e envia em um ÚNICO e-mail com múltiplos anexos.
+        Orquestra a geração e envio. Um e-mail com múltiplos anexos (um por produto).
         """
+        # Formatação das datas do período para MM-DD-YYYY
         try:
-            # 1. Busca todos os dados e agrupa por produto (usando a função auxiliar _fetch_grouped_data)
+            p_start = datetime.strptime(filters["period"]["start_date"], "%Y-%m-%d").strftime("%m-%d-%Y")
+            p_end = datetime.strptime(filters["period"]["end_date"], "%Y-%m-%d").strftime("%m-%d-%Y")
+        except Exception:
+            p_start = filters["period"]["start_date"]
+            p_end = filters["period"]["end_date"]
+
+        try:
+            # 1. Busca e Agrupa dados
             grouped_data = await asyncio.to_thread(self._fetch_grouped_data, filters)
-            
+
+            # 2. CENÁRIO: NADA CONSTA (Feedback Positivo)
             if not grouped_data:
-                logger.warning(f"Nenhum dado de taxa abusiva encontrado para {user_email}.")
-                return False
+                logger.info(f"Feedback positivo: Nenhuma taxa abusiva para {user_email}.")
+                params = {
+                    "from": self.settings.email_from,
+                    "to": [user_email],
+                    "subject": "BuyGoods Fee Audit Completed – No Overcharges Found",
+                    "html": f"""
+                    <p>Hello,</p>
+
+                    <p>Your <strong>BuyGoods fee audit</strong> for the period 
+                    <strong>{p_start}</strong> to <strong>{p_end}</strong> has been completed.</p>
+
+                    <p>After reviewing the transactions for the selected products, 
+                    <strong>no platform fees were identified above the agreed threshold</strong>.</p>
+
+                    <p>This means that, for this period, all analyzed transactions appear to have 
+                    been charged according to the expected fee structure.</p>
+
+                    <p>No further action is required at this time.</p>
+
+                    <p>If you would like us to review a different period or additional products, 
+                    feel free to run a new audit at any time.</p>
+
+                    <p>Best regards,<br>
+                    <strong>Tiger Offers Team</strong></p>
+                    """,
+                }
+                await asyncio.to_thread(resend.Emails.send, params)
+                return True
 
             attachments = []
-            
-            # 2. Loop principal: Criamos um PDF para cada produto agrupado
+
+            # 3. Loop: Geração de um PDF por produto
             for group_name, items in grouped_data.items():
-                # --- CÁLCULOS DO SUMÁRIO ---
                 prod_revenue = sum(item.get("sale_total", 0) for item in items)
                 prod_fees = sum(item.get("merchant_commission", 0) for item in items)
                 
-                # Cálculo do Overcharged: O que foi pago além dos 7% combinados
-                # Fórmula: Taxa Real - (Volume de Vendas * 0.07)
-                expected_fee_at_7_percent = prod_revenue * 0.07
-                overcharged_amount = max(0, prod_fees - expected_fee_at_7_percent)
+                # Taxa dinâmica baseada na network do primeiro item do grupo
+                agreed_rate = items[0].get("agreed_tax", 0.07)
+                expected_fee = prod_revenue * agreed_rate
+                overcharged_amount = max(0, prod_fees - expected_fee)
 
-                # Montamos o contexto específico para este arquivo PDF
                 context = {
-                    "report_title": "Excessive Fee Analysis – BuyGoods",
-                    "period_start": filters["period"]["start_date"],
-                    "period_end": filters["period"]["end_date"],
+                    "report_title": "Excessive Fee Analysis",
+                    "period_start": p_start,
+                    "period_end": p_end,
                     "total_transactions": len(items),
                     "total_affected_revenue": prod_revenue,
                     "total_fees_paid": prod_fees,
                     "overcharged_fees": overcharged_amount,
-                    "grouped_transactions": {group_name: items} 
+                    "agreed_rate_percent": agreed_rate * 100,
+                    "grouped_transactions": {group_name: items},
                 }
 
-                # 3. Renderização e Geração do PDF em Memória
-                html_string = self.jinja_env.get_template(template_name).render(**context)
+                template = self.jinja_env.get_template(template_name)
+                html_string = template.render(**context)
+                
                 pdf_bytes = await asyncio.to_thread(self._generate_pdf_bytes, html_string)
 
-                # 4. Nome do Arquivo (Ex: "AUDIT_VisiumPro.pdf")
                 clean_product_name = group_name.split(" (")[0].strip().replace(" ", "_")
-                
                 attachments.append({
                     "filename": f"AUDIT_{clean_product_name}.pdf",
-                    "content": list(pdf_bytes) # Resend espera uma lista de inteiros ou bytes
+                    "content": list(pdf_bytes)
                 })
 
-            # 5. Envio do E-mail Consolidado com todos os anexos
-            logger.info(f"Enviando e-mail com {len(attachments)} anexos de auditoria para {user_email}")
+            # 4. Envio do E-mail Consolidado
+            logger.info(f"Enviando e-mail com {len(attachments)} anexos para {user_email}")
             
-            params = {
+            email_params = {
                 "from": self.settings.email_from,
                 "to": [user_email],
-                "subject": f"BuyGoods Fee Audit: {len(attachments)} Products Found",
+                "subject": f"BuyGoods Fee Audit Report – {len(attachments)} Product(s) with Potential Overcharges",
                 "html": f"""
                 <p>Hello,</p>
-                <p>Your requested fee audit is ready. We identified overcharged fees in <strong>{len(attachments)}</strong> products.</p>
-                <p>Please find the individual audit reports attached as PDF files.</p>
-                <p>Best regards,<br>Tiger Offers Team</p>
+
+                <p>Your <strong>BuyGoods fee audit</strong> for the period 
+                <strong>{p_start}</strong> to <strong>{p_end}</strong> has been completed.</p>
+
+                <p>During our analysis, we identified <strong>{len(attachments)} product(s)</strong> 
+                where the platform fees charged appear to be higher than expected.</p>
+
+                <p>For your convenience, we’ve attached a detailed report for each affected product. 
+                These reports break down the transactions and highlight the fees that may require review.</p>
+
+                <p>We recommend reviewing the attached files and contacting BuyGoods support if you wish 
+                to dispute or request clarification on any of the charges.</p>
+
+                <p>If you have any questions or need help interpreting the reports, feel free to reach out.</p>
+
+                <p>Best regards,<br>
+                <strong>Tiger Offers Team</strong></p>
                 """,
-                "attachments": attachments
+                "attachments": attachments,
             }
 
-            # Envia via Resend (I/O Bound)
-            response = await asyncio.to_thread(resend.Emails.send, params)
-            
-            logger.success(f"E-mail de auditoria enviado com sucesso para {user_email}. Resend ID: {response.get('id')}")
+            response = await asyncio.to_thread(resend.Emails.send, email_params)
+            logger.success(f"Relatórios enviados com sucesso! Resend ID: {response.get('id')}")
             return True
 
         except Exception as e:
-            logger.exception(f"Erro ao processar e-mail com múltiplos anexos para {user_email}: {e}")
+            logger.exception(f"Erro fatal ao gerar relatório para {user_email}: {e}")
             raise e

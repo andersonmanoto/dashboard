@@ -94,3 +94,21 @@ async def get_api_key_scanner(
         return api_key_header
 
     raise HTTPException(status.HTTP_403_FORBIDDEN, "Acesso Negado")
+
+
+async def verify_reports_key(
+    x_api_key: Annotated[str, Header(alias="X-API-KEY")] = None,
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Valida a chave de API para geração de relatórios."""
+    if not settings.reports_api_key:
+        logger.critical("REPORTS_API_KEY não configurado nas definições!")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Config Error")
+
+    if x_api_key != settings.reports_api_key:
+        logger.warning(
+            f"Tentativa de acesso não autorizada ao endpoint de relatórios. Key: {x_api_key}"
+        )
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Credenciais de relatórios inválidas"
+        )

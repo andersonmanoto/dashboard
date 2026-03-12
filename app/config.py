@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # Segurança
     webhook_secret: str
     upload_api_key: str
+    reports_api_key: str
 
     # Supabase
     supabase_url: str

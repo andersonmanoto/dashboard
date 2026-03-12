@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Request, status, HTTPException
+from fastapi import APIRouter, Request, status, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import date
 from loguru import logger
+
+from app.dependencies import verify_reports_key
 
 router = APIRouter(tags=["Reports"])
 
@@ -20,7 +22,10 @@ class ReportRequest(BaseModel):
     template_name: str = "buygoods_fee_audit.html"
 
 
-@router.post("/reports/buygoods-fees", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+        "/reports/buygoods-fees",
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(verify_reports_key)])
 async def request_fee_audit_report(request: Request, payload: ReportRequest):
     """
     Solicita a geração do relatório.
