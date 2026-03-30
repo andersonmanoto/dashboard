@@ -86,16 +86,15 @@ class ReportWorkerSettings:
         port=settings.redis_port,
     )
 
-    # ⚠️ IMPORTANTE: Diferencia a fila deste worker da fila principal!
     queue_name = "reports_queue"
 
     on_startup = startup
     on_shutdown = shutdown
     functions = [task_generate_pdf_report, task_generate_dropoff_warning]
-    # === AGENDAMENTO AUTOMÁTICO AQUI ===
+    # AGENDAMENTO DO CRON
     cron_jobs = [
-        # Dispara todos os dias às 08:00 AM (Ajuste a hora conforme o fuso do servidor)
-        cron(cron_dropoff_warning, hour=8, minute=0)
+        # Dispara todos os dias às 08:00 AM - (11:00 AM horário da vps/arq)
+        cron(cron_dropoff_warning, hour=11, minute=00)
     ]
 
     max_jobs = 5
