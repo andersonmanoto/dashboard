@@ -1,4 +1,5 @@
 from arq.connections import RedisSettings
+from arq import cron
 from loguru import logger
 
 from app.config import get_settings
@@ -43,6 +44,38 @@ async def shutdown(ctx):
         pass
 
 
+async def cron_dropoff_warning(ctx):
+    """Executado automaticamente pelo ARQ cron"""
+    logger.info("Executando Cron Diário: Affiliate Drop-off Warning")
+
+    settings = get_settings()
+
+    target_emails =[
+        email.strip() 
+        for email in settings.report_target_emails.split(",") 
+        if email.strip()
+    ]
+
+    report_service = ctx["report_service"]
+
+    await report_service.generate_and_send_dropoff_warning(
+        target_emails=target_emails, days_limit=3
+    )
+
+
+async def task_generate_dropoff_warning(ctx, target_emails: list[str], days_limit: int):
+    """Tarefa sob demanda disparada pela API."""
+    logger.info(
+        f"[Report Worker] Pedido manual de Drop-off Warning para: {target_emails}"
+    )
+
+    report_service = ctx["report_service"]
+
+    await report_service.generate_and_send_dropoff_warning(
+        target_emails=target_emails, days_limit=days_limit
+    )
+
+
 class ReportWorkerSettings:
     """Configurações exclusivas para este Worker de relatórios."""
 
@@ -58,10 +91,14 @@ class ReportWorkerSettings:
 
     on_startup = startup
     on_shutdown = shutdown
-    functions = [task_generate_pdf_report]
+    functions = [task_generate_pdf_report, task_generate_dropoff_warning]
+    # === AGENDAMENTO AUTOMÁTICO AQUI ===
+    cron_jobs = [
+        # Dispara todos os dias às 08:00 AM (Ajuste a hora conforme o fuso do servidor)
+        cron(cron_dropoff_warning, hour=8, minute=0)
+    ]
 
-    # Ajustes finos: Relatórios demoram mais tempo que webhooks
-    max_jobs = 5  # Poucos jobs em paralelo para não rebentar a RAM
-    job_timeout = 300  # Até 5 minutos para gerar e enviar o PDF
+    max_jobs = 5
+    job_timeout = 300
     retry_jobs = True
     max_tries = 2

@@ -466,15 +466,12 @@ class DatabaseRepository:
             # BUSCA: Tudo de events + joins com affiliates, products e networks
             # Nota: Estamos assumindo que 'events' tem uma FK para 'networks'
             query = self.client.table("events").select(
-                "*, "
-                "affiliates(aff_name, aff_id), "
-                "products(name), "
-                "networks(tax)"
+                "*, affiliates(aff_name, aff_id), products(name), networks(tax)"
             )
 
             query = query.gte("event_date", start_date)
             query = query.lte("event_date", end_date)
-            query = query.gt("merchant_commission_rate", 0.01) 
+            query = query.gt("merchant_commission_rate", 0.01)
             query = query.eq("is_test", False)
             query = query.in_("action_type", ["SALE", "neworder", "rebill"])
 
@@ -491,3 +488,14 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao buscar transações de alta taxa: {e}")
             raise e
+
+    def get_affiliates_without_recent_sales(self, days: int = 3) -> list[dict]:
+        """Busca afiliados ativos sem vendas recentes nos últimos X dias."""
+        try:
+            response = self.client.rpc(
+                "get_affiliates_without_recent_sales", {"days_limit": days}
+            ).execute()
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar afiliados sem vendas recentes: {e}")
+            return []

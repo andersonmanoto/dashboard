@@ -22,10 +22,16 @@ class ReportRequest(BaseModel):
     template_name: str = "buygoods_fee_audit.html"
 
 
+class DropoffReportRequest(BaseModel):
+    emails: list[EmailStr]
+    days_limit: int = 3
+
+
 @router.post(
-        "/reports/buygoods-fees",
-        status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(verify_reports_key)])
+    "/reports/buygoods-fees",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(verify_reports_key)],
+)
 async def request_fee_audit_report(request: Request, payload: ReportRequest):
     """
     Solicita a geração do relatório.
@@ -58,4 +64,45 @@ async def request_fee_audit_report(request: Request, payload: ReportRequest):
 
     except Exception as e:
         logger.exception(f"Erro ao enfileirar: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao processar pedido.")
+
+
+@router.post(
+    "/reports/affiliates-dropoff",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(verify_reports_key)],
+)
+async def request_dropoff_warning_report(
+    request: Request, payload: DropoffReportRequest
+):
+    """
+    Dispara manualmente a geração do relatório de afiliados sem vendas recentes.
+    """
+    logger.info(f"Payload recebido para Drop-off Warning: {payload.model_dump()}")
+
+    try:
+        redis_pool = getattr(request.app.state, "redis_pool", None)
+
+        if not redis_pool:
+            logger.error("Redis pool não encontrado no app.state")
+            raise HTTPException(status_code=500, detail="Serviço de fila indisponível.")
+
+        # Enfileira a nova task que criamos no worker
+        job = await redis_pool.enqueue_job(
+            "task_generate_dropoff_warning",
+            payload.emails,
+            payload.days_limit,
+            _queue_name="reports_queue",
+        )
+
+        logger.info(f"Job Drop-off criado: {job.job_id} para {payload.emails}")
+
+        return {
+            "status": "queued",
+            "message": f"Seu relatório de Drop-off está sendo gerado para os últimos {payload.days_limit} dias.",
+            "job_id": job.job_id,
+        }
+
+    except Exception as e:
+        logger.exception(f"Erro ao enfileirar dropoff report: {e}")
         raise HTTPException(status_code=500, detail="Erro interno ao processar pedido.")

@@ -10,6 +10,7 @@ from loguru import logger
 from app.config import Settings
 from app.repositories.database import DatabaseRepository
 
+
 class ReportService:
     """
     Serviço dedicado à geração de PDFs e envio de e-mails.
@@ -38,11 +39,6 @@ class ReportService:
             agreed_tax = float(network_tax) if network_tax is not None else 0.07
             tx["agreed_tax"] = agreed_tax
 
-            # --------------------------------------------------------
-            # A MÁGICA ACONTECE AQUI: FILTRO DINÂMICO
-            # Se a taxa cobrada na transação for menor ou igual à taxa
-            # cadastrada na network, ignoramos esta transação!
-            # --------------------------------------------------------
             actual_rate = tx.get("merchant_commission_rate", 0)
             if actual_rate <= agreed_tax:
                 continue
@@ -89,8 +85,12 @@ class ReportService:
         """
         # Formatação das datas do período para MM-DD-YYYY
         try:
-            p_start = datetime.strptime(filters["period"]["start_date"], "%Y-%m-%d").strftime("%m-%d-%Y")
-            p_end = datetime.strptime(filters["period"]["end_date"], "%Y-%m-%d").strftime("%m-%d-%Y")
+            p_start = datetime.strptime(
+                filters["period"]["start_date"], "%Y-%m-%d"
+            ).strftime("%m-%d-%Y")
+            p_end = datetime.strptime(
+                filters["period"]["end_date"], "%Y-%m-%d"
+            ).strftime("%m-%d-%Y")
         except Exception:
             p_start = filters["period"]["start_date"]
             p_end = filters["period"]["end_date"]
@@ -101,7 +101,9 @@ class ReportService:
 
             # 2. CENÁRIO: NADA CONSTA (Feedback Positivo)
             if not grouped_data:
-                logger.info(f"Feedback positivo: Nenhuma taxa abusiva para {user_email}.")
+                logger.info(
+                    f"Feedback positivo: Nenhuma taxa abusiva para {user_email}."
+                )
                 params = {
                     "from": self.settings.email_from,
                     "to": [user_email],
@@ -136,7 +138,7 @@ class ReportService:
             for group_name, items in grouped_data.items():
                 prod_revenue = sum(item.get("sale_total", 0) for item in items)
                 prod_fees = sum(item.get("merchant_commission", 0) for item in items)
-                
+
                 # Taxa dinâmica baseada na network do primeiro item do grupo
                 agreed_rate = items[0].get("agreed_tax", 0.07)
                 expected_fee = prod_revenue * agreed_rate
@@ -156,18 +158,24 @@ class ReportService:
 
                 template = self.jinja_env.get_template(template_name)
                 html_string = template.render(**context)
-                
-                pdf_bytes = await asyncio.to_thread(self._generate_pdf_bytes, html_string)
+
+                pdf_bytes = await asyncio.to_thread(
+                    self._generate_pdf_bytes, html_string
+                )
 
                 clean_product_name = group_name.split(" (")[0].strip().replace(" ", "_")
-                attachments.append({
-                    "filename": f"AUDIT_{clean_product_name}.pdf",
-                    "content": list(pdf_bytes)
-                })
+                attachments.append(
+                    {
+                        "filename": f"AUDIT_{clean_product_name}.pdf",
+                        "content": list(pdf_bytes),
+                    }
+                )
 
             # 4. Envio do E-mail Consolidado
-            logger.info(f"Enviando e-mail com {len(attachments)} anexos para {user_email}")
-            
+            logger.info(
+                f"Enviando e-mail com {len(attachments)} anexos para {user_email}"
+            )
+
             email_params = {
                 "from": self.settings.email_from,
                 "to": [user_email],
@@ -196,9 +204,77 @@ class ReportService:
             }
 
             response = await asyncio.to_thread(resend.Emails.send, email_params)
-            logger.success(f"Relatórios enviados com sucesso! Resend ID: {response.get('id')}")
+            logger.success(
+                f"Relatórios enviados com sucesso! Resend ID: {response.get('id')}"
+            )
             return True
 
         except Exception as e:
             logger.exception(f"Erro fatal ao gerar relatório para {user_email}: {e}")
             raise e
+
+    async def generate_and_send_dropoff_warning(
+        self, target_emails: list[str], days_limit: int = 3
+    ):
+        """Busca afiliados em risco de churn, gera o PDF em lista corrida e envia por e-mail."""
+
+        # 1. Busca no banco (já vem em ordem alfabética)
+        records = await asyncio.to_thread(
+            self.db.get_affiliates_without_recent_sales, days_limit
+        )
+
+        if not records:
+            logger.info(
+                "Nenhuma queda súbita detectada hoje. E-mail de warning não enviado."
+            )
+            return
+
+        # Calcula os totais para o cabeçalho
+        total_risk_volume = sum(float(row["volume_total_historico"]) for row in records)
+        unique_products = len(set(row["produto"] for row in records))
+
+        # 2. Renderiza o HTML (Passamos a lista plana 'records')
+        context = {
+            "days_limit": days_limit,
+            "total_products": unique_products,
+            "total_affiliates": len(records),
+            "total_risk_volume": total_risk_volume,
+            "records": records,
+        }
+
+        template = self.jinja_env.get_template("affiliates_without_recent_sales.html")
+        html_string = template.render(**context)
+
+        # 3. Gera PDF
+        pdf_bytes = await asyncio.to_thread(self._generate_pdf_bytes, html_string)
+
+        # 4. Envia E-mail
+        email_params = {
+            "from": self.settings.email_from,
+            "to": target_emails,
+            "subject": f"Alerta: {len(records)} afiliados sem vendas há mais de {days_limit} dias",
+            "html": f"""
+            <p>Olá, time de afiliados,</p>
+
+            <p>O relatório <strong>Afiliados sem vendas</strong> está disponível.</p>
+
+            <p>Identificamos <strong>{len(records)} afiliados ativos</strong> que não registraram vendas 
+            há mais de <strong>{days_limit} dias</strong>.</p>
+
+            <p>O relatório completo segue em anexo, organizado em ordem alfabética.</p>
+
+            <br>
+
+            <p>Atenciosamente,<br>
+            <strong>Tiger Offers Team</strong></p>
+            """,
+            "attachments": [
+                {
+                    "filename": f"afiliados_sem_vendas_{days_limit}d_{datetime.now().strftime('%Y_%m_%d')}.pdf",
+                    "content": list(pdf_bytes),
+                }
+            ],
+        }
+
+        await asyncio.to_thread(resend.Emails.send, email_params)
+        logger.success("Drop-off Warning (Lista Corrida) gerado e enviado com sucesso!")

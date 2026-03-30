@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="UTF-8">
+    <title>Affiliate Drop-off Warning</title>
+    <style>
+        /* 1. Page Settings */
+        @page {
+            size: A4 portrait;
+            margin: 2cm;
+            @bottom-right {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 9pt;
+                color: #7f8c8d;
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            }
+        }
+
+        /* 2. Base Typography */
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #2c3e50;
+            line-height: 1.4;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* 3. Report Header */
+        .header {
+            display: flex;
+            align-items: center;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        .logo {
+            max-height: 120px;
+            margin-right: 30px;
+            flex-shrink: 0;
+            object-fit: contain;
+        }
+        .header-titles {
+            flex-grow: 1;
+        }
+        .header-titles h1 {
+            margin: 0;
+            color: #DA610F;
+            font-size: 22px;
+            text-transform: uppercase;
+            line-height: 1.2;
+        }
+        .header-titles p {
+            margin: 5px 0 0 0;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+
+        /* 4. Summary Boxes (Ajustado para 50% cada) */
+        .summary {
+            display: table;
+            width: 100%;
+            margin-bottom: 22px;
+            border-collapse: collapse;
+        }
+        .summary-box {
+            display: table-cell;
+            width: 50%;
+            text-align: center;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border: 1px solid #ecf0f1;
+        }
+        .summary-box h3 {
+            margin: 0;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #95a5a6;
+            letter-spacing: 1px;
+        }
+        .summary-box p {
+            margin: 10px 0 0 0;
+            font-size: 20px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        /* 5. Data Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        
+        /* 🔥 A MÁGICA PARA O PDF NÃO CRASHAR/CORTAR LINHAS 🔥 */
+        tr {
+            page-break-inside: avoid;
+        }
+
+        th, td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #ecf0f1;
+            text-align: left;
+            vertical-align: middle;
+        }
+        th {
+            background-color: #34495e;
+            color: #ffffff;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+        }
+        tr:nth-child(even) {
+            background-color: #fafbfc;
+        }
+        
+        /* 6. Utilities */
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        
+        .badge-danger {
+            background-color: #e74c3c;
+            color: white;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 10px;
+            white-space: nowrap;
+        }
+        
+        /* Etiqueta de Network */
+        .badge-network {
+            background-color: #ecf0f1; 
+            color: #2c3e50; 
+            padding: 3px 6px; 
+            border-radius: 3px; 
+            font-weight: bold; 
+            font-size: 9px; 
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <img src="assets/tigeroffers.png" alt="Tiger Offers Logo" class="logo">
+        <div class="header-titles">
+            <h1>Relatório de Afiliados</h1>
+            <p>Afiliados ativos sem vendas há mais de <strong>{{ days_limit }} dias</strong></p>
+        </div>
+    </div>
+
+    <div class="summary">
+        <div class="summary-box">
+            <h3>Afiliados</h3>
+            <p>{{ total_affiliates }}</p>
+        </div>
+        <div class="summary-box" style="background-color: #fdf2f2; border-color: #f5c6cb;">
+            <h3 style="color: #c0392b;">Volume Histórico ($)</h3>
+            <p style="color: #c0392b;">$ {{ "{:,.2f}".format(total_risk_volume) }}</p>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 29%;">Afiliado (ID)</th>
+                <th style="width: 12%;" class="text-center">Plataforma</th>
+                <th style="width: 20%;" class="text-center">Último Produto Vendido</th>
+                <th style="width: 11%;" class="text-center">Última Venda</th>
+                <th style="width: 12%;" class="text-center">Dias sem Vendas</th>
+                <th style="width: 16%;" class="text-center">Volume Histórico ($)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for aff in records %}
+            <tr>
+                <td>
+                    <strong>{{ aff.afiliado }}</strong> 
+                    <span style="font-size: 10px; color: #7f8c8d; white-space: nowrap;">({{ aff.id_afiliado }})</span>
+                </td>
+                
+                <td class="text-center">
+                    <span class="badge-network">{{ aff.network_name }}</span>
+                </td>
+
+                <td>{{ aff.produto }}</td>
+                <td class="text-center">{{ aff.data_ultima_venda }}</td>
+                <td class="text-center">
+                    <span class="badge-danger">{{ aff.dias_sem_venda }} dias</span>
+                </td>
+                <td class="text-center">$ {{ "{:,.2f}".format(aff.volume_total_historico) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</body>
+</html>

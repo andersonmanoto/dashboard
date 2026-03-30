@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # Resend (Email)
     resend_api_key: str = ""
     email_from: str = "reports@dash.tigeroffers.com"
+    report_target_emails: str = "andersonmano@tigeroffers.com"
 
     # Web Scanner
     scanner_secret_token: str
