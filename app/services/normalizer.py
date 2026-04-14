@@ -73,6 +73,7 @@ class PayloadNormalizer:
         e constrói os objetos de detalhes do pedido.
         """
         action_type = ActionType(payload.get("action_type", "sale"))
+        aff_name = self._sanitize_affiliate_name(payload.get("aff_name"))
 
         # Determina campo de data baseado no action_type
         date_field = self._get_buygoods_date_field(action_type, payload)
@@ -134,7 +135,7 @@ class PayloadNormalizer:
                 external_product_id=payload.get("product_id"),
                 external_checkout_code=payload.get("product_codename"),
                 external_affiliate_id=payload.get("aff_id"),
-                external_affiliate_name=payload.get("aff_name"),
+                external_affiliate_name=aff_name,
                 product_name=payload.get("product_name"),
                 sku=payload.get("sku"),
                 funnel_codename=payload.get("funnel_codename"),
@@ -187,6 +188,10 @@ class PayloadNormalizer:
         Realiza a tradução de status (ex: 'payment' -> 'neworder') e prepara
         os identificadores de produto para o processador.
         """
+
+        aff_name = self._sanitize_affiliate_name(payload.get("affiliate_name"))
+
+
         # 1. Parse de Data
         event_date, event_time = parse_date(
             payload.get("datetime_full", ""), NetworkType.DIGISTORE24
@@ -264,7 +269,7 @@ class PayloadNormalizer:
                 external_product_id=product_id,
                 external_checkout_code=product_id,
                 external_affiliate_id=payload.get("affiliate_id"),
-                external_affiliate_name=payload.get("affiliate_name"),
+                external_affiliate_name=aff_name,
                 product_name=payload.get("product_name"),
                 billing_type=payload.get("billing_type"),
                 merchant_id=payload.get("merchant_id"),
@@ -272,3 +277,20 @@ class PayloadNormalizer:
             shipping_details=ShippingDetails(country=payload.get("country")),
             payload=payload,
         )
+
+    def _sanitize_affiliate_name(self, raw_name: str | None) -> str | None:
+        """
+        Padroniza nomes de afiliados baseados em regras de negócio internas.
+        """
+        if not raw_name:
+            return raw_name
+            
+        clean_name = raw_name.strip()
+        
+        # Dicionário de conversão (De -> Para)
+        name_mapping = {
+            "Gestor One": "Aff TigerOffers",
+            # "Outro Nome Errado": "Nome Certo",
+        }
+        
+        return name_mapping.get(clean_name, clean_name)
