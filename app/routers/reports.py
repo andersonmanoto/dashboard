@@ -99,7 +99,7 @@ async def request_dropoff_warning_report(
 
         return {
             "status": "queued",
-            "message": f"Seu relatório de Drop-off está sendo gerado para os últimos {payload.days_limit} dias.",
+            "message": "Seu relatório de Drop-off está sendo gerado.",
             "job_id": job.job_id,
         }
 
