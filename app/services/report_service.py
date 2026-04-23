@@ -259,7 +259,7 @@ class ReportService:
             <p>O relatório <strong>Afiliados sem vendas</strong> está disponível.</p>
 
             <p>Identificamos <strong>{len(records)} afiliados ativos</strong> que não registraram vendas 
-            há mais de <strong>{days_limit} dias</strong>.</p>
+             <strong>entre 4 e 7 dias</strong>.</p>
 
             <p>O relatório completo segue em anexo, organizado em ordem alfabética.</p>
 
