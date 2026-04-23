@@ -252,7 +252,7 @@ class ReportService:
         email_params = {
             "from": self.settings.email_from,
             "to": target_emails,
-            "subject": f"Alerta: {len(records)} afiliados sem vendas há mais de {days_limit} dias",
+            "subject": f"Alerta: {len(records)} afiliados sem vendas entre 4 e 7 dias",
             "html": f"""
             <p>Olá, time de afiliados,</p>
 
