@@ -499,3 +499,21 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao buscar afiliados sem vendas recentes: {e}")
             return []
+
+    def get_chargebacks_last_30_days(self) -> list[dict]:
+        """Busca afiliados com chargebacks nos últimos 30 dias."""
+        try:
+            response = self.client.rpc("get_affiliate_chargebacks_30_days").execute()
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar chargebacks dos últimos 30 dias: {e}")
+            return []
+
+    def get_negative_net_revenue_last_30_days(self) -> list[dict]:
+        """Busca afiliados com Net Revenue negativo nos últimos 30 dias."""
+        try:
+            response = self.client.rpc("get_negative_net_revenue_30_days").execute()
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar Net Revenue negativo: {e}")
+            return []

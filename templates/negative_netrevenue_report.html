@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="UTF-8">
+    <title>Negative Net Revenue Report</title>
+    <style>
+        @page { size: A4 portrait; margin: 2cm; @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #7f8c8d; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; } }
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #2c3e50; line-height: 1.4; margin: 0; padding: 0; }
+        .header { display: flex; align-items: center; border-bottom: 2px solid #ecf0f1; padding-bottom: 20px; margin-bottom: 30px; }
+        .logo { max-height: 120px; margin-right: 30px; flex-shrink: 0; object-fit: contain; }
+        .header-titles { flex-grow: 1; }
+        .header-titles h1 { margin: 0; color: #c0392b; font-size: 22px; text-transform: uppercase; line-height: 1.2; }
+        .header-titles p { margin: 5px 0 0 0; color: #7f8c8d; font-size: 14px; }
+        .summary { display: table; width: 100%; margin-bottom: 22px; }
+        .summary-box { display: table-cell; width: 50%; text-align: center; padding: 15px; background-color: #f8f9fa; border: 1px solid #ecf0f1; }
+        .summary-box h3 { margin: 0; font-size: 11px; text-transform: uppercase; color: #95a5a6; letter-spacing: 1px; }
+        .summary-box p { margin: 10px 0 0 0; font-size: 22px; font-weight: bold; color: #2c3e50; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; table-layout: fixed; }
+        col.col-affiliate { width: 40%; }
+        col.col-product    { width: 35%; }
+        col.col-revenue    { width: 25%; }
+        tr { page-break-inside: avoid; }
+        th, td { padding: 10px 8px; border-bottom: 1px solid #ecf0f1; text-align: left; overflow: hidden; }
+        th { background-color: #34495e; color: #ffffff; text-transform: uppercase; font-size: 10px; }
+        tr:nth-child(even) { background-color: #fafbfc; }
+        .text-right { text-align: right; white-space: nowrap; }
+        .aff-id { font-size: 9px; color: #7f8c8d; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="assets/tigeroffers.png" alt="Tiger Offers Logo" class="logo">
+        <div class="header-titles">
+            <h1>Negative Net Revenue (Loss)</h1>
+            <p>Período analisado: <strong>Últimos 30 Dias</strong></p>
+        </div>
+    </div>
+
+    <div class="summary">
+        <div class="summary-box">
+            <h3>Afiliados</h3>
+            <p>{{ total_affiliates }}</p>
+        </div>
+        <div class="summary-box" style="background-color: #fdf2f2; border: 1px solid #f5c6cb;">
+            <h3 style="color: #c0392b;">Impacto Financeiro</h3>
+            <p style="color: #c0392b;">$ {{ "{:,.2f}".format(total_loss) }}</p>
+        </div>
+    </div>
+
+    <table>
+        <colgroup>
+            <col class="col-affiliate">
+            <col class="col-product">
+            <col class="col-revenue">
+        </colgroup>
+        <thead>
+            <tr>
+                <th>Affiliate Name</th>
+                <th>Product</th>
+                <th class="text-right">Net Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tx in records %}
+            <tr>
+                <td><strong>{{ tx.affiliate_name }}</strong> <span class="aff-id">({{ tx.affiliate_id }})</span></td>
+                <td>{{ tx.product_name }}</td>
+                <td class="text-right" style="color: #c0392b; font-weight: bold;">$ {{ "{:,.2f}".format(tx.net_revenue) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

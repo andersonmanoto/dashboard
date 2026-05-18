@@ -278,3 +278,124 @@ class ReportService:
 
         await asyncio.to_thread(resend.Emails.send, email_params)
         logger.success("Drop-off Warning (Lista Corrida) gerado e enviado com sucesso!")
+
+    async def generate_and_send_chargeback_report(self, target_emails: list[str]):
+        """Gera e envia o relatório de chargebacks por afiliado (30 dias)."""
+
+        # 1. Busca os dados no banco
+        records = await asyncio.to_thread(self.db.get_chargebacks_last_30_days)
+
+        if not records:
+            logger.info("Nenhum chargeback nos últimos 30 dias! E-mail não enviado.")
+            return
+
+        # 2. Calcula os totais para o cabeçalho
+        total_loss = sum(float(row["total_amount_lost"]) for row in records)
+
+        # 3. Renderiza o HTML
+        context = {
+            "total_affiliates": len(records),
+            "total_loss": total_loss,
+            "records": records,
+        }
+
+        template = self.jinja_env.get_template("chargeback_report.html")
+        html_string = template.render(**context)
+
+        # 4. Gera PDF
+        pdf_bytes = await asyncio.to_thread(self._generate_pdf_bytes, html_string)
+
+        # 5. Envia E-mail via Resend
+        email_params = {
+            "from": self.settings.email_from,
+            "to": target_emails,
+            "subject": "Alerta Financeiro: Relatório de Chargebacks (Últimos 30 Dias)",
+            "html": f""" <p>Olá,</p> <p>O relatório de <strong>Chargebacks por Afiliado 
+            — Últimos 30 Dias</strong> foi atualizado e encontra-se disponível para análise.
+            </p> <p>No período analisado, foi identificado um impacto financeiro acumulado de 
+            <strong>${total_loss:,.2f}</strong>, desconsiderando operações internas relacionadas à HelpGrid e Afiliado 0 (Tiger Offers).
+            </p> <p>O relatório detalhado, contendo a distribuição por afiliado e produto, segue em anexo, 
+            organizado do maior para o menor impacto financeiro.</p> <br> <p>Atenciosamente,
+            <br> <strong>Tiger Offers Team</strong></p> """,
+            "attachments": [
+                {
+                    "filename": f"chargebacks_30_dias_{datetime.now().strftime('%Y_%m_%d')}.pdf",
+                    "content": list(pdf_bytes),
+                }
+            ],
+        }
+
+        await asyncio.to_thread(resend.Emails.send, email_params)
+        logger.success("Relatório de Chargebacks gerado e enviado com sucesso!")
+
+
+    async def generate_and_send_netrevenue_report(self, target_emails: list[str]):
+        """Gera e envia o relatório de Net Revenue Negativo."""
+        records = await asyncio.to_thread(self.db.get_negative_net_revenue_last_30_days)
+
+        if not records:
+            logger.info("Nenhum afiliado com Net Revenue negativo. Relatório ignorado.")
+            return
+
+        # Soma os prejuízos (os números vêm negativos do banco, então sum() já dá o total negativo)
+        total_loss = sum(float(row["net_revenue"]) for row in records)
+
+        context = {
+            "total_affiliates": len(records),
+            "total_loss": total_loss,
+            "records": records,
+        }
+
+        template = self.jinja_env.get_template("negative_netrevenue_report.html")
+        html_string = template.render(**context)
+
+        pdf_bytes = await asyncio.to_thread(self._generate_pdf_bytes, html_string)
+
+        email_params = {
+            "from": self.settings.email_from,
+            "to": target_emails,
+            "subject": (
+                "Alerta Financeiro: "
+                "Net Revenue Negativo (Últimos 30 Dias)"
+            ),
+            "html": f"""
+            <p>Olá,</p>
+
+            <p>
+                O relatório consolidado de
+                <strong>Net Revenue Negativo</strong>
+                referente aos últimos 30 dias já está disponível.
+            </p>
+
+            <p>
+                Durante o período analisado, foi identificado um impacto financeiro
+                acumulado de
+                <strong>${total_loss:,.2f}</strong>
+                associado a afiliados com resultado líquido negativo.
+            </p>
+
+            <p>
+                O relatório detalhado segue em anexo, contendo a consolidação por
+                afiliado e produto.
+            </p>
+
+            <br>
+
+            <p>
+                Atenciosamente,<br>
+                <strong>Tiger Offers Team</strong>
+            </p>
+            """,
+            "attachments": [
+                {
+                    "filename": (
+                        f"net_revenue_loss_"
+                        f"{datetime.now().strftime('%Y_%m_%d')}.pdf"
+                    ),
+                    "content": list(pdf_bytes),
+                }
+            ],
+        }
+
+        await asyncio.to_thread(resend.Emails.send, email_params)
+        logger.success("Relatório de Net Revenue gerado e enviado com sucesso!")

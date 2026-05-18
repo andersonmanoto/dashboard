@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     email_from: str = "reports@dash.tigeroffers.com"
     report_target_emails: str = "andersonmano@tigeroffers.com"
+    chargeback_target_emails: str = "andersonmano@tigeroffers.com"
+    netrevenue_target_emails: str = "andersonmano@tigeroffers.com"
 
     # Web Scanner
     scanner_secret_token: str

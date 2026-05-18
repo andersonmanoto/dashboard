@@ -191,7 +191,6 @@ class PayloadNormalizer:
 
         aff_name = self._sanitize_affiliate_name(payload.get("affiliate_name"))
 
-
         # 1. Parse de Data
         event_date, event_time = parse_date(
             payload.get("datetime_full", ""), NetworkType.DIGISTORE24
@@ -284,13 +283,13 @@ class PayloadNormalizer:
         """
         if not raw_name:
             return raw_name
-            
+
         clean_name = raw_name.strip()
-        
+
         # Dicionário de conversão (De -> Para)
         name_mapping = {
             "Gestor One": "Aff TigerOffers",
             # "Outro Nome Errado": "Nome Certo",
         }
-        
+
         return name_mapping.get(clean_name, clean_name)
