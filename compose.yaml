@@ -15,6 +15,9 @@ services:
     depends_on:
       - redis
     stop_grace_period: 20s
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
 
   worker:
     build: .
@@ -62,7 +65,7 @@ services:
     volumes:
       - ${REDIS_VOLUME:-redis_data}:/data:Z
     stop_grace_period: 40s
-
+      
 volumes:
   redis_data:
 
