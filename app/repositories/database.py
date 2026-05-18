@@ -12,7 +12,7 @@ from models.schemas import (
     NormalizedEvent,
     SalesStatus,
 )
-from supabase import Client, create_client
+from supabase import create_client, ClientOptions
 
 
 class DatabaseRepository:
@@ -33,8 +33,12 @@ class DatabaseRepository:
         if not settings.supabase_url or not settings.supabase_key:
             raise ValueError("Credenciais do Supabase não configuradas")
 
-        self.client: Client = create_client(
-            settings.supabase_url, settings.supabase_key
+        opts = ClientOptions(postgrest_client_timeout=30)
+
+        self.client = create_client(
+            settings.supabase_url, 
+            settings.supabase_key,
+            options=opts
         )
         # logger.info("Conexão com Supabase estabelecida")
 
