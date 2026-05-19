@@ -14,10 +14,8 @@ from app.services.slack_service import SlackService
 # --- DEPENDÊNCIAS DE SERVIÇOS ---
 
 
-def get_database_repository(
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> DatabaseRepository:
-    return DatabaseRepository(settings)
+def get_database_repository(request: Request) -> DatabaseRepository:
+    return request.app.state.db
 
 
 def get_slack_service(

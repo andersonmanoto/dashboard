@@ -15,7 +15,6 @@ async def lifespan(app: FastAPI):
     logger.info("Webhook Dashboard iniciado")
     settings = get_settings()
 
-    # 1. Inicializa Conexões
     try:
         # Redis
         app.state.redis_pool = await create_pool(
@@ -23,9 +22,9 @@ async def lifespan(app: FastAPI):
         )
         logger.info(f"Redis conectado em {settings.redis_host}")
 
-        # Cache de Networks (DB -> Memória)
-        repo = DatabaseRepository(settings)
-        repo.load_networks_cache()
+        # DB singleton — pool de conexões reusado entre requests
+        app.state.db = DatabaseRepository(settings)
+        app.state.db.load_networks_cache()
 
     except Exception as e:
         logger.critical(f"Falha na inicialização: {e}")
