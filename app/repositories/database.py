@@ -34,21 +34,20 @@ class DatabaseRepository:
         if not settings.supabase_url or not settings.supabase_key:
             raise ValueError("Credenciais do Supabase não configuradas")
 
-        http_client = httpx.Client(
+        self.client = create_client(
+            settings.supabase_url,
+            settings.supabase_key,
+            options=ClientOptions(postgrest_client_timeout=30),
+        )
+
+        # Força timeout e pool no postgrest diretamente
+        self.client.postgrest.session = httpx.Client(
             timeout=httpx.Timeout(30.0, connect=10.0),
             limits=httpx.Limits(
                 max_connections=20,
                 max_keepalive_connections=10,
             ),
-        )
-
-        self.client = create_client(
-            settings.supabase_url,
-            settings.supabase_key,
-            options=ClientOptions(
-                postgrest_client_timeout=30,
-                httpx_client=http_client,
-            ),
+            headers=self.client.postgrest.session.headers,  # preserva auth headers
         )
 
     def load_networks_cache(self) -> None:
