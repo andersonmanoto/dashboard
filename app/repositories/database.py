@@ -1,4 +1,5 @@
 from functools import lru_cache
+import time
 import httpx
 from typing import Dict, Optional, Union
 from uuid import UUID
@@ -416,20 +417,57 @@ class DatabaseRepository:
             logger.error(f"Erro ao buscar missing_codenames: {e}")
             return []
 
-    def create_inbox_entry(self, network: str, payload: dict) -> str:
-        """
-        Registra um novo webhook cru na tabela Inbox.
-        """
-        try:
-            data = {"network": network, "payload": payload, "status": "pending"}
-            response = self.client.table("webhook_inbox").insert(data).execute()
+    # def create_inbox_entry(self, network: str, payload: dict) -> str:
+    #     """
+    #     Registra um novo webhook cru na tabela Inbox.
+    #     """
+    #     try:
+    #         data = {"network": network, "payload": payload, "status": "pending"}
+    #         response = self.client.table("webhook_inbox").insert(data).execute()
 
-            if response.data:
-                return response.data[0]["id"]
-            return None
-        except Exception as e:
-            logger.error(f"Erro CRÍTICO ao salvar na inbox: {e}")
-            raise e
+    #         if response.data:
+    #             return response.data[0]["id"]
+    #         return None
+    #     except Exception as e:
+    #         logger.error(f"Erro CRÍTICO ao salvar na inbox: {e}")
+    #         raise e
+    def create_inbox_entry(self, network: str, payload: dict) -> str:
+        data = {
+            "network": network,
+            "payload": payload,
+            "status": "pending"
+        }
+
+        for attempt in range(3):
+            try:
+                response = (
+                    self.client
+                    .table("webhook_inbox")
+                    .insert(data)
+                    .execute()
+                )
+
+                if response.data:
+                    return response.data[0]["id"]
+
+                return None
+
+            except httpx.ConnectTimeout:
+                wait = 2 ** attempt
+
+                logger.warning(
+                    f"Supabase ConnectTimeout "
+                    f"(attempt={attempt + 1}) "
+                    f"retrying in {wait}s"
+                )
+
+                time.sleep(wait)
+
+            except Exception:
+                logger.exception("Erro inesperado ao salvar inbox")
+                raise
+
+        raise Exception("Supabase indisponível após retries")
 
     def fetch_pending_webhooks(self, limit: int = 10) -> list[dict]:
         try:
