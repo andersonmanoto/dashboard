@@ -4,57 +4,76 @@ services:
     image: localhost/dashhook/api:2.3.0
     container_name: dashhook-api
     restart: unless-stopped
+
     env_file:
       - .env
+
     environment:
       - PYTHONPATH=/app:/app/app
       - REDIS_HOST=redis
+
     ports:
       - "8000:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 1
+
     depends_on:
       - redis
+
     stop_grace_period: 20s
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
 
   worker:
     build: .
     image: localhost/dashhook/worker:2.3.0
     container_name: dashhook-worker
     restart: unless-stopped
+
     env_file:
       - .env
+
     environment:
       - PYTHONPATH=/app:/app/app
       - REDIS_HOST=redis
+
     command: arq app.worker.WorkerSettings
+
     depends_on:
       - redis
+
     stop_grace_period: 30s
-  
+
   report_worker:
     build: .
     image: localhost/dashhook/api:2.3.0
     container_name: dashhook-report-worker
     restart: unless-stopped
+
     env_file:
       - .env
+
     environment:
       - PYTHONPATH=/app:/app/app
       - REDIS_HOST=redis
+
     command: arq app.report_worker.ReportWorkerSettings
+
     depends_on:
       - redis
+
     stop_grace_period: 30s
 
   redis:
     image: docker.io/library/redis:7-alpine
     container_name: dashhook-redis
     restart: unless-stopped
+
     ports:
       - "6379:6379"
+
     command:
       [
         "redis-server",
@@ -62,14 +81,11 @@ services:
         "--loglevel", "warning",
         "--shutdown-timeout", "30"
       ]
+
     volumes:
       - ${REDIS_VOLUME:-redis_data}:/data:Z
+
     stop_grace_period: 40s
-      
+
 volumes:
   redis_data:
-
-networks:
-  default:
-    name: tiger_network
-    driver: bridge

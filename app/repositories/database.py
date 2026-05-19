@@ -42,13 +42,18 @@ class DatabaseRepository:
         )
 
         # Força timeout e pool no postgrest diretamente
-        self.client.postgrest.session = httpx.Client(
-            timeout=httpx.Timeout(30.0, connect=10.0),
-            limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
-            ),
-            headers=self.client.postgrest.session.headers,  # preserva auth headers
+        # self.client.postgrest.session = httpx.Client(
+        #     timeout=httpx.Timeout(30.0, connect=10.0),
+        #     limits=httpx.Limits(
+        #         max_connections=20,
+        #         max_keepalive_connections=10,
+        #     ),
+        #     headers=self.client.postgrest.session.headers,  # preserva auth headers
+        # )
+        self.client = create_client(
+            settings.supabase_url,
+            settings.supabase_key,
+            options=ClientOptions(postgrest_client_timeout=30),
         )
 
     def load_networks_cache(self) -> None:
