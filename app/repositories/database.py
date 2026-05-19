@@ -1,4 +1,5 @@
 from functools import lru_cache
+import httpx
 from typing import Dict, Optional, Union
 from uuid import UUID
 
@@ -33,14 +34,22 @@ class DatabaseRepository:
         if not settings.supabase_url or not settings.supabase_key:
             raise ValueError("Credenciais do Supabase não configuradas")
 
-        opts = ClientOptions(postgrest_client_timeout=30)
+        http_client = httpx.Client(
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+            ),
+        )
 
         self.client = create_client(
-            settings.supabase_url, 
+            settings.supabase_url,
             settings.supabase_key,
-            options=opts
+            options=ClientOptions(
+                postgrest_client_timeout=30,
+                httpx_client=http_client,
+            ),
         )
-        # logger.info("Conexão com Supabase estabelecida")
 
     def load_networks_cache(self) -> None:
         """
