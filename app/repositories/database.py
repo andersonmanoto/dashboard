@@ -25,13 +25,7 @@ class DatabaseRepository:
     e o ciclo de vida dos eventos na 'Inbox'.
     """
 
-    # Cache: "BuyGoods" -> "uuid-do-banco"
-    _networks_cache: Dict[str, str] = {}
-
     def __init__(self, settings: Settings):
-        """
-        Inicializa a conexão com o Supabase.
-        """
         if not settings.supabase_url or not settings.supabase_key:
             raise ValueError("Credenciais do Supabase não configuradas")
 
@@ -41,20 +35,20 @@ class DatabaseRepository:
             options=ClientOptions(postgrest_client_timeout=30),
         )
 
-        # Força timeout e pool no postgrest diretamente
-        # self.client.postgrest.session = httpx.Client(
-        #     timeout=httpx.Timeout(30.0, connect=10.0),
-        #     limits=httpx.Limits(
-        #         max_connections=20,
-        #         max_keepalive_connections=10,
-        #     ),
-        #     headers=self.client.postgrest.session.headers,  # preserva auth headers
-        # )
-        self.client = create_client(
-            settings.supabase_url,
-            settings.supabase_key,
-            options=ClientOptions(postgrest_client_timeout=30),
+        # Substitui session com pool configurado e keepalive curto
+        self.client.postgrest.session = httpx.Client(
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=20.0,  # descarta idle antes do Supabase fechar (~30s)
+            ),
+            headers=self.client.postgrest.session.headers,
         )
+
+        # Caches de instância
+        self._networks_cache: Dict[str, str] = {}
+        self._checkout_cache: Dict[str, CheckoutInfo] = {}
 
     def load_networks_cache(self) -> None:
         """
@@ -62,19 +56,15 @@ class DatabaseRepository:
         Chamado pelo lifespan no main.py.
         """
         try:
-            # Busca ID e Nome de todas as redes
             response = self.client.table("networks").select("id, name").execute()
 
             if response.data:
-                # Limpa e popula o cache
-                DatabaseRepository._networks_cache.clear()
+                self._networks_cache.clear()
                 for row in response.data:
-                    name = row["name"]
-                    uid = row["id"]
-                    DatabaseRepository._networks_cache[name] = uid
+                    self._networks_cache[row["name"]] = row["id"]
 
                 logger.info(
-                    f"Cache de Networks carregado: {len(DatabaseRepository._networks_cache)} redes."
+                    f"Cache de Networks carregado: {len(self._networks_cache)} redes."
                 )
         except Exception as e:
             logger.error(f"Erro ao carregar cache de networks: {e}")
@@ -83,22 +73,18 @@ class DatabaseRepository:
         """
         Busca o UUID da rede. Se não existir no cache/banco, CRIA automaticamente.
         """
-        # 1. Normaliza input (Enum -> str)
         name = (
             network_name.value
             if isinstance(network_name, NetworkType)
             else str(network_name)
         )
 
-        # 2. Tenta Cache (Rápido - O(1))
-        if name in DatabaseRepository._networks_cache:
-            return DatabaseRepository._networks_cache[name]
+        if name in self._networks_cache:
+            return self._networks_cache[name]
 
-        # 3. Se não tá no cache, tenta criar (Auto-provisioning)
         try:
             logger.warning(f"Rede nova detectada: '{name}'. Criando registro...")
 
-            # Tenta inserir (Upsert para garantir unicidade)
             response = (
                 self.client.table("networks")
                 .upsert({"name": name}, on_conflict="name")
@@ -107,10 +93,10 @@ class DatabaseRepository:
 
             if response.data:
                 new_id = response.data[0]["id"]
-                DatabaseRepository._networks_cache[name] = new_id
+                self._networks_cache[name] = new_id
                 return new_id
 
-            # Fallback: Se upsert não retornou dados, busca o ID
+            # Fallback: busca o ID se upsert não retornou dados
             response = (
                 self.client.table("networks")
                 .select("id")
@@ -121,7 +107,7 @@ class DatabaseRepository:
 
             if response.data:
                 existing_id = response.data["id"]
-                DatabaseRepository._networks_cache[name] = existing_id
+                self._networks_cache[name] = existing_id
                 return existing_id
 
             return None
@@ -191,7 +177,6 @@ class DatabaseRepository:
         Cadastra um novo afiliado no banco de dados.
         """
         try:
-            # Resolve o nome da rede para UUID usando o cache
             net_id_str = self.get_network_id(affiliate.network)
             if net_id_str:
                 affiliate.network_id = UUID(net_id_str)
@@ -225,9 +210,6 @@ class DatabaseRepository:
         """
         Busca informações de checkout baseadas no código do produto (codename).
         """
-        if not hasattr(self, "_checkout_cache"):
-            self._checkout_cache = {}
-
         cache_key = f"{code}:{account_id}"
 
         if cache_key in self._checkout_cache:
@@ -249,7 +231,6 @@ class DatabaseRepository:
                 return None
 
             row = response.data[0]
-
             result = CheckoutInfo(
                 checkout_id=row["id"],
                 product_id=row["product_id"],
@@ -337,20 +318,15 @@ class DatabaseRepository:
     ) -> Optional[dict]:
         """
         Persiste o Evento e o Status Financeiro atomicamente.
-        AGORA: Resolve o nome da rede para UUID antes de enviar ao banco.
         """
         try:
-            # 1. Resolve Network ID para o Evento
-            # Busca no cache ou cria se não existir
             net_id_str = self.get_network_id(event.network)
             if net_id_str:
                 event.network_id = UUID(net_id_str)
 
-            # 2. Resolve Network ID para o Status (se houver)
             if status:
                 status.network_id = event.network_id
 
-            # Serializa para JSON
             event_json = event.model_dump(mode="json", exclude_none=True)
 
             status_json = None
@@ -369,12 +345,10 @@ class DatabaseRepository:
                 event_id = (
                     saved_data.get("id") if isinstance(saved_data, dict) else "N/A"
                 )
-
                 logger.info(
                     f"Transação OK | Order: {event.order_id} |"
                     f"NetID: {event.network_id} | DB_ID: {event_id}"
                 )
-
                 return saved_data
 
             return None
@@ -422,50 +396,28 @@ class DatabaseRepository:
             logger.error(f"Erro ao buscar missing_codenames: {e}")
             return []
 
-    # def create_inbox_entry(self, network: str, payload: dict) -> str:
-    #     """
-    #     Registra um novo webhook cru na tabela Inbox.
-    #     """
-    #     try:
-    #         data = {"network": network, "payload": payload, "status": "pending"}
-    #         response = self.client.table("webhook_inbox").insert(data).execute()
-
-    #         if response.data:
-    #             return response.data[0]["id"]
-    #         return None
-    #     except Exception as e:
-    #         logger.error(f"Erro CRÍTICO ao salvar na inbox: {e}")
-    #         raise e
     def create_inbox_entry(self, network: str, payload: dict) -> str:
-        data = {
-            "network": network,
-            "payload": payload,
-            "status": "pending"
-        }
+        """
+        Registra um novo webhook cru na tabela Inbox.
+        Retry automático em erros transientes de conexão.
+        """
+        data = {"network": network, "payload": payload, "status": "pending"}
 
         for attempt in range(3):
             try:
                 response = (
-                    self.client
-                    .table("webhook_inbox")
-                    .insert(data)
-                    .execute()
+                    self.client.table("webhook_inbox").insert(data).execute()
                 )
-
                 if response.data:
                     return response.data[0]["id"]
-
                 return None
 
-            except httpx.ConnectTimeout:
+            except (httpx.ConnectTimeout, httpx.RemoteProtocolError) as e:
                 wait = 2 ** attempt
-
                 logger.warning(
-                    f"Supabase ConnectTimeout "
-                    f"(attempt={attempt + 1}) "
+                    f"Supabase transient error (attempt={attempt + 1}): {e}, "
                     f"retrying in {wait}s"
                 )
-
                 time.sleep(wait)
 
             except Exception:
@@ -518,8 +470,6 @@ class DatabaseRepository:
             product_id = filters.get("product_id")
             network_id = filters.get("network_id")
 
-            # BUSCA: Tudo de events + joins com affiliates, products e networks
-            # Nota: Estamos assumindo que 'events' tem uma FK para 'networks'
             query = self.client.table("events").select(
                 "*, affiliates(aff_name, aff_id), products(name), networks(tax)"
             )
