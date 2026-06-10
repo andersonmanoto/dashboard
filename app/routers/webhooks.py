@@ -9,9 +9,11 @@ from app.dependencies import (
     get_database_repository,
     verify_secret_token,
     extract_payload,
+    get_event_processor
 )
 from app.repositories.database import DatabaseRepository
 from app.models.enums import NetworkType
+from app.services.event_processor import EventProcessor
 
 router = APIRouter(tags=["Webhooks"])
 
@@ -83,3 +85,41 @@ async def webhook_digistore24(
     except Exception as e:
         logger.exception(f"Erro DigiStore: {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@router.post("/buygoods/abandon/{secret_token}")
+async def buygoods_abandon_webhook(
+    secret_token: str,
+    request: Request,
+    processor: Annotated[EventProcessor, Depends(get_event_processor)],
+    auth: None = Depends(verify_secret_token),
+):
+    ###########################################################################
+    raw_body = await request.body()
+    logger.debug(f"Raw bytes: {raw_body}")
+    logger.debug(f"Content-Type: {request.headers.get('content-type')}")
+    ##########################################################################
+
+    try:
+        raw_body = await request.body()
+        decoded = raw_body.decode("iso-8859-1")
+        
+        # Parse manual do form urlencoded respeitando o charset correto
+        from urllib.parse import parse_qs
+        parsed = parse_qs(decoded, keep_blank_values=True)
+        payload = {k: v[0] for k, v in parsed.items()}
+
+        if not payload:
+            raise HTTPException(status_code=400, detail="Empty payload")
+
+        success = await processor.process_buygoods_abandon_cart(payload)
+        if not success:
+             raise HTTPException(status_code=500, detail="Error processing abandoned cart")
+
+        return {"status": "success"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro no webhook de abandon cart: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")

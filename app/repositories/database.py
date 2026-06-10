@@ -522,3 +522,17 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao buscar Net Revenue negativo: {e}")
             return []
+        
+    def insert_abandoned_cart(self, cart_data: dict) -> Optional[dict]:
+        """
+        Insere um registro de carrinho abandonado na tabela abandoned_carts.
+        """
+        try:
+            response = self.client.table("abandoned_carts").insert(cart_data).execute()
+            if response.data:
+                logger.info(f"Carrinho abandonado salvo | Email: {cart_data.get('customer_email')}")
+                return response.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao inserir carrinho abandonado: {e}")
+            return None

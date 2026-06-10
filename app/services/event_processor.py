@@ -318,3 +318,40 @@ class EventProcessor:
             return abs(amount) if amount < 0 else amount
 
         return event.sale_total
+
+    async def process_buygoods_abandon_cart(self, payload: dict) -> bool:
+        """
+        Processa o payload de carrinho abandonado da BuyGoods.
+        """
+        try:
+            action_type = payload.get("action_type", "abandon")
+            customer_email = payload.get("emailaddress", "")
+            
+            # Agrupando endereço num JSONB
+            location = {
+                "address": payload.get("address", ""),
+                "city": payload.get("city", ""),
+                "state": payload.get("state", ""),
+                "country": payload.get("country", "")
+            }
+
+            cart_data = {
+                "action_type": action_type,
+                "customer_name": payload.get("name", ""),
+                "customer_email": customer_email,
+                "customer_phone": payload.get("phone", ""),
+                "ipaddress": payload.get("ipaddress", ""),
+                "product_codename": payload.get("product_codename", ""),
+                "location": location,
+                "payload": payload,
+                "is_recovered": False
+            }
+
+            # Usa o repositório instanciado
+            result = self.db.insert_abandoned_cart(cart_data)
+            
+            return bool(result)
+
+        except Exception as e:
+            logger.exception(f"Erro fatal ao processar abandon cart (Email: {payload.get('emailaddress')}): {e}")
+            return False
