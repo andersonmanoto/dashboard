@@ -94,12 +94,6 @@ async def buygoods_abandon_webhook(
     processor: Annotated[EventProcessor, Depends(get_event_processor)],
     auth: None = Depends(verify_secret_token),
 ):
-    ###########################################################################
-    raw_body = await request.body()
-    logger.debug(f"Raw bytes: {raw_body}")
-    logger.debug(f"Content-Type: {request.headers.get('content-type')}")
-    ##########################################################################
-
     try:
         raw_body = await request.body()
         decoded = raw_body.decode("iso-8859-1")
