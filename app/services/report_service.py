@@ -232,6 +232,8 @@ class ReportService:
         # Calcula os totais para o cabeçalho
         total_risk_volume = sum(float(row["volume_total_historico"]) for row in records)
         unique_products = len(set(row["produto"] for row in records))
+        # Soma os reembolsos de todos os afiliados listados
+        total_refund_30d = sum(float(row.get("reembolso_30_dias", 0)) for row in records)
 
         # 2. Renderiza o HTML (Passamos a lista plana 'records')
         context = {
@@ -239,6 +241,7 @@ class ReportService:
             "total_products": unique_products,
             "total_affiliates": len(records),
             "total_risk_volume": total_risk_volume,
+            "total_refund_30d": total_refund_30d,
             "records": records,
         }
 
