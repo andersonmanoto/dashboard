@@ -326,13 +326,13 @@ class EventProcessor:
         try:
             action_type = payload.get("action_type", "abandon")
             customer_email = payload.get("emailaddress", "")
-            
+
             # Agrupando endereço num JSONB
             location = {
                 "address": payload.get("address", ""),
                 "city": payload.get("city", ""),
                 "state": payload.get("state", ""),
-                "country": payload.get("country", "")
+                "country": payload.get("country", ""),
             }
 
             cart_data = {
@@ -344,14 +344,16 @@ class EventProcessor:
                 "product_codename": payload.get("product_codename", ""),
                 "location": location,
                 "payload": payload,
-                "is_recovered": False
+                "is_recovered": False,
             }
 
             # Usa o repositório instanciado
             result = self.db.insert_abandoned_cart(cart_data)
-            
+
             return bool(result)
 
         except Exception as e:
-            logger.exception(f"Erro fatal ao processar abandon cart (Email: {payload.get('emailaddress')}): {e}")
+            logger.exception(
+                f"Erro fatal ao processar abandon cart (Email: {payload.get('emailaddress')}): {e}"
+            )
             return False

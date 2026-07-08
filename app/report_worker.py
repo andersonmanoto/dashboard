@@ -88,6 +88,7 @@ async def task_generate_chargeback_report(ctx, target_emails: list[str]):
         target_emails=target_emails
     )
 
+
 async def cron_chargeback_report(ctx):
     """Executado automaticamente pelo ARQ cron nas Segundas e Quintas"""
     logger.info("Executando Cron Agendado: Affiliate Chargebacks Report (30 Days)")
@@ -95,14 +96,16 @@ async def cron_chargeback_report(ctx):
     settings = get_settings()
 
     target_emails = [
-        email.strip() 
-        for email in settings.chargeback_target_emails.split(",") 
+        email.strip()
+        for email in settings.chargeback_target_emails.split(",")
         if email.strip()
     ]
 
     # Trava de segurança: se esquecer de por no .env, ele avisa e cancela o envio
     if not target_emails:
-        logger.warning("Nenhum e-mail alvo configurado em CHARGEBACK_TARGET_EMAILS. Abortando envio.")
+        logger.warning(
+            "Nenhum e-mail alvo configurado em CHARGEBACK_TARGET_EMAILS. Abortando envio."
+        )
         return
 
     report_service: ReportService = ctx["report_service"]
@@ -112,26 +115,38 @@ async def cron_chargeback_report(ctx):
         target_emails=target_emails
     )
 
+
 async def task_generate_netrevenue_report(ctx, target_emails: list[str]):
     """Tarefa sob demanda disparada pela API para o Net Revenue Report."""
-    logger.info(f"[Report Worker] Pedido manual de Net Revenue Report para: {target_emails}")
+    logger.info(
+        f"[Report Worker] Pedido manual de Net Revenue Report para: {target_emails}"
+    )
     report_service: ReportService = ctx["report_service"]
-    await report_service.generate_and_send_netrevenue_report(target_emails=target_emails)
+    await report_service.generate_and_send_netrevenue_report(
+        target_emails=target_emails
+    )
+
 
 async def cron_netrevenue_report(ctx):
     """Executado automaticamente pelo ARQ cron"""
     logger.info("Executando Cron Agendado: Negative Net Revenue Report")
     settings = get_settings()
-    
+
     target_emails = [
-        email.strip() for email in settings.netrevenue_target_emails.split(",") if email.strip()
+        email.strip()
+        for email in settings.netrevenue_target_emails.split(",")
+        if email.strip()
     ]
     if not target_emails:
-        logger.warning("Nenhum e-mail alvo configurado em NETREVENUE_TARGET_EMAILS. Abortando.")
+        logger.warning(
+            "Nenhum e-mail alvo configurado em NETREVENUE_TARGET_EMAILS. Abortando."
+        )
         return
 
     report_service: ReportService = ctx["report_service"]
-    await report_service.generate_and_send_netrevenue_report(target_emails=target_emails)
+    await report_service.generate_and_send_netrevenue_report(
+        target_emails=target_emails
+    )
 
 
 class ReportWorkerSettings:
@@ -152,19 +167,17 @@ class ReportWorkerSettings:
         task_generate_pdf_report,
         task_generate_dropoff_warning,
         task_generate_chargeback_report,
-        task_generate_netrevenue_report
+        task_generate_netrevenue_report,
     ]
-    
+
     # AGENDAMENTO DO CRON
     cron_jobs = [
         # Drop-off: Dispara TODOS OS DIAS às 08:00 AM BRT (11:00 AM na VPS)
         cron(cron_dropoff_warning, hour=11, minute=0),
-        
         # Chargebacks: Dispara SEGUNDAS (0) e QUINTAS (3) às 08:10 AM BRT (11:10 AM na VPS)
         cron(cron_chargeback_report, weekday={0, 3}, hour=11, minute=10),
-
         # Net Revenue Negativo: Dispara SEGUNDAS (0) e QUINTAS (3) às 08:20 AM BRT (11:20 AM na VPS)
-        cron(cron_netrevenue_report, weekday={0, 3}, hour=11, minute=20)
+        cron(cron_netrevenue_report, weekday={0, 3}, hour=11, minute=20),
     ]
 
     max_jobs = 5

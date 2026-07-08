@@ -64,6 +64,29 @@ class Settings(BaseSettings):
     # Arquivos
     temp_dir: str = tempfile.gettempdir()
 
+    # SlickText & AbstractAPI
+    abstract_api_key: str = ""
+    slicktext_api_key: str = ""
+    slicktext_brand_id: str = ""
+    slicktext_api_url: str = "https://api.slicktext.com/v1"
+
+
+# Dicionário mapeando o nome do produto (em minúsculas) para o ID da lista no SlickText
+SLICKTEXT_PRODUCT_LISTS = {
+    "prostafense": 129612,
+    "audileaf": 129610,
+    "nervolyn": 129608,
+    "breatheasex": 129605,
+}
+
+
+def get_list_id_for_product(product_name: str) -> int | None:
+    """Busca o ID da lista ignorando case sensitive e espaços extras."""
+    if not product_name:
+        return None
+    normalized_name = product_name.strip().lower()
+    return SLICKTEXT_PRODUCT_LISTS.get(normalized_name)
+
 
 @lru_cache
 def get_settings() -> Settings:

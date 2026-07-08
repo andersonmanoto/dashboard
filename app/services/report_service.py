@@ -233,7 +233,9 @@ class ReportService:
         total_risk_volume = sum(float(row["volume_total_historico"]) for row in records)
         unique_products = len(set(row["produto"] for row in records))
         # Soma os reembolsos de todos os afiliados listados
-        total_refund_30d = sum(float(row.get("reembolso_30_dias", 0)) for row in records)
+        total_refund_30d = sum(
+            float(row.get("reembolso_30_dias", 0)) for row in records
+        )
 
         # 2. Renderiza o HTML (Passamos a lista plana 'records')
         context = {
@@ -331,7 +333,6 @@ class ReportService:
         await asyncio.to_thread(resend.Emails.send, email_params)
         logger.success("Relatório de Chargebacks gerado e enviado com sucesso!")
 
-
     async def generate_and_send_netrevenue_report(self, target_emails: list[str]):
         """Gera e envia o relatório de Net Revenue Negativo."""
         records = await asyncio.to_thread(self.db.get_negative_net_revenue_last_30_days)
@@ -357,10 +358,7 @@ class ReportService:
         email_params = {
             "from": self.settings.email_from,
             "to": target_emails,
-            "subject": (
-                "Alerta Financeiro: "
-                "Net Revenue Negativo (Últimos 30 Dias)"
-            ),
+            "subject": ("Alerta Financeiro: Net Revenue Negativo (Últimos 30 Dias)"),
             "html": f"""
             <p>Olá,</p>
 
@@ -392,8 +390,7 @@ class ReportService:
             "attachments": [
                 {
                     "filename": (
-                        f"net_revenue_loss_"
-                        f"{datetime.now().strftime('%Y_%m_%d')}.pdf"
+                        f"net_revenue_loss_{datetime.now().strftime('%Y_%m_%d')}.pdf"
                     ),
                     "content": list(pdf_bytes),
                 }

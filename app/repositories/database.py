@@ -405,15 +405,13 @@ class DatabaseRepository:
 
         for attempt in range(3):
             try:
-                response = (
-                    self.client.table("webhook_inbox").insert(data).execute()
-                )
+                response = self.client.table("webhook_inbox").insert(data).execute()
                 if response.data:
                     return response.data[0]["id"]
                 return None
 
             except (httpx.ConnectTimeout, httpx.RemoteProtocolError) as e:
-                wait = 2 ** attempt
+                wait = 2**attempt
                 logger.warning(
                     f"Supabase transient error (attempt={attempt + 1}): {e}, "
                     f"retrying in {wait}s"
@@ -522,7 +520,7 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao buscar Net Revenue negativo: {e}")
             return []
-        
+
     def insert_abandoned_cart(self, cart_data: dict) -> Optional[dict]:
         """
         Insere um registro de carrinho abandonado na tabela abandoned_carts.
@@ -530,7 +528,9 @@ class DatabaseRepository:
         try:
             response = self.client.table("abandoned_carts").insert(cart_data).execute()
             if response.data:
-                logger.info(f"Carrinho abandonado salvo | Email: {cart_data.get('customer_email')}")
+                logger.info(
+                    f"Carrinho abandonado salvo | Email: {cart_data.get('customer_email')}"
+                )
                 return response.data[0]
             return None
         except Exception as e:

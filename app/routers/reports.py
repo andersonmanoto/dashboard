@@ -30,8 +30,10 @@ class DropoffReportRequest(BaseModel):
 class ChargebackReportRequest(BaseModel):
     emails: list[EmailStr]
 
+
 class NetRevenueReportRequest(BaseModel):
     emails: list[EmailStr]
+
 
 @router.post(
     "/reports/buygoods-fees",
@@ -150,14 +152,17 @@ async def request_chargeback_report(request: Request, payload: ChargebackReportR
     except Exception as e:
         logger.exception(f"Erro ao enfileirar chargeback report: {e}")
         raise HTTPException(status_code=500, detail="Erro interno ao processar pedido.")
-    
+
+
 @router.post(
-    "/reports/affiliates-netrevenue-loss", 
+    "/reports/affiliates-netrevenue-loss",
     summary="Request Negative Net Revenue Report (30 Days)",
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(verify_reports_key)],
 )
-async def request_netrevenue_loss_report(request: Request, payload: NetRevenueReportRequest):
+async def request_netrevenue_loss_report(
+    request: Request, payload: NetRevenueReportRequest
+):
     """Enfileira a geração do relatório de Net Revenue Negativo."""
     logger.info(f"Payload recebido para Net Revenue: {payload.model_dump()}")
     try:
@@ -166,11 +171,15 @@ async def request_netrevenue_loss_report(request: Request, payload: NetRevenueRe
             raise HTTPException(status_code=500, detail="Fila indisponível.")
 
         job = await redis_pool.enqueue_job(
-            "task_generate_netrevenue_report", 
+            "task_generate_netrevenue_report",
             payload.emails,
             _queue_name="reports_queue",
         )
-        return {"status": "queued", "message": "Relatório de Net Revenue na fila.", "job_id": job.job_id}
+        return {
+            "status": "queued",
+            "message": "Relatório de Net Revenue na fila.",
+            "job_id": job.job_id,
+        }
     except Exception as e:
         logger.exception(f"Erro ao enfileirar net revenue report: {e}")
         raise HTTPException(status_code=500, detail="Erro interno ao processar pedido.")

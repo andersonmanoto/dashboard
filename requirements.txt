@@ -17,3 +17,4 @@ weasyprint==68.1
 Jinja2==3.1.6
 resend==2.23.0
 email-validator==2.1.1
+phonenumbers==9.0.34

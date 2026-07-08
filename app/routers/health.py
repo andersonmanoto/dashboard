@@ -8,7 +8,7 @@ router = APIRouter(tags=["Health & Monitoring"])
 @router.get("/health")
 async def health_check(request: Request, response: Response):
     start_time = time.time()
-    
+
     status_data = {
         "status": "healthy",
         "services": {"database": "unknown", "redis": "unknown"},
