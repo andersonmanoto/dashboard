@@ -104,7 +104,9 @@ def _sync_to_slicktext(
 
 
 async def process_slicktext_sync_task(
-    payload: dict, settings: Settings, db_repo: DatabaseRepository
+    payload: dict, 
+    settings: Settings, 
+    db_repo: DatabaseRepository
 ):
     """
     Background task para processar o fluxo do SlickText.
@@ -114,26 +116,30 @@ async def process_slicktext_sync_task(
     product_codename = payload.get("product_codename", "")
     country = payload.get("country", "US")
 
-    # 1. Busca nome real do produto no Supabase (ajuste a chamada ao seu db_repo conforme necessário)
-    # Como não tenho acesso aos métodos internos do seu DatabaseRepository,
-    # estou assumindo que ele expõe o client do Supabase na propriedade `.client` ou similar.
-    # Caso contrário, substitua pela sua função interna que busca o produto.
+    # 1. Busca nome real do produto e a URL no Supabase
     try:
-        res = (
-            db_repo.client.table("checkouts")
-            .select("products(name)")
-            .eq("checkout_code", product_codename)
-            .limit(1)
+        # Alteramos o select para trazer a 'url' também
+        res = db_repo.client.table("checkouts")\
+            .select("url, products(name)")\
+            .eq("checkout_code", product_codename)\
+            .limit(1)\
             .execute()
-        )
-        if not res.data or not res.data[0].get("products"):
-            logger.warning(
-                f"Produto não encontrado para o codename: {product_codename}"
-            )
+            
+        if not res.data:
+            logger.warning(f"Checkout não encontrado para o codename: {product_codename}")
             return
-        product_name = res.data[0]["products"]["name"]
+            
+        checkout_data = res.data[0]
+        checkout_url = checkout_data.get("url", "")
+        
+        if not checkout_data.get("products"):
+            logger.warning(f"Produto não encontrado para o codename: {product_codename}")
+            return
+            
+        product_name = checkout_data["products"]["name"]
+        
     except Exception as e:
-        logger.error(f"Erro ao buscar produto no banco: {e}")
+        logger.error(f"Erro ao buscar produto/url no banco: {e}")
         return
 
     # 2. Pega ID da lista
@@ -145,10 +151,8 @@ async def process_slicktext_sync_task(
     # 3. Valida telefone
     country_code = "US" if country.lower() in ("united states", "us") else country
     formatted_phone = format_phone_local(raw_phone, country_code)
-
-    if not formatted_phone or not validate_phone_abstract(
-        formatted_phone, settings.abstract_api_key
-    ):
+    
+    if not formatted_phone or not validate_phone_abstract(formatted_phone, settings.abstract_api_key):
         return
 
     # 4. Envia para SlickText
@@ -156,7 +160,8 @@ async def process_slicktext_sync_task(
         "first_name": customer_name,
         "mobile_number": formatted_phone,
         "produto": product_name,
+        "url_abandonada": checkout_url,
         "opt_in_status": "subscribed",
     }
-
+    
     _sync_to_slicktext(slicktext_payload, customer_name, list_id, settings)
