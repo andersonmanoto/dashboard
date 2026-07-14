@@ -77,6 +77,7 @@ SLICKTEXT_PRODUCT_LISTS = {
     "audileaf": 129610,
     "nervolyn": 129608,
     "breatheasex": 129605,
+    "visiumpro": 135593,
 }
 
 

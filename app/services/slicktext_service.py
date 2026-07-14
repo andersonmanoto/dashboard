@@ -104,9 +104,7 @@ def _sync_to_slicktext(
 
 
 async def process_slicktext_sync_task(
-    payload: dict, 
-    settings: Settings, 
-    db_repo: DatabaseRepository
+    payload: dict, settings: Settings, db_repo: DatabaseRepository
 ):
     """
     Background task para processar o fluxo do SlickText.
@@ -116,30 +114,50 @@ async def process_slicktext_sync_task(
     product_codename = payload.get("product_codename", "")
     country = payload.get("country", "US")
 
-    # 1. Busca nome real do produto e a URL no Supabase
+    # 1. Busca nome real do produto, a URL e o aff_id_sms no Supabase
     try:
-        # Alteramos o select para trazer a 'url' também
-        res = db_repo.client.table("checkouts")\
-            .select("url, products(name)")\
-            .eq("checkout_code", product_codename)\
-            .limit(1)\
+        # Adicionamos 'aff_id_sms' no join com a tabela products
+        res = (
+            db_repo.client.table("checkouts")
+            .select("url, products(name, aff_id_sms)")
+            .eq("checkout_code", product_codename)
+            .limit(1)
             .execute()
-            
+        )
+
         if not res.data:
-            logger.warning(f"Checkout não encontrado para o codename: {product_codename}")
+            logger.warning(
+                f"Checkout não encontrado para o codename: {product_codename}"
+            )
             return
-            
+
         checkout_data = res.data[0]
         checkout_url = checkout_data.get("url", "")
-        
+
         if not checkout_data.get("products"):
-            logger.warning(f"Produto não encontrado para o codename: {product_codename}")
+            logger.warning(
+                f"Produto não encontrado para o codename: {product_codename}"
+            )
             return
-            
-        product_name = checkout_data["products"]["name"]
-        
+
+        product_info = checkout_data["products"]
+        product_name = product_info.get("name")
+        aff_id_sms = product_info.get("aff_id_sms")
+
+        # Nova Regra: Se não tiver aff_id_sms, aborta o envio silenciosamente
+        if not aff_id_sms:
+            logger.info(
+                f"SlickText ignorado: 'aff_id_sms' está vazio para o produto '{product_name}' (codename: {product_codename})."
+            )
+            return
+
+        # Concatena o aff_id na URL existente da BuyGoods
+        url_abandonada_final = f"{checkout_url}&aff_id={aff_id_sms}"
+
     except Exception as e:
-        logger.error(f"Erro ao buscar produto/url no banco: {e}")
+        logger.error(
+            f"Erro ao buscar dados no banco para o codename '{product_codename}': {e}"
+        )
         return
 
     # 2. Pega ID da lista
@@ -151,8 +169,10 @@ async def process_slicktext_sync_task(
     # 3. Valida telefone
     country_code = "US" if country.lower() in ("united states", "us") else country
     formatted_phone = format_phone_local(raw_phone, country_code)
-    
-    if not formatted_phone or not validate_phone_abstract(formatted_phone, settings.abstract_api_key):
+
+    if not formatted_phone or not validate_phone_abstract(
+        formatted_phone, settings.abstract_api_key
+    ):
         return
 
     # 4. Envia para SlickText
@@ -160,8 +180,8 @@ async def process_slicktext_sync_task(
         "first_name": customer_name,
         "mobile_number": formatted_phone,
         "produto": product_name,
-        "url_abandonada": checkout_url,
+        "url_abandonada": url_abandonada_final,
         "opt_in_status": "subscribed",
     }
-    
+
     _sync_to_slicktext(slicktext_payload, customer_name, list_id, settings)
