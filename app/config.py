@@ -78,6 +78,7 @@ SLICKTEXT_PRODUCT_LISTS = {
     "nervolyn": 129608,
     "breatheasex": 129605,
     "visiumpro": 135593,
+    "pressurecalmx": 139758,
 }
 
 
