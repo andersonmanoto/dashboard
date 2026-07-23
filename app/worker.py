@@ -1,3 +1,5 @@
+import asyncio
+
 from arq.connections import RedisSettings
 from arq import cron
 from loguru import logger
@@ -9,8 +11,7 @@ from app.services.event_processor import EventProcessor
 from app.services.normalizer import PayloadNormalizer
 from app.services.slack_service import SlackService
 
-
-from app.scripts.sync_approved_orders import run_pipeline
+from app.scripts.sync_approved_orders import fetch_pending_ids, process_single_item
 
 
 async def task_process_webhook(
@@ -62,6 +63,21 @@ async def task_process_webhook(
         raise
 
 
+async def task_sync_slicktext_item(ctx, queue_id: str):
+    """
+    Job individual: processa UM item da fila de sincronização com o SlickText.
+    Roda isolado com o timeout padrão do worker (job_timeout), então um item
+    lento ou com erro não derruba o lote inteiro nem os outros itens.
+    """
+    logger.info(f"Sincronizando item da fila SlickText | queue_id={queue_id}")
+    try:
+        await asyncio.to_thread(process_single_item, queue_id)
+        logger.info(f"Item {queue_id} processado.")
+    except Exception:
+        logger.exception(f"Falha ao processar item {queue_id} da fila SlickText")
+        raise
+
+
 async def startup(ctx):
     logger.info("Inicializando Worker ARQ...")
     settings = get_settings()
@@ -90,14 +106,24 @@ async def shutdown(ctx):
 
 
 async def cron_sync_slicktext_approved(ctx):
-    """Executado automaticamente pelo ARQ cron de hora em hora"""
-    logger.info("Executando Cron: Sincronização de Compras Aprovadas no SlickText")
+    """
+    Executado automaticamente pelo ARQ cron.
+    NÃO processa nada aqui — só busca os IDs pendentes e enfileira um job
+    individual por item (task_sync_slicktext_item). Isso mantém o cron
+    rápido (sem chamadas HTTP externas) e deixa o ARQ paralelizar o
+    processamento real respeitando max_jobs, com timeout por item.
+    """
+    redis = ctx["redis"]
 
-    # O run_pipeline é síncrono. Como é rápido e isolado, podemos rodar diretamente
-    # ou usar asyncio.to_thread para não bloquear o event loop do ARQ, se preferir.
-    import asyncio
+    pending_ids = await asyncio.to_thread(fetch_pending_ids, 15)
+    if not pending_ids:
+        logger.info("Nada pendente na fila de Compras Aprovadas.")
+        return
 
-    await asyncio.to_thread(run_pipeline)
+    for queue_id in pending_ids:
+        await redis.enqueue_job("task_sync_slicktext_item", queue_id)
+
+    logger.info(f"{len(pending_ids)} item(ns) enfileirado(s) para sincronização com o SlickText.")
 
 
 class WorkerSettings:
@@ -110,15 +136,14 @@ class WorkerSettings:
 
     on_startup = startup
     on_shutdown = shutdown
-    functions = [task_process_webhook]
+    functions = [task_process_webhook, task_sync_slicktext_item]
 
-    # NOVO: AGENDAMENTO DO CRON NO WORKER PRINCIPAL
+    # AGENDAMENTO DO CRON: só enfileira, timeout curto é suficiente
     cron_jobs = [
-        # Dispara de 1 em 1 hora, sempre no minuto 0 (ex: 14:00, 15:00, 16:00)
-        cron(cron_sync_slicktext_approved, minute={0, 10, 20, 30, 40, 50}, timeout=300),
+        cron(cron_sync_slicktext_approved, minute={0, 15, 30, 45}, timeout=30),
     ]
 
-    max_jobs = 20
-    job_timeout = 60
+    max_jobs = 20        # quantos jobs (incluindo os de sync) rodam em paralelo
+    job_timeout = 60     # timeout por job individual — cobre com folga o pior caso (~40s) de um item
     retry_jobs = True
     max_tries = 3

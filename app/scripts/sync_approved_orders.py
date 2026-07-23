@@ -1,6 +1,7 @@
 """
 Pipeline isolada para Sincronização de Compras Aprovadas no SlickText.
-Deve ser executada via Cron Job ou agendador (ex: de 1 em 1 hora).
+Cada item da fila agora é processado como um job ARQ individual
+(veja worker.py) em vez de tudo rodar em série numa única thread.
 """
 
 from __future__ import annotations
@@ -273,31 +274,65 @@ def process_queue_item(item: dict) -> None:
         ).eq("event_id", queue_id).execute()
 
 
-def run_pipeline() -> None:
-    logger.info("Buscando aprovações pendentes para o SlickText...")
+def fetch_pending_ids(limit: int = 15) -> list[str]:
+    """
+    Busca apenas os IDs pendentes, sem processar nada.
+    Usada pelo cron para enfileirar um job ARQ por item (ver worker.py).
+    Rápida e leve — não faz nenhuma chamada HTTP externa.
+    """
+    res = (
+        supabase.table("slicktext_sync_queue")
+        .select("event_id")
+        .in_("status", ["pending", "retry"])
+        .lt("attempts", MAX_ATTEMPTS)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return [row["event_id"] for row in (res.data or [])]
 
-    # Query que traz os dados da Fila aninhados com os dados do Evento (via FK)
+
+def process_single_item(queue_id: str) -> None:
+    """
+    Busca os dados de UM item específico da fila e processa isoladamente.
+    Chamada dentro de um job ARQ individual (task_sync_slicktext_item),
+    então um item lento ou com erro não afeta os demais.
+    """
     res = (
         supabase.table("slicktext_sync_queue")
         .select(
             "event_id, attempts, events(customer_name, customer_phone, products(name), checkouts(quantity))"
         )
-        .in_("status", ["pending", "retry"])
-        .lt("attempts", MAX_ATTEMPTS)
-        .order("created_at", desc=True)
-        .limit(15)
+        .eq("event_id", queue_id)
+        .single()
         .execute()
     )
 
-    pending = res.data or []
-    if not pending:
+    item = res.data
+    if not item:
+        logger.warning(f"Item {queue_id} não encontrado na fila (já processado?).")
+        return
+
+    process_queue_item(item)
+
+
+def run_pipeline() -> None:
+    """
+    Mantida apenas para execução manual/local (ex: debug via terminal).
+    O fluxo produtivo agora passa por fetch_pending_ids + process_single_item,
+    orquestrado pelo worker.py via jobs individuais do ARQ.
+    """
+    logger.info("Buscando aprovações pendentes para o SlickText...")
+
+    pending_ids = fetch_pending_ids(limit=15)
+    if not pending_ids:
         logger.info("Nada pendente na fila de Compras Aprovadas.")
         return
 
-    logger.info(f"Processando {len(pending)} compra(s) aprovada(s)...")
+    logger.info(f"Processando {len(pending_ids)} compra(s) aprovada(s)...")
 
-    for item in pending:
-        process_queue_item(item)
+    for queue_id in pending_ids:
+        process_single_item(queue_id)
 
     logger.info("Rodada concluída.")
 
