@@ -210,8 +210,10 @@ def process_queue_item(item: dict) -> None:
 
     # Extração
     raw_phone = event_data.get("customer_phone")
-    product_name = event_data.get("products", {}).get("name")
-    quantity = event_data.get("checkouts", {}).get("quantity")
+    products_data = event_data.get("products") or {}
+    product_name = products_data.get("name")
+    checkouts_data = event_data.get("checkouts") or {}
+    quantity = checkouts_data.get("quantity")
 
     list_id = get_approved_list_id_for_product(product_name)
     if not list_id:
