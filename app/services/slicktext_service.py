@@ -112,15 +112,11 @@ def _sync_to_slicktext(
 
         if is_duplicate:
             logger.info(
-                f"[SlickText] Passo 1.1: O contato {mobile_number} já existe. Iniciando busca do ID..."
+                f"[SlickText] Passo 1.1: O contato {mobile_number} já existe. Buscando ID numérico para atualização..."
             )
 
             try:
-                # Disparando a busca
-                search_params = {"q": mobile_number}
-                logger.info(
-                    f"[SlickText] Executando GET /contacts com parâmetros: {search_params}"
-                )
+                search_params = {"mobile_number": mobile_number}
 
                 resp_search = requests.get(
                     f"{base_url}/contacts",
@@ -134,16 +130,9 @@ def _sync_to_slicktext(
                 contacts_list = search_data.get("data", [])
 
                 logger.info(
-                    f"[SlickText] Busca retornou {len(contacts_list)} contatos no array 'data'."
+                    f"[SlickText] Busca retornou {len(contacts_list)} contato(s) para {mobile_number}."
                 )
 
-                # Mapeando todos os telefones que a API retornou para vermos o que veio
-                returned_phones = [c.get("mobile_number") for c in contacts_list]
-                logger.info(
-                    f"[SlickText] Telefones presentes na resposta: {returned_phones}"
-                )
-
-                # Buscando o match exato
                 for contact in contacts_list:
                     if contact.get("mobile_number") == mobile_number:
                         contact_id = contact.get("contact_id")
@@ -151,10 +140,7 @@ def _sync_to_slicktext(
 
                 if contact_id:
                     logger.info(
-                        f"[SlickText] MATCH ENCONTRADO! ID do contato existente: {contact_id}"
-                    )
-                    logger.info(
-                        f"[SlickText] Passo 1.2: Sobrescrevendo dados (PUT /contacts/{contact_id})..."
+                        f"[SlickText] MATCH ENCONTRADO! ID do contato: {contact_id}"
                     )
 
                     resp_put = requests.put(
@@ -164,24 +150,32 @@ def _sync_to_slicktext(
                         timeout=10,
                     )
                     resp_put.raise_for_status()
+
                     logger.info(
                         f"[SlickText] SUCESSO: Dados do contato {contact_id} atualizados!"
                     )
                 else:
                     logger.error(
-                        f"[SlickText] ERRO FATAL: O telefone {mobile_number} não estava entre os {len(contacts_list)} retornados pela busca."
+                        f"[SlickText] ERRO FATAL: O telefone {mobile_number} não foi encontrado na busca de duplicados. "
+                        f"Resposta bruta: {search_data}"
                     )
-                    logger.debug(f"[SlickText] Payload bruto da busca: {search_data}")
                     return False
 
-            except requests.RequestException as search_exc:
+            except requests.RequestException as update_exc:
                 logger.error(
-                    f"[SlickText] ERRO DE REDE ao buscar/atualizar contato: {search_exc}"
+                    f"[SlickText] ERRO DE REDE ao buscar/atualizar contato: {update_exc}"
                 )
-                if search_exc.response is not None:
+                if update_exc.response is not None:
                     logger.error(
-                        f"[SlickText] Detalhes do erro: {search_exc.response.text}"
+                        f"[SlickText] Detalhes do erro: {update_exc.response.text}"
                     )
+                return False
+            except Exception as unexpected_exc:
+                # Pega qualquer coisa que não seja erro de rede (JSON malformado, chave
+                # faltando, etc.) pra nunca mais morrer em silêncio sem logar nada.
+                logger.exception(
+                    f"[SlickText] ERRO INESPERADO ao buscar/atualizar contato {mobile_number}: {unexpected_exc}"
+                )
                 return False
         else:
             logger.error("[SlickText] Erro na criação (não é duplicidade). Abortando.")
