@@ -71,8 +71,8 @@ class Settings(BaseSettings):
     slicktext_api_url: str = "https://api.slicktext.com/v1"
 
 
-# Dicionário mapeando o nome do produto (em minúsculas) para o ID da lista no SlickText
-SLICKTEXT_PRODUCT_LISTS = {
+# Dicionário mapeando o nome do produto (em minúsculas) para o ID da lista (Carrinho Abandonado) no SlickText
+SLICKTEXT_ABANDONED_LISTS = {
     "prostafense": 129612,
     "audileaf": 129610,
     "nervolyn": 129608,
@@ -81,13 +81,31 @@ SLICKTEXT_PRODUCT_LISTS = {
     "pressurecalmx": 139758,
 }
 
+# Mapeamento para Compra Aprovada
+SLICKTEXT_APPROVED_LISTS = {
+    "prostafense": 129611,
+    "audileaf": 129609,
+    "nervolyn": 129607,
+    "breatheasex": 129604,
+    "visiumpro": 135594,
+    "pressurecalmx": 139759,
+}
+
 
 def get_list_id_for_product(product_name: str) -> int | None:
     """Busca o ID da lista ignorando case sensitive e espaços extras."""
     if not product_name:
         return None
     normalized_name = product_name.strip().lower()
-    return SLICKTEXT_PRODUCT_LISTS.get(normalized_name)
+    return SLICKTEXT_ABANDONED_LISTS.get(normalized_name)
+
+
+def get_approved_list_id_for_product(product_name: str) -> int | None:
+    """Busca o ID da lista de compra aprovada ignorando case sensitive."""
+    if not product_name:
+        return None
+    normalized_name = product_name.strip().lower()
+    return SLICKTEXT_APPROVED_LISTS.get(normalized_name)
 
 
 @lru_cache

@@ -1,4 +1,5 @@
 from arq.connections import RedisSettings
+from arq import cron
 from loguru import logger
 
 from app.config import get_settings
@@ -7,6 +8,9 @@ from app.repositories.database import DatabaseRepository
 from app.services.event_processor import EventProcessor
 from app.services.normalizer import PayloadNormalizer
 from app.services.slack_service import SlackService
+
+
+from app.scripts.sync_approved_orders import run_pipeline
 
 
 async def task_process_webhook(
@@ -85,6 +89,17 @@ async def shutdown(ctx):
         pass
 
 
+async def cron_sync_slicktext_approved(ctx):
+    """Executado automaticamente pelo ARQ cron de hora em hora"""
+    logger.info("Executando Cron: Sincronização de Compras Aprovadas no SlickText")
+
+    # O run_pipeline é síncrono. Como é rápido e isolado, podemos rodar diretamente
+    # ou usar asyncio.to_thread para não bloquear o event loop do ARQ, se preferir.
+    import asyncio
+
+    await asyncio.to_thread(run_pipeline)
+
+
 class WorkerSettings:
     settings = get_settings()
 
@@ -96,6 +111,13 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     functions = [task_process_webhook]
+
+    # NOVO: AGENDAMENTO DO CRON NO WORKER PRINCIPAL
+    cron_jobs = [
+        # Dispara de 1 em 1 hora, sempre no minuto 0 (ex: 14:00, 15:00, 16:00)
+        cron(cron_sync_slicktext_approved, minute=0),
+    ]
+
     max_jobs = 20
     job_timeout = 60
     retry_jobs = True
