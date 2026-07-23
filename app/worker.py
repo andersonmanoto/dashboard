@@ -115,7 +115,7 @@ class WorkerSettings:
     # NOVO: AGENDAMENTO DO CRON NO WORKER PRINCIPAL
     cron_jobs = [
         # Dispara de 1 em 1 hora, sempre no minuto 0 (ex: 14:00, 15:00, 16:00)
-        cron(cron_sync_slicktext_approved, minute=0, timeout=300),
+        cron(cron_sync_slicktext_approved, minute={0, 10, 20, 30, 40, 50}, timeout=300),
     ]
 
     max_jobs = 20

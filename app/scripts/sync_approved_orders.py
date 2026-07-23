@@ -285,7 +285,7 @@ def run_pipeline() -> None:
         .in_("status", ["pending", "retry"])
         .lt("attempts", MAX_ATTEMPTS)
         .order("created_at", desc=True)
-        .limit(50)
+        .limit(15)
         .execute()
     )
 
