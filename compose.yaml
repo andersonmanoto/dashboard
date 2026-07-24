@@ -31,13 +31,14 @@ services:
     image: localhost/dashhook/worker:2.3.0
     container_name: dashhook-worker
     restart: unless-stopped
+    network_mode: host
 
     env_file:
       - .env
 
     environment:
       - PYTHONPATH=/app:/app/app
-      - REDIS_HOST=redis
+      - REDIS_HOST=127.0.0.1
 
     command: arq app.worker.WorkerSettings
 
