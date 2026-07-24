@@ -277,30 +277,39 @@ def process_queue_item(item: dict) -> None:
         ).eq("event_id", queue_id).execute()
 
 
-def fetch_pending_ids(limit: int = 15) -> list[str]:
+def fetch_pending_ids(limit: int = 15, max_retries: int = 2) -> list[str]:
     """
-    Busca apenas os IDs pendentes, sem processar nada.
-    Usada pelo cron para enfileirar um job ARQ por item (ver worker.py).
-    Rápida e leve — não faz nenhuma chamada HTTP externa.
+    max_retries=2 → pior caso: 10s + 2s + 10s = 22s, cabe com folga
+    dentro do timeout de 30s do cron job.
     """
     import time
-    start = time.monotonic()
-    logger.info("fetch_pending_ids: iniciando query...")
-    try:
-        res = (
-            supabase.table("slicktext_sync_queue")
-            .select("event_id")
-            .in_("status", ["pending", "retry"])
-            .lt("attempts", MAX_ATTEMPTS)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-    except Exception:
-        logger.exception(f"fetch_pending_ids: falhou após {time.monotonic() - start:.2f}s")
-        raise
-    logger.info(f"fetch_pending_ids: concluída em {time.monotonic() - start:.2f}s")
-    return [row["event_id"] for row in (res.data or [])]
+    
+    for attempt in range(1, max_retries + 1):
+        start = time.monotonic()
+        try:
+            res = (
+                supabase.table("slicktext_sync_queue")
+                .select("event_id")
+                .in_("status", ["pending", "retry"])
+                .lt("attempts", MAX_ATTEMPTS)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            logger.info(f"fetch_pending_ids: concluída em {time.monotonic() - start:.2f}s")
+            return [row["event_id"] for row in (res.data or [])]
+
+        except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
+            wait = 2 ** attempt  # 2s, 4s
+            logger.warning(
+                f"fetch_pending_ids: tentativa {attempt}/{max_retries} falhou "
+                f"após {time.monotonic() - start:.2f}s ({type(exc).__name__}). "
+                f"Retentando em {wait}s..."
+            )
+            if attempt == max_retries:
+                logger.error(f"fetch_pending_ids: esgotou {max_retries} tentativas.")
+                raise
+            time.sleep(wait)
 
 
 def process_single_item(queue_id: str) -> None:

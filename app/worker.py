@@ -152,7 +152,7 @@ class WorkerSettings:
 
     # AGENDAMENTO DO CRON: só enfileira, timeout curto é suficiente
     cron_jobs = [
-        cron(cron_sync_slicktext_approved, minute={0, 15, 30, 45}, timeout=30),
+        cron(cron_sync_slicktext_approved, minute={0, 15, 30, 45}, timeout=35),
     ]
 
     max_jobs = 20        # quantos jobs (incluindo os de sync) rodam em paralelo
