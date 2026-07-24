@@ -130,30 +130,41 @@ class EventProcessor:
             return
 
         network = self._network_value(event.network)
-
-        affiliate = self.db.get_affiliate_by_external_id(network, external_aff_id)
+        
+        # 1. Extrai o account_id logo no começo
+        account_id = event.payload.get("account_id") if event.payload else None
+        
+        # 2. Busca usando network, aff_id E account_id
+        affiliate = self.db.get_affiliate_by_external_id(
+            network=network, 
+            aff_id=external_aff_id, 
+            account_id=account_id
+        )
 
         if not affiliate:
             aff_name = event.order_details.external_affiliate_name or "Tiger Offers"
 
-            # 1. Busca o ID do Tear 0
+            # Busca o ID do Tear 0
             default_tear_id = self.db.get_default_tear_id()
 
-            # 2. Cria o objeto com o tear_id preenchido
+            # Cria o objeto com o tear_id e account_id preenchidos
             new_affiliate = Affiliate(
                 network=network,
                 aff_id=external_aff_id,
                 aff_name=aff_name,
                 status=AffiliateStatus.ACTIVE,
                 tear_id=default_tear_id,
+                account_id=str(account_id) if account_id else None
             )
 
             try:
                 affiliate = self.db.create_affiliate(new_affiliate)
             except Exception:
-                # Fallback em caso de race condition
+                # Fallback em caso de race condition: busca usando os três parâmetros
                 affiliate = self.db.get_affiliate_by_external_id(
-                    network, external_aff_id
+                    network=network, 
+                    aff_id=external_aff_id,
+                    account_id=account_id
                 )
 
         if affiliate and affiliate.id:

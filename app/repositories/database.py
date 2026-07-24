@@ -141,23 +141,29 @@ class DatabaseRepository:
             return None
 
     def get_affiliate_by_external_id(
-        self, network: Union[NetworkType, str], aff_id: str
+        self, network: Union[NetworkType, str], aff_id: str, account_id: Optional[str] = None
     ) -> Optional[Affiliate]:
         """
-        Busca um afiliado pelo seu ID na plataforma de origem.
+        Busca um afiliado pelo seu ID na plataforma de origem e, se fornecido, pelo account_id.
         """
         network_value = network.value if isinstance(network, NetworkType) else network
 
         try:
             net_id_str = self.get_network_id(network)
-            response = (
+            
+            # Monta a query base
+            query = (
                 self.client.table("affiliates")
                 .select("*")
                 .eq("aff_id", aff_id)
                 .eq("network_id", net_id_str)
-                .limit(1)
-                .execute()
             )
+            
+            # Adiciona o filtro de account_id dinamicamente se ele existir
+            if account_id:
+                query = query.eq("account_id", str(account_id))
+                
+            response = query.limit(1).execute()
 
             if response.data:
                 row_data = response.data[0]
@@ -168,7 +174,7 @@ class DatabaseRepository:
 
         except Exception as e:
             logger.error(
-                f"Erro ao buscar afiliado {aff_id} (network={network_value}): {e}"
+                f"Erro ao buscar afiliado {aff_id} (network={network_value}, account={account_id}): {e}"
             )
             return None
 
@@ -187,9 +193,10 @@ class DatabaseRepository:
                 exclude_none=True,
             )
 
+            # Atenção: a regra de on_conflict agora inclui account_id
             response = (
                 self.client.table("affiliates")
-                .upsert(data, on_conflict="aff_id, network_id")
+                .upsert(data, on_conflict="aff_id, network_id, account_id")
                 .execute()
             )
 
