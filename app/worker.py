@@ -3,6 +3,7 @@ import asyncio
 from arq.connections import RedisSettings
 from arq import cron
 from loguru import logger
+from concurrent.futures import ThreadPoolExecutor
 
 from app.config import get_settings
 from app.models.enums import NetworkType
@@ -82,9 +83,16 @@ async def startup(ctx):
     logger.info("Inicializando Worker ARQ...")
     settings = get_settings()
 
+    # Executor dedicado, maior que o padrão do asyncio.
+    # Sem isso, asyncio.to_thread() compartilha um pool pequeno
+    # (min(32, cpu_count+4)) entre TODOS os jobs concorrentes,
+    # o que trava até chamadas rápidas como fetch_pending_ids.
+    executor = ThreadPoolExecutor(max_workers=40, thread_name_prefix="worker-io")
+    asyncio.get_event_loop().set_default_executor(executor)
+    ctx["executor"] = executor  # guarda pra fechar no shutdown
+
     db_repo = DatabaseRepository(settings)
     slack = SlackService(settings, db_repo)
-    # Carrega as Networks do banco no cache
     db_repo.load_networks_cache()
 
     ctx["db_repo"] = db_repo
@@ -96,6 +104,10 @@ async def startup(ctx):
 
 async def shutdown(ctx):
     logger.info("Desligando Worker...")
+
+    executor = ctx.get("executor")
+    if executor:
+        executor.shutdown(wait=False)
 
     try:
         redis = ctx.get("redis")
