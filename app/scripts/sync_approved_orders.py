@@ -7,6 +7,7 @@ Cada item da fila agora é processado como um job ARQ individual
 from __future__ import annotations
 
 import requests
+import httpx
 import phonenumbers
 from enum import Enum, auto
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from app.config import get_settings, get_approved_list_id_for_product
 
 SETTINGS = get_settings()
 supabase: Client = create_client(SETTINGS.supabase_url, SETTINGS.supabase_key)
+
+supabase.postgrest.session.timeout = httpx.Timeout(10.0)
 
 MAX_ATTEMPTS = 3
 SLICKTEXT_TIMEOUT = 10
@@ -280,15 +283,23 @@ def fetch_pending_ids(limit: int = 15) -> list[str]:
     Usada pelo cron para enfileirar um job ARQ por item (ver worker.py).
     Rápida e leve — não faz nenhuma chamada HTTP externa.
     """
-    res = (
-        supabase.table("slicktext_sync_queue")
-        .select("event_id")
-        .in_("status", ["pending", "retry"])
-        .lt("attempts", MAX_ATTEMPTS)
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
+    import time
+    start = time.monotonic()
+    logger.info("fetch_pending_ids: iniciando query...")
+    try:
+        res = (
+            supabase.table("slicktext_sync_queue")
+            .select("event_id")
+            .in_("status", ["pending", "retry"])
+            .lt("attempts", MAX_ATTEMPTS)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+    except Exception:
+        logger.exception(f"fetch_pending_ids: falhou após {time.monotonic() - start:.2f}s")
+        raise
+    logger.info(f"fetch_pending_ids: concluída em {time.monotonic() - start:.2f}s")
     return [row["event_id"] for row in (res.data or [])]
 
 
