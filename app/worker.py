@@ -72,7 +72,7 @@ async def task_sync_slicktext_item(ctx, queue_id: str):
     """
     logger.info(f"Sincronizando item da fila SlickText | queue_id={queue_id}")
     try:
-        await asyncio.to_thread(process_single_item, queue_id)
+        await process_single_item(queue_id)
         logger.info(f"Item {queue_id} processado.")
     except Exception:
         logger.exception(f"Falha ao processar item {queue_id} da fila SlickText")
