@@ -72,6 +72,7 @@ async def task_sync_slicktext_item(ctx, queue_id: str):
     """
     logger.info(f"Sincronizando item da fila SlickText | queue_id={queue_id}")
     try:
+        # 👉 A chamada foi corrigida para usar o await diretamente
         await process_single_item(queue_id)
         logger.info(f"Item {queue_id} processado.")
     except Exception:
@@ -83,10 +84,6 @@ async def startup(ctx):
     logger.info("Inicializando Worker ARQ...")
     settings = get_settings()
 
-    # Executor dedicado, maior que o padrão do asyncio.
-    # Sem isso, asyncio.to_thread() compartilha um pool pequeno
-    # (min(32, cpu_count+4)) entre TODOS os jobs concorrentes,
-    # o que trava até chamadas rápidas como fetch_pending_ids.
     executor = ThreadPoolExecutor(max_workers=40, thread_name_prefix="worker-io")
     asyncio.get_event_loop().set_default_executor(executor)
     ctx["executor"] = executor  # guarda pra fechar no shutdown
@@ -127,7 +124,8 @@ async def cron_sync_slicktext_approved(ctx):
     """
     redis = ctx["redis"]
 
-    pending_ids = await asyncio.to_thread(fetch_pending_ids, 15)
+    pending_ids = await fetch_pending_ids(limit=15)
+    
     if not pending_ids:
         logger.info("Nada pendente na fila de Compras Aprovadas.")
         return
