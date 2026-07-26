@@ -25,18 +25,20 @@ SETTINGS = get_settings()
 # Instância Singleton do cliente assíncrono para ser reaproveitado de forma segura no event loop
 _supabase_async: Optional[AsyncClient] = None
 
+
 async def get_supabase() -> AsyncClient:
     global _supabase_async
     if _supabase_async is None:
         _supabase_async = await create_async_client(
-            SETTINGS.supabase_url, 
-            SETTINGS.supabase_key
+            SETTINGS.supabase_url, SETTINGS.supabase_key
         )
     return _supabase_async
+
 
 MAX_ATTEMPTS = 3
 SLICKTEXT_TIMEOUT = 10.0
 ABSTRACT_TIMEOUT = 10.0
+
 
 class SyncResult(Enum):
     SUCCESS = auto()
@@ -70,7 +72,7 @@ async def validate_phone_abstract(formatted_phone: str) -> Optional[bool]:
                 "https://phoneintelligence.abstractapi.com/v1/",
                 params={"api_key": SETTINGS.abstract_api_key, "phone": formatted_phone},
             )
-            
+
         if response.status_code == 401:
             logger.error("AbstractAPI 401: Chave recusada.")
             return None
@@ -117,7 +119,9 @@ async def sync_contact_to_slicktext(
     contact_id = None
 
     try:
-        async with httpx.AsyncClient(headers=headers, timeout=SLICKTEXT_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            headers=headers, timeout=SLICKTEXT_TIMEOUT
+        ) as client:
             # 1. Criar
             try:
                 resp_create = await client.post(f"{base_url}/contacts", json=payload)
@@ -129,7 +133,8 @@ async def sync_contact_to_slicktext(
                 status = exc.response.status_code
                 error_msg = exc.response.text.lower()
                 is_duplicate = status == 409 or (
-                    status in (400, 422) and ("exists" in error_msg or "already" in error_msg)
+                    status in (400, 422)
+                    and ("exists" in error_msg or "already" in error_msg)
                 )
 
                 if is_duplicate:
@@ -154,15 +159,21 @@ async def sync_contact_to_slicktext(
                             resp_update.raise_for_status()
                             logger.info(f"Contato {contact_id} atualizado com sucesso!")
                         else:
-                            logger.error(f"Falha: {mobile_number} não encontrado na busca.")
+                            logger.error(
+                                f"Falha: {mobile_number} não encontrado na busca."
+                            )
                             return SyncResult.API_ERROR
 
                     except httpx.RequestError as update_exc:
-                        logger.error(f"Erro ao buscar/atualizar contato existente: {update_exc}")
+                        logger.error(
+                            f"Erro ao buscar/atualizar contato existente: {update_exc}"
+                        )
                         return SyncResult.API_ERROR
                 else:
                     if "us and ca" in error_msg:
-                        logger.error(f"SlickText rejeitou a região do telefone para {customer}.")
+                        logger.error(
+                            f"SlickText rejeitou a região do telefone para {customer}."
+                        )
                         return SyncResult.UNSUPPORTED_REGION
                     logger.error(f"Erro HTTP {status} na criação: {error_msg}")
                     return SyncResult.API_ERROR
@@ -198,24 +209,40 @@ async def process_queue_item(item: dict) -> None:
 
     event_data = item.get("events")
     if not event_data:
-        await db.table("slicktext_sync_queue").update(
-            {"status": "failed", "last_error": "Dados do evento não encontrados"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update(
+                {"status": "failed", "last_error": "Dados do evento não encontrados"}
+            )
+            .eq("event_id", queue_id)
+            .execute()
+        )
         return
 
     customer = event_data.get("customer_name", "Desconhecido")
 
     if attempts >= MAX_ATTEMPTS:
         logger.error(f"{customer} atingiu o limite de tentativas.")
-        await db.table("slicktext_sync_queue").update(
-            {"status": "failed", "last_error": "max_attempts"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": "max_attempts"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
         return
 
     # Aumenta tentativa
-    await db.table("slicktext_sync_queue").update(
-        {"attempts": attempts + 1, "updated_at": datetime.now(timezone.utc).isoformat()}
-    ).eq("event_id", queue_id).execute()
+    await (
+        db.table("slicktext_sync_queue")
+        .update(
+            {
+                "attempts": attempts + 1,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        .eq("event_id", queue_id)
+        .execute()
+    )
 
     # Extração
     raw_phone = event_data.get("customer_phone")
@@ -227,29 +254,41 @@ async def process_queue_item(item: dict) -> None:
     list_id = get_approved_list_id_for_product(product_name)
     if not list_id:
         logger.warning(f"Lista não mapeada para o produto: {product_name}")
-        await db.table("slicktext_sync_queue").update(
-            {"status": "failed", "last_error": "lista_nao_encontrada"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": "lista_nao_encontrada"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
         return
 
     # Validação
     formatted_phone = format_phone_local(raw_phone)
     if not formatted_phone:
-        await db.table("slicktext_sync_queue").update(
-            {"status": "failed", "last_error": "telefone_invalido"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": "telefone_invalido"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
         return
 
     abstract_valid = await validate_phone_abstract(formatted_phone)
     if abstract_valid is None:
-        await db.table("slicktext_sync_queue").update(
-            {"status": "retry", "last_error": "abstract_api_error"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "retry", "last_error": "abstract_api_error"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
         return
     if abstract_valid is False:
-        await db.table("slicktext_sync_queue").update(
-            {"status": "failed", "last_error": "rejeitado_abstract"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": "rejeitado_abstract"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
         return
 
     # Payload
@@ -265,27 +304,40 @@ async def process_queue_item(item: dict) -> None:
     result = await sync_contact_to_slicktext(payload, customer, list_id)
 
     if result == SyncResult.SUCCESS:
-        await db.table("slicktext_sync_queue").update(
-            {"status": "synced", "last_error": None}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "synced", "last_error": None})
+            .eq("event_id", queue_id)
+            .execute()
+        )
     elif result == SyncResult.UNSUPPORTED_REGION:
-        await db.table("slicktext_sync_queue").update(
-            {"status": "failed", "last_error": "regiao_nao_suportada"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": "regiao_nao_suportada"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
     elif result == SyncResult.API_ERROR:
-        await db.table("slicktext_sync_queue").update(
-            {"status": "retry", "last_error": "slicktext_api_error"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "retry", "last_error": "slicktext_api_error"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
     elif result == SyncResult.MISSING_CREDENTIALS:
-        await db.table("slicktext_sync_queue").update(
-            {"status": "synced", "last_error": "missing_credentials_simulacao"}
-        ).eq("event_id", queue_id).execute()
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "synced", "last_error": "missing_credentials_simulacao"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
 
 
 async def fetch_pending_ids(limit: int = 15, max_retries: int = 2) -> list[str]:
     import time
+
     db = await get_supabase()
-    
+
     for attempt in range(1, max_retries + 1):
         start = time.monotonic()
         try:
@@ -298,11 +350,13 @@ async def fetch_pending_ids(limit: int = 15, max_retries: int = 2) -> list[str]:
                 .limit(limit)
                 .execute()
             )
-            logger.info(f"fetch_pending_ids: concluída em {time.monotonic() - start:.2f}s")
+            logger.info(
+                f"fetch_pending_ids: concluída em {time.monotonic() - start:.2f}s"
+            )
             return [row["event_id"] for row in (res.data or [])]
 
         except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
-            wait = 2 ** attempt
+            wait = 2**attempt
             logger.warning(
                 f"fetch_pending_ids: tentativa {attempt}/{max_retries} falhou "
                 f"após {time.monotonic() - start:.2f}s ({type(exc).__name__}). "

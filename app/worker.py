@@ -125,7 +125,7 @@ async def cron_sync_slicktext_approved(ctx):
     redis = ctx["redis"]
 
     pending_ids = await fetch_pending_ids(limit=15)
-    
+
     if not pending_ids:
         logger.info("Nada pendente na fila de Compras Aprovadas.")
         return
@@ -133,7 +133,9 @@ async def cron_sync_slicktext_approved(ctx):
     for queue_id in pending_ids:
         await redis.enqueue_job("task_sync_slicktext_item", queue_id)
 
-    logger.info(f"{len(pending_ids)} item(ns) enfileirado(s) para sincronização com o SlickText.")
+    logger.info(
+        f"{len(pending_ids)} item(ns) enfileirado(s) para sincronização com o SlickText."
+    )
 
 
 class WorkerSettings:
@@ -153,7 +155,9 @@ class WorkerSettings:
         cron(cron_sync_slicktext_approved, minute={0, 15, 30, 45}, timeout=35),
     ]
 
-    max_jobs = 20        # quantos jobs (incluindo os de sync) rodam em paralelo
-    job_timeout = 60     # timeout por job individual — cobre com folga o pior caso (~40s) de um item
+    max_jobs = 20  # quantos jobs (incluindo os de sync) rodam em paralelo
+    job_timeout = (
+        60  # timeout por job individual — cobre com folga o pior caso (~40s) de um item
+    )
     retry_jobs = True
     max_tries = 3

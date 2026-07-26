@@ -141,7 +141,10 @@ class DatabaseRepository:
             return None
 
     def get_affiliate_by_external_id(
-        self, network: Union[NetworkType, str], aff_id: str, account_id: Optional[str] = None
+        self,
+        network: Union[NetworkType, str],
+        aff_id: str,
+        account_id: Optional[str] = None,
     ) -> Optional[Affiliate]:
         """
         Busca um afiliado pelo seu ID na plataforma de origem e, se fornecido, pelo account_id.
@@ -150,7 +153,7 @@ class DatabaseRepository:
 
         try:
             net_id_str = self.get_network_id(network)
-            
+
             # Monta a query base
             query = (
                 self.client.table("affiliates")
@@ -158,11 +161,11 @@ class DatabaseRepository:
                 .eq("aff_id", aff_id)
                 .eq("network_id", net_id_str)
             )
-            
+
             # Adiciona o filtro de account_id dinamicamente se ele existir
             if account_id:
                 query = query.eq("account_id", str(account_id))
-                
+
             response = query.limit(1).execute()
 
             if response.data:

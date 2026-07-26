@@ -23,12 +23,12 @@ router = APIRouter(tags=["Webhooks"])
 # Instância Singleton do cliente assíncrono dedicado para a inbox do webhook
 _inbox_supabase_async: AsyncClient | None = None
 
+
 async def get_inbox_supabase(settings: Settings) -> AsyncClient:
     global _inbox_supabase_async
     if _inbox_supabase_async is None:
         _inbox_supabase_async = await create_async_client(
-            settings.supabase_url, 
-            settings.supabase_key
+            settings.supabase_url, settings.supabase_key
         )
     return _inbox_supabase_async
 
@@ -38,25 +38,35 @@ async def webhook_buygoods(
     secret_token: str,
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
-    # Validação do token
     auth: None = Depends(verify_secret_token),
 ) -> dict:
     """Recebe Webhooks da BuyGoods."""
     try:
         payload = await extract_payload(request)
+        inbox_id = None
 
-        # 1. Salva na Inbox usando cliente assíncrono nativo (evita travamentos de pool)
-        db_async = await get_inbox_supabase(settings)
-        
-        response = await db_async.table("webhook_inbox").insert({
-            "network": NetworkType.BUYGOODS.value,
-            "payload": payload,
-            "status": "pending"
-        }).execute()
-        
-        inbox_id = response.data[0]["id"] if response.data else None
+        # 1. Tenta salvar na Inbox
+        try:
+            db_async = await get_inbox_supabase(settings)
+            response = (
+                await db_async.table("webhook_inbox")
+                .insert(
+                    {
+                        "network": NetworkType.BUYGOODS.value,
+                        "payload": payload,
+                        "status": "pending",
+                    }
+                )
+                .execute()
+            )
+            inbox_id = response.data[0]["id"] if response.data else None
+        except Exception as db_err:
+            # Se o Supabase der timeout ou erro de rede, não abortamos!
+            logger.warning(
+                f"Falha ao salvar na inbox (Supabase indisponível). Seguindo para o Redis... Erro: {db_err}"
+            )
 
-        # 2. Enfileira no Redis
+        # 2. Enfileira no Redis GARANTIDAMENTE
         await request.app.state.redis_pool.enqueue_job(
             "task_process_webhook",
             network_str=NetworkType.BUYGOODS.value,
@@ -85,19 +95,29 @@ async def webhook_digistore24(
     try:
         payload = dict(request.query_params)
         order_id = payload.get("order_id")
+        inbox_id = None
 
-        # 1. Salva na Inbox de forma assíncrona (Padronizado com a BuyGoods)
-        db_async = await get_inbox_supabase(settings)
-        
-        response = await db_async.table("webhook_inbox").insert({
-            "network": NetworkType.DIGISTORE24.value,
-            "payload": payload,
-            "status": "pending"
-        }).execute()
+        # 1. Tenta salvar na Inbox
+        try:
+            db_async = await get_inbox_supabase(settings)
+            response = (
+                await db_async.table("webhook_inbox")
+                .insert(
+                    {
+                        "network": NetworkType.DIGISTORE24.value,
+                        "payload": payload,
+                        "status": "pending",
+                    }
+                )
+                .execute()
+            )
+            inbox_id = response.data[0]["id"] if response.data else None
+        except Exception as db_err:
+            logger.warning(
+                f"Falha ao salvar na inbox (Supabase indisponível). Seguindo para o Redis... Erro: {db_err}"
+            )
 
-        inbox_id = response.data[0]["id"] if response.data else None
-
-        # 2. Enfileira no Redis
+        # 2. Enfileira no Redis GARANTIDAMENTE
         await request.app.state.redis_pool.enqueue_job(
             "task_process_webhook",
             network_str=NetworkType.DIGISTORE24.value,
