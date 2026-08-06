@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     slack_bot_token: str
     slack_default_channel: str = "#None"
     slack_monitor_channel: str = "#monitor-sites"
+    slack_maxweb_targets: str = "#monitor-sites"
 
     # Blacklist de codenames
     codename_blacklist_prefixes: tuple[str, ...] = ("calls", "wc")

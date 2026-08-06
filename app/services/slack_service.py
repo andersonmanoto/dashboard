@@ -1,12 +1,13 @@
 from typing import Optional, Union
 
-from config import Settings
 from loguru import logger
-from models.enums import NetworkType
-from models.schemas import MissingCodename
-from repositories.database import DatabaseRepository
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+
+from app.config import Settings
+from app.models.enums import NetworkType
+from app.models.schemas import MissingCodename
+from app.repositories.database import DatabaseRepository
 
 
 class SlackService:
@@ -49,18 +50,6 @@ class SlackService:
         1. Verifica se o codename está na blacklist (ignora se estiver).
         2. Registra o erro na tabela `missing_codenames` do banco.
         3. Envia um alerta visual formatado para o canal de monitoramento do Slack.
-
-        Args:
-            network: Rede de origem (ex: BuyGoods).
-            order_id: ID do pedido.
-            product: Nome do produto reportado.
-            codename: O código que falhou na busca.
-            account_id: ID da conta (opcional).
-            buy_url: URL de compra para auditoria (opcional).
-            channel: Canal específico para envio (opcional).
-
-        Returns:
-            bool: True se a mensagem foi enviada ao Slack, False caso contrário.
         """
         # Ignora codenames em blacklist
         if self._is_blacklisted(codename):
@@ -86,9 +75,9 @@ class SlackService:
             aff_name=aff_name,
         )
 
-        # 3. Envia para Slack
+        # 3. Envia para Slack usando o método público
         target_channel = channel or self.monitor_channel
-        return self._send_message(
+        return self.send_message(
             channel=target_channel, text="Codename não encontrado", blocks=blocks
         )
 
@@ -97,9 +86,6 @@ class SlackService:
     ) -> None:
         """
         Persiste o erro de codename no banco de dados para auditoria futura.
-
-        Cria um registro na tabela `missing_codenames` via repositório.
-        Captura exceções silenciosamente para não interromper o fluxo principal.
         """
         try:
             network_val = (
@@ -123,9 +109,6 @@ class SlackService:
     def _is_blacklisted(self, codename: Optional[str]) -> bool:
         """
         Verifica se o codename deve ser ignorado.
-
-        Alguns códigos (ex: 'calls_', 'wc_')
-        não possuem correspondência no funil (checkout).
         """
         if not codename:
             return False
@@ -148,12 +131,6 @@ class SlackService:
     ) -> list[dict]:
         """
         Gera o layout da mensagem do Slack usando Block Kit.
-
-        Cria uma mensagem rica com seções, campos em negrito e links,
-        facilitando a leitura e ação rápida pela equipe de suporte.
-
-        Returns:
-            list[dict]: Lista de blocos JSON compatível com a API do Slack.
         """
         codename_display = codename or "N/A"
         account_display = account_id or "N/A"
@@ -202,22 +179,33 @@ class SlackService:
             },
         ]
 
-    def _send_message(self, channel: str, text: str, blocks: list[dict]) -> bool:
+    def send_message(
+        self,
+        channel: str,
+        text: str,
+        blocks: list[dict],
+        username: Optional[str] = None,
+        icon_emoji: Optional[str] = None,
+        icon_url: Optional[str] = None,  # <-- Novo parâmetro adicionado aqui
+    ) -> bool:
         """
         Dispara a mensagem final para a API do Slack.
-
-        Args:
-            channel (str): ID ou nome do canal (ex: #monitor-sites).
-            text (str): Texto de fallback (para notificações push).
-            blocks (list[dict]): Estrutura visual da mensagem.
-
-        Returns:
-            bool: True se enviado com sucesso (ok=True), False se der erro.
         """
         try:
-            response = self.client.chat_postMessage(
-                channel=channel, text=text, blocks=blocks
-            )
+            kwargs = {
+                "channel": channel,
+                "text": text,
+                "blocks": blocks,
+            }
+
+            if username:
+                kwargs["username"] = username
+            if icon_emoji:
+                kwargs["icon_emoji"] = icon_emoji
+            if icon_url:
+                kwargs["icon_url"] = icon_url
+
+            response = self.client.chat_postMessage(**kwargs)
             return response["ok"]
 
         except SlackApiError as e:

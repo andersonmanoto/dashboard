@@ -9,6 +9,7 @@ from loguru import logger
 
 from app.config import Settings
 from app.repositories.database import DatabaseRepository
+from supabase import create_async_client
 
 
 class ReportService:
@@ -399,3 +400,126 @@ class ReportService:
 
         await asyncio.to_thread(resend.Emails.send, email_params)
         logger.success("Relatório de Net Revenue gerado e enviado com sucesso!")
+
+    async def generate_and_send_maxweb_refund_warning(self):
+        """
+        Busca afiliados da MaxWeb com >= 15% de refund (em $) nos últimos 7 dias
+        e envia o alerta formatado para o Slack de forma dinâmica usando o .env.
+        """
+        try:
+            # Importa e instancia o SlackService apenas aqui para não afetar o resto da classe
+            from app.services.slack_service import SlackService
+            from app.repositories.database import DatabaseRepository
+
+            # Busca o repositório seja qual for o nome (db ou db_repo).
+            # Se não existir no self, cria um novo instantaneamente
+            repo = getattr(
+                self, "db", getattr(self, "db_repo", DatabaseRepository(self.settings))
+            )
+            slack_svc = SlackService(self.settings, repo)
+
+            # 1. Busca os dados usando a RPC do Supabase
+            db_async = await create_async_client(
+                self.settings.supabase_url, self.settings.supabase_key
+            )
+            response = await db_async.rpc("get_maxweb_high_refunds").execute()
+            resultados = response.data
+
+            if not resultados:
+                logger.info(
+                    "Nenhum afiliado da MaxWeb passou de 15% de refund nos últimos 7 dias, sem alerta pra disparar."
+                )
+                return
+
+            logger.warning(
+                f"{len(resultados)} afiliado(s) da MaxWeb acima do limite de refund. Montando o alerta pro Slack."
+            )
+
+            # 2. Constrói o layout da mensagem (Block Kit)
+            blocks = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Alerta de Refund — MaxWeb",
+                        "emoji": False,
+                    },
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"Taxa de Reembolso ≥ 15% nos últimos 7 dias · {len(resultados)} ocorrência(s)",
+                        }
+                    ],
+                },
+                {"type": "divider"},
+            ]
+
+            for item in resultados:
+                aff_id = item.get("aff_id")
+                aff_name = item.get("aff_name")
+                produto = item.get("produto")
+                vendas = float(item.get("valor_total_vendas", 0))
+                refunds = float(item.get("valor_total_refunds", 0))
+                taxa = float(item.get("taxa_refund_percentual", 0))
+
+                # Indicador único de severidade por item (não por linha)
+                severidade = "🔴 Crítico" if taxa >= 50 else "🟠 Atenção"
+
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"*{aff_name}*  `{aff_id}`\n{severidade} — *{taxa:.1f}%* de refund",
+                        },
+                        "fields": [
+                            {"type": "mrkdwn", "text": f"*Produto:*\n{produto}"},
+                            {"type": "mrkdwn", "text": f"*Vendas:*\n${vendas:,.2f}"},
+                            {
+                                "type": "mrkdwn",
+                                "text": f"*Reembolsado:*\n${refunds:,.2f}",
+                            },
+                            {"type": "mrkdwn", "text": f"*Taxa:*\n{taxa:.1f}%"},
+                        ],
+                    }
+                )
+                blocks.append({"type": "divider"})
+
+            # 3. Puxa os alvos do .env e limpa os espaços vazios
+            targets_string = getattr(self.settings, "slack_maxweb_targets", "")
+            targets = [t.strip() for t in targets_string.split(",") if t.strip()]
+
+            if not targets:
+                logger.warning(
+                    "SLACK_MAXWEB_TARGETS não tá configurado no .env, não tem pra quem mandar o alerta."
+                )
+                return
+
+            # 4. Envia para cada pessoa/canal da lista usando a instância local (slack_svc)
+            sucesso_count = 0
+            for target in targets:
+                sucesso = slack_svc.send_message(
+                    channel=target,
+                    text="Alerta de Refund - MaxWeb",
+                    blocks=blocks,
+                    username="MaxWeb Refund Monitor",
+                    # icon_emoji=":chart_with_downwards_trend:",
+                    icon_url="https://tigeroffers.com/assets/img/top-tiger.png",
+                )
+                if sucesso:
+                    sucesso_count += 1
+                    logger.debug(f"Alerta MaxWeb enviado pra: {target}")
+                else:
+                    logger.error(f"Falha ao enviar alerta MaxWeb pra: {target}")
+
+            logger.info(
+                f"Alerta da MaxWeb concluído, entregue a {sucesso_count}/{len(targets)} destinos."
+            )
+
+        except Exception as e:
+            logger.exception(
+                f"Problemas ao gerar/enviar o alerta de refund da MaxWeb: {e}"
+            )
