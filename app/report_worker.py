@@ -185,8 +185,8 @@ class ReportWorkerSettings:
         cron(cron_chargeback_report, weekday={0, 3}, hour=11, minute=10),
         # Net Revenue Negativo: Dispara SEGUNDAS (0) e QUINTAS (3) às 08:20 AM BRT (11:20 AM na VPS)
         cron(cron_netrevenue_report, weekday={0, 3}, hour=11, minute=20),
-        # Refunds MaxWeb: Dispara TODOS OS DIAS às 08:30 AM BRT (11:30 AM na VPS)
-        cron(cron_maxweb_refund_warning, hour=11, minute=30),
+        # Refunds MaxWeb: Dispara TODOS OS DIAS às 08:00 AM BRT (11:00 AM na VPS)
+        cron(cron_maxweb_refund_warning, hour=10, minute=55),
     ]
 
     max_jobs = 5
