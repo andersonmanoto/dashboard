@@ -546,3 +546,154 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao inserir carrinho abandonado: {e}")
             return None
+
+    def _fetch_all_paginated(
+        self, table_name: str, build_query, page_size: int = 1000, select: str = "*"
+    ) -> list[dict]:
+        """
+        Busca todas as linhas de uma tabela/view do Supabase, paginando em blocos
+        de `page_size` (o PostgREST limita a 1000 linhas por requisição).
+        """
+        rows: list[dict] = []
+        start = 0
+
+        while True:
+            query = build_query(self.client.table(table_name).select(select))
+            response = query.range(start, start + page_size - 1).execute()
+            page = response.data or []
+            rows.extend(page)
+
+            if len(page) < page_size:
+                break
+            start += page_size
+
+        return rows
+
+    def get_affiliate_product_network_snapshot(
+        self,
+        start_date: str,
+        end_date: str,
+        network_id: Optional[str] = None,
+        product_id: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Snapshot diário Afiliado + Produto + Plataforma (Nível 1 do relatório)."""
+
+        def build(query):
+            query = query.gte("snapshot_date", start_date).lte(
+                "snapshot_date", end_date
+            )
+            if network_id:
+                query = query.eq("network_id", network_id)
+            if product_id:
+                query = query.in_("product_id", product_id)
+            return query
+
+        try:
+            return self._fetch_all_paginated(
+                "snapshot_daily_affiliate_product_network", build
+            )
+        except Exception as e:
+            logger.error(f"Erro ao buscar snapshot afiliado/produto/rede: {e}")
+            raise e
+
+    def get_affiliate_product_funnel_network_snapshot(
+        self,
+        start_date: str,
+        end_date: str,
+        network_id: Optional[str] = None,
+        product_id: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Snapshot diário Afiliado + Produto + Funil + Plataforma (Nível 2 do relatório)."""
+
+        def build(query):
+            query = query.gte("snapshot_date", start_date).lte(
+                "snapshot_date", end_date
+            )
+            if network_id:
+                query = query.eq("network_id", network_id)
+            if product_id:
+                query = query.in_("product_id", product_id)
+            return query
+
+        try:
+            return self._fetch_all_paginated(
+                "snapshot_daily_affiliate_product_funnel_network", build
+            )
+        except Exception as e:
+            logger.error(f"Erro ao buscar snapshot de funil por afiliado: {e}")
+            raise e
+
+    def get_affiliate_quantity_snapshot(
+        self,
+        start_date: str,
+        end_date: str,
+        network_id: Optional[str] = None,
+        product_id: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Snapshot diário Afiliado + Produto + Funil + Pote/Quantidade (Nível 3 do relatório)."""
+
+        def build(query):
+            query = query.gte("snapshot_date", start_date).lte(
+                "snapshot_date", end_date
+            )
+            if network_id:
+                query = query.eq("network_id", network_id)
+            if product_id:
+                query = query.in_("product_id", product_id)
+            return query
+
+        try:
+            return self._fetch_all_paginated("snapshot_daily_affiliate_quantity", build)
+        except Exception as e:
+            logger.error(f"Erro ao buscar snapshot de potes por afiliado: {e}")
+            raise e
+
+    def get_cogs_percentage(self) -> float:
+        """Busca o percentual de COGS mais recente configurado no sistema."""
+        try:
+            response = (
+                self.client.table("cogs")
+                .select("percentage")
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if response.data:
+                return float(response.data[0]["percentage"])
+            return 0.0
+        except Exception as e:
+            logger.error(f"Erro ao buscar percentual de COGS: {e}")
+            return 0.0
+
+    def get_affiliates_lookup(self) -> Dict[str, dict]:
+        """Mapa id -> {aff_name, aff_id} de todos os afiliados (paginado)."""
+        try:
+            rows = self._fetch_all_paginated(
+                "affiliates", lambda q: q, select="id, aff_name, aff_id"
+            )
+            return {row["id"]: row for row in rows}
+        except Exception as e:
+            logger.error(f"Erro ao carregar afiliados: {e}")
+            return {}
+
+    def get_products_lookup(self) -> Dict[str, str]:
+        """Mapa id -> nome do produto (paginado)."""
+        try:
+            rows = self._fetch_all_paginated(
+                "products", lambda q: q, select="id, name"
+            )
+            return {row["id"]: row["name"] for row in rows}
+        except Exception as e:
+            logger.error(f"Erro ao carregar produtos: {e}")
+            return {}
+
+    def get_networks_lookup(self) -> Dict[str, str]:
+        """Mapa id -> nome da plataforma/rede (paginado)."""
+        try:
+            rows = self._fetch_all_paginated(
+                "networks", lambda q: q, select="id, name"
+            )
+            return {row["id"]: row["name"] for row in rows}
+        except Exception as e:
+            logger.error(f"Erro ao carregar plataformas: {e}")
+            return {}

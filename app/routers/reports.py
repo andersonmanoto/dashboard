@@ -35,6 +35,13 @@ class NetRevenueReportRequest(BaseModel):
     emails: list[EmailStr]
 
 
+class AffiliateXlsxReportRequest(BaseModel):
+    emails: list[EmailStr]
+    period: DatePeriod
+    network_id: Optional[str] = None
+    product_id: Optional[list[str]] = None
+
+
 @router.post(
     "/reports/buygoods-fees",
     status_code=status.HTTP_202_ACCEPTED,
@@ -182,4 +189,40 @@ async def request_netrevenue_loss_report(
         }
     except Exception as e:
         logger.exception(f"Erro ao enfileirar net revenue report: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao processar pedido.")
+
+
+@router.post(
+    "/reports/affiliates-xlsx",
+    summary="Request Affiliate Report (.xlsx)",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(verify_reports_key)],
+)
+async def request_affiliate_xlsx_report(
+    request: Request, payload: AffiliateXlsxReportRequest
+):
+    """
+    Enfileira a geração do Relatório de Afiliados em .xlsx (Visão Geral,
+    Detalhado por Funil, Detalhado por Pote, Resumo/KPIs e Metadados) para o
+    período informado. O arquivo é enviado por e-mail quando pronto.
+    """
+    logger.info(f"Payload recebido para Relatório de Afiliados (.xlsx): {payload.model_dump()}")
+    try:
+        redis_pool = getattr(request.app.state, "redis_pool", None)
+        if not redis_pool:
+            raise HTTPException(status_code=500, detail="Fila indisponível.")
+
+        job = await redis_pool.enqueue_job(
+            "task_generate_affiliate_xlsx_report",
+            payload.emails,
+            payload.model_dump(mode="json"),
+            _queue_name="reports_queue",
+        )
+        return {
+            "status": "queued",
+            "message": "Relatório de Afiliados (.xlsx) na fila.",
+            "job_id": job.job_id,
+        }
+    except Exception as e:
+        logger.exception(f"Erro ao enfileirar relatório de afiliados (.xlsx): {e}")
         raise HTTPException(status_code=500, detail="Erro interno ao processar pedido.")

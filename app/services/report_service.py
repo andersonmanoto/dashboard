@@ -9,6 +9,8 @@ from loguru import logger
 
 from app.config import Settings
 from app.repositories.database import DatabaseRepository
+from app.services import affiliate_report_aggregator as aggregator
+from app.services.affiliate_xlsx_builder import build_affiliate_report_workbook
 from supabase import create_async_client
 
 
@@ -400,6 +402,134 @@ class ReportService:
 
         await asyncio.to_thread(resend.Emails.send, email_params)
         logger.success("Relatório de Net Revenue gerado e enviado com sucesso!")
+
+    def _fetch_affiliate_report_data(self, filters: dict) -> dict:
+        """Busca (sincronamente) os 3 níveis de snapshot + lookups + % de COGS."""
+        period = filters.get("period", {})
+        start_date = str(period["start_date"])
+        end_date = str(period["end_date"])
+        network_id = filters.get("network_id")
+        product_id = filters.get("product_id")
+
+        return {
+            "level1": self.db.get_affiliate_product_network_snapshot(
+                start_date, end_date, network_id=network_id, product_id=product_id
+            ),
+            "level2": self.db.get_affiliate_product_funnel_network_snapshot(
+                start_date, end_date, network_id=network_id, product_id=product_id
+            ),
+            "level3": self.db.get_affiliate_quantity_snapshot(
+                start_date, end_date, network_id=network_id, product_id=product_id
+            ),
+            "affiliates": self.db.get_affiliates_lookup(),
+            "products": self.db.get_products_lookup(),
+            "networks": self.db.get_networks_lookup(),
+            "cogs_pct": self.db.get_cogs_percentage(),
+        }
+
+    async def generate_and_send_affiliate_xlsx_report(
+        self, target_emails: list[str], filters: dict
+    ):
+        """
+        Gera o .xlsx do Relatório de Afiliados (Visão Geral, Detalhado por Funil,
+        Detalhado por Pote, Resumo/KPIs e Metadados) e envia por e-mail.
+        """
+        period = filters.get("period", {})
+        start_date = str(period["start_date"])
+        end_date = str(period["end_date"])
+
+        data = await asyncio.to_thread(self._fetch_affiliate_report_data, filters)
+
+        visao_geral_df = aggregator.build_visao_geral(
+            data["level1"], data["affiliates"], data["cogs_pct"]
+        )
+
+        if visao_geral_df.empty:
+            logger.info(
+                f"Sem dados de afiliados no período {start_date} a {end_date}. "
+                "Relatório xlsx não enviado."
+            )
+            params = {
+                "from": self.settings.email_from,
+                "to": target_emails,
+                "subject": f"Relatório de Afiliados ({start_date} a {end_date}) — Sem dados",
+                "html": f"""
+                <p>Olá,</p>
+                <p>Não foram encontradas vendas de afiliados no período
+                <strong>{start_date}</strong> a <strong>{end_date}</strong>.</p>
+                <p>Nenhum arquivo foi gerado.</p>
+                <br>
+                <p>Atenciosamente,<br><strong>Tiger Offers Team</strong></p>
+                """,
+            }
+            await asyncio.to_thread(resend.Emails.send, params)
+            return True
+
+        detalhado_funil_df = aggregator.build_detalhado_funil(
+            data["level2"], data["affiliates"], data["products"], data["networks"]
+        )
+        detalhado_pote_df = aggregator.build_detalhado_pote(
+            data["level3"], data["affiliates"], data["products"], data["networks"]
+        )
+        kpis = aggregator.build_kpis(visao_geral_df)
+
+        network_id = filters.get("network_id")
+        platform_filter = (
+            data["networks"].get(network_id, network_id) if network_id else "Todas"
+        )
+        product_ids = filters.get("product_id")
+        product_filter = (
+            ", ".join(
+                data["products"].get(pid, pid) for pid in product_ids
+            )
+            if product_ids
+            else "Todos"
+        )
+
+        xlsx_bytes = await asyncio.to_thread(
+            build_affiliate_report_workbook,
+            visao_geral_df,
+            detalhado_funil_df,
+            detalhado_pote_df,
+            kpis,
+            start_date,
+            end_date,
+            datetime.now(),
+            platform_filter,
+            product_filter,
+        )
+
+        email_params = {
+            "from": self.settings.email_from,
+            "to": target_emails,
+            "subject": f"Relatório de Afiliados — {start_date} a {end_date}",
+            "html": f"""
+            <p>Olá,</p>
+            <p>O <strong>Relatório de Afiliados</strong> referente ao período
+            <strong>{start_date}</strong> a <strong>{end_date}</strong> está pronto.</p>
+            <p>Resumo do período: <strong>{kpis['total_afiliados']} afiliados</strong>,
+            faturamento total de <strong>${kpis['faturamento_total']:,.2f}</strong> e
+            lucro líquido de <strong>${kpis['lucro_liquido_total']:,.2f}</strong>.</p>
+            <p>O arquivo em anexo contém as abas: Resumo e KPIs, Visão Geral,
+            Detalhado por Funil, Detalhado por Pote e Metadados.</p>
+            <br>
+            <p>Atenciosamente,<br><strong>Tiger Offers Team</strong></p>
+            """,
+            "attachments": [
+                {
+                    "filename": (
+                        f"relatorio_afiliados_{start_date}_a_{end_date}.xlsx"
+                    ),
+                    "content": list(xlsx_bytes),
+                }
+            ],
+        }
+
+        response = await asyncio.to_thread(resend.Emails.send, email_params)
+        logger.success(
+            f"Relatório de Afiliados (.xlsx) enviado! Resend ID: {response.get('id')}"
+        )
+        return True
 
     async def generate_and_send_maxweb_refund_warning(self):
         """
