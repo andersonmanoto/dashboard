@@ -39,7 +39,7 @@ class NetRevenueReportRequest(BaseModel):
 class AffiliateXlsxReportRequest(BaseModel):
     emails: list[EmailStr]
     period: DatePeriod
-    network_id: Optional[UUID] = None
+    network_id: Optional[list[UUID]] = None
     product_id: Optional[list[UUID]] = None
     requesting_user_id: Optional[UUID] = None
 

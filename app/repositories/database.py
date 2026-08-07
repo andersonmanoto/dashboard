@@ -573,7 +573,7 @@ class DatabaseRepository:
         self,
         start_date: str,
         end_date: str,
-        network_id: Optional[str] = None,
+        network_id: Optional[list[str]] = None,
         product_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """
@@ -591,7 +591,7 @@ class DatabaseRepository:
                 "snapshot_date", end_date
             )
             if network_id:
-                query = query.eq("network_id", network_id)
+                query = query.in_("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
             return query
@@ -608,7 +608,7 @@ class DatabaseRepository:
         self,
         start_date: str,
         end_date: str,
-        network_id: Optional[str] = None,
+        network_id: Optional[list[str]] = None,
         product_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """Snapshot diário Afiliado + Produto + Funil + Plataforma (Nível 2 do relatório)."""
@@ -618,7 +618,7 @@ class DatabaseRepository:
                 "snapshot_date", end_date
             )
             if network_id:
-                query = query.eq("network_id", network_id)
+                query = query.in_("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
             return query
@@ -635,7 +635,7 @@ class DatabaseRepository:
         self,
         start_date: str,
         end_date: str,
-        network_id: Optional[str] = None,
+        network_id: Optional[list[str]] = None,
         product_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """Snapshot diário Afiliado + Produto + Funil + Pote/Quantidade (Nível 3 do relatório)."""
@@ -645,7 +645,7 @@ class DatabaseRepository:
                 "snapshot_date", end_date
             )
             if network_id:
-                query = query.eq("network_id", network_id)
+                query = query.in_("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
             return query
