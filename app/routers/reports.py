@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, status, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import date
+from uuid import UUID
 from loguru import logger
 
 from app.dependencies import verify_reports_key
@@ -38,9 +39,9 @@ class NetRevenueReportRequest(BaseModel):
 class AffiliateXlsxReportRequest(BaseModel):
     emails: list[EmailStr]
     period: DatePeriod
-    network_id: Optional[str] = None
-    product_id: Optional[list[str]] = None
-    requesting_user_id: Optional[str] = None
+    network_id: Optional[UUID] = None
+    product_id: Optional[list[UUID]] = None
+    requesting_user_id: Optional[UUID] = None
 
 
 @router.post(

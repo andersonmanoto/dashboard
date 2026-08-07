@@ -1,7 +1,6 @@
 """Monta o .xlsx do Relatório de Afiliados a partir dos DataFrames já agregados."""
 
 import io
-from datetime import datetime
 
 import pandas as pd
 from openpyxl import Workbook
@@ -52,6 +51,48 @@ def _number_format_for(column_name: str) -> str | None:
     if column_name in INTEGER_COLUMNS:
         return INTEGER_FMT
     return None
+
+
+def _formatted_width(value, fmt: str | None) -> int:
+    """Estima quantos caracteres o valor ocupa exibido no formato da coluna."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return 0
+    try:
+        if fmt == PERCENT_FMT:
+            return len(f"{float(value) * 100:.1f}%")
+        if fmt == ROAS_FMT:
+            return len(f"{float(value):.2f}x")
+        if fmt == CURRENCY_FMT:
+            return len(f"${float(value):,.2f}")
+        if fmt == INTEGER_FMT:
+            return len(f"{float(value):,.0f}")
+    except (TypeError, ValueError):
+        pass
+    return len(str(value))
+
+
+def _autofit_columns(
+    ws: Worksheet,
+    df: pd.DataFrame,
+    columns: list[str],
+    extra_values: dict[str, list] | None = None,
+    min_width: int = 10,
+    max_width: int = 42,
+) -> None:
+    """Larguras baseadas no maior valor formatado de cada coluna (+ header)."""
+    for col_idx, col_name in enumerate(columns, start=1):
+        fmt = _number_format_for(col_name)
+        widest = len(col_name)
+
+        if col_name in df.columns:
+            for value in df[col_name]:
+                widest = max(widest, _formatted_width(value, fmt))
+
+        for value in (extra_values or {}).get(col_name, []):
+            widest = max(widest, _formatted_width(value, fmt))
+
+        width = max(min_width, min(widest + 3, max_width))
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
 
 
 def _write_header(ws: Worksheet, columns: list[str], row: int = 1) -> None:
@@ -125,10 +166,7 @@ def _write_flat_sheet(
             ws.add_table(table)
 
     ws.freeze_panes = f"B{data_start_row}"
-    for col_idx, col_name in enumerate(columns, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = max(
-            len(col_name) + 2, 12
-        )
+    _autofit_columns(ws, df, columns)
 
     if "Lucro Líquido" in columns:
         col_letter = get_column_letter(columns.index("Lucro Líquido") + 1)
@@ -207,10 +245,7 @@ def _write_pote_sheet(ws: Worksheet, df: pd.DataFrame, columns: list[str]) -> No
 
     if df.empty:
         ws.freeze_panes = "B2"
-        for col_idx, col_name in enumerate(columns, start=1):
-            ws.column_dimensions[get_column_letter(col_idx)].width = max(
-                len(col_name) + 2, 12
-            )
+        _autofit_columns(ws, df, columns)
         return
 
     for _, group_df in df.groupby(group_cols, sort=False):
@@ -252,93 +287,14 @@ def _write_pote_sheet(ws: Worksheet, df: pd.DataFrame, columns: list[str]) -> No
     last_row = row - 1
     ws.auto_filter.ref = f"A1:{get_column_letter(len(columns))}{last_row}"
     ws.freeze_panes = "B2"
-    for col_idx, col_name in enumerate(columns, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = max(
-            len(col_name) + 2, 12
-        )
-
-
-def _write_kpis_sheet(ws: Worksheet, kpis: dict, period_label: str) -> None:
-    ws.column_dimensions["A"].width = 32
-    ws.column_dimensions["B"].width = 20
-
-    title = ws.cell(row=1, column=1, value=f"Resumo do Período — {period_label}")
-    title.font = Font(bold=True, size=14)
-    ws.merge_cells("A1:B1")
-
-    rows = [
-        ("Afiliados no período", kpis["total_afiliados"], INTEGER_FMT),
-        ("Volume Front (total)", kpis["volume_front_total"], INTEGER_FMT),
-        ("Volume Funil (total)", kpis["volume_funil_total"], INTEGER_FMT),
-        ("Faturamento total", kpis["faturamento_total"], CURRENCY_FMT),
-        ("Receita Real total", kpis["receita_real_total"], CURRENCY_FMT),
-        ("Comissão total", kpis["comissao_total"], CURRENCY_FMT),
-        ("Taxa de Plataforma total", kpis["taxa_plataforma_total"], CURRENCY_FMT),
-        ("COGS total", kpis["cogs_total"], CURRENCY_FMT),
-        ("Refund total", kpis["refund_total"], CURRENCY_FMT),
-        ("Chargeback total", kpis["chargeback_total"], CURRENCY_FMT),
-        ("Lucro Líquido total", kpis["lucro_liquido_total"], CURRENCY_FMT),
-        ("Margem média", kpis["margem_media"], PERCENT_FMT),
-        ("ROAS médio", kpis["roas_medio"], ROAS_FMT),
-    ]
-
-    for offset, (label, value, fmt) in enumerate(rows, start=3):
-        ws.cell(row=offset, column=1, value=label).font = Font(bold=True)
-        cell = ws.cell(row=offset, column=2, value=value)
-        cell.number_format = fmt
-
-    lucro_row = 3 + [r[0] for r in rows].index("Lucro Líquido total")
-    lucro_cell = ws.cell(row=lucro_row, column=2)
-    lucro_cell.font = GREEN_FONT if kpis["lucro_liquido_total"] >= 0 else RED_FONT
-
-
-def _write_metadados_sheet(
-    ws: Worksheet,
-    start_date: str,
-    end_date: str,
-    generated_at: datetime,
-    platform_filter: str,
-    product_filter: str,
-    owner_scope_label: str = "Todos",
-) -> None:
-    ws.column_dimensions["A"].width = 26
-    ws.column_dimensions["B"].width = 50
-
-    rows = [
-        ("Período (início)", start_date),
-        ("Período (fim)", end_date),
-        ("Data de geração", generated_at.strftime("%Y-%m-%d %H:%M:%S")),
-        ("Escopo de afiliados", owner_scope_label),
-        ("Plataforma(s) filtrada(s)", platform_filter),
-        ("Produto(s) filtrado(s)", product_filter),
-        (
-            "Fonte dos dados",
-            "Soma dos snapshots diários (snapshot_daily_affiliate_*) no período selecionado.",
-        ),
-        (
-            "Observação",
-            "COGS = Faturamento × percentual global configurado. "
-            "Lucro Líquido = Faturamento - Comissão - Taxa de Plataforma - COGS - Refund - Chargeback.",
-        ),
-    ]
-    for row_idx, (label, value) in enumerate(rows, start=1):
-        ws.cell(row=row_idx, column=1, value=label).font = Font(bold=True)
-        ws.cell(row=row_idx, column=2, value=value).alignment = Alignment(
-            wrap_text=True
-        )
+    # As linhas-resumo ("TOTAL FRONT") não fazem parte do df — considera à parte.
+    _autofit_columns(ws, df, columns, extra_values={"Pote": ["TOTAL FRONT"]})
 
 
 def build_affiliate_report_workbook(
     visao_geral_df: pd.DataFrame,
     detalhado_funil_df: pd.DataFrame,
     detalhado_pote_df: pd.DataFrame,
-    kpis: dict,
-    start_date: str,
-    end_date: str,
-    generated_at: datetime,
-    platform_filter: str = "Todas",
-    product_filter: str = "Todos",
-    owner_scope_label: str = "Todos",
 ) -> bytes:
     from app.services.affiliate_report_aggregator import (
         DETALHADO_FUNIL_COLUMNS,
@@ -348,11 +304,8 @@ def build_affiliate_report_workbook(
 
     wb = Workbook()
 
-    ws_kpis = wb.worksheets[0]
-    ws_kpis.title = "Resumo e KPIs"
-    _write_kpis_sheet(ws_kpis, kpis, f"{start_date} a {end_date}")
-
-    ws_visao = wb.create_sheet("Visão Geral")
+    ws_visao = wb.worksheets[0]
+    ws_visao.title = "Visão Geral"
     _write_flat_sheet(
         ws_visao,
         visao_geral_df,
@@ -372,17 +325,6 @@ def build_affiliate_report_workbook(
 
     ws_pote = wb.create_sheet("Detalhado por Pote")
     _write_pote_sheet(ws_pote, detalhado_pote_df, DETALHADO_POTE_COLUMNS)
-
-    ws_meta = wb.create_sheet("Metadados")
-    _write_metadados_sheet(
-        ws_meta,
-        start_date,
-        end_date,
-        generated_at,
-        platform_filter,
-        product_filter,
-        owner_scope_label,
-    )
 
     buffer = io.BytesIO()
     wb.save(buffer)

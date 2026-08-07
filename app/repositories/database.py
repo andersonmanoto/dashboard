@@ -575,9 +575,16 @@ class DatabaseRepository:
         end_date: str,
         network_id: Optional[str] = None,
         product_id: Optional[list[str]] = None,
-        affiliate_id: Optional[list[str]] = None,
     ) -> list[dict]:
-        """Snapshot diário Afiliado + Produto + Plataforma (Nível 1 do relatório)."""
+        """
+        Snapshot diário Afiliado + Produto + Plataforma (Nível 1 do relatório).
+
+        Não filtra por lista de affiliate_id aqui de propósito: um `.in_()`
+        com centenas de UUIDs estoura o limite de tamanho de URL de proxies
+        na frente do Supabase (erro '400 Bad Request' sem corpo JSON). Quando
+        for necessário restringir por owner, filtre a lista retornada em
+        Python (ver ReportService._fetch_affiliate_report_data).
+        """
 
         def build(query):
             query = query.gte("snapshot_date", start_date).lte(
@@ -587,8 +594,6 @@ class DatabaseRepository:
                 query = query.eq("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
-            if affiliate_id:
-                query = query.in_("affiliate_id", affiliate_id)
             return query
 
         try:
@@ -605,7 +610,6 @@ class DatabaseRepository:
         end_date: str,
         network_id: Optional[str] = None,
         product_id: Optional[list[str]] = None,
-        affiliate_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """Snapshot diário Afiliado + Produto + Funil + Plataforma (Nível 2 do relatório)."""
 
@@ -617,8 +621,6 @@ class DatabaseRepository:
                 query = query.eq("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
-            if affiliate_id:
-                query = query.in_("affiliate_id", affiliate_id)
             return query
 
         try:
@@ -635,7 +637,6 @@ class DatabaseRepository:
         end_date: str,
         network_id: Optional[str] = None,
         product_id: Optional[list[str]] = None,
-        affiliate_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """Snapshot diário Afiliado + Produto + Funil + Pote/Quantidade (Nível 3 do relatório)."""
 
@@ -647,8 +648,6 @@ class DatabaseRepository:
                 query = query.eq("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
-            if affiliate_id:
-                query = query.in_("affiliate_id", affiliate_id)
             return query
 
         try:

@@ -437,10 +437,10 @@ class ReportService:
         product_id = filters.get("product_id")
 
         owner_scope = self._resolve_owner_scope(filters.get("requesting_user_id"))
-        affiliate_id = owner_scope["affiliate_ids"]
+        owned_ids = owner_scope["affiliate_ids"]
 
         # Owner sem nenhum afiliado atribuído: não há o que buscar.
-        if owner_scope["restricted"] and not affiliate_id:
+        if owner_scope["restricted"] and not owned_ids:
             return {
                 "level1": [],
                 "level2": [],
@@ -452,28 +452,29 @@ class ReportService:
                 "owner_scope": owner_scope,
             }
 
+        level1 = self.db.get_affiliate_product_network_snapshot(
+            start_date, end_date, network_id=network_id, product_id=product_id
+        )
+        level2 = self.db.get_affiliate_product_funnel_network_snapshot(
+            start_date, end_date, network_id=network_id, product_id=product_id
+        )
+        level3 = self.db.get_affiliate_quantity_snapshot(
+            start_date, end_date, network_id=network_id, product_id=product_id
+        )
+
+        # Restrição por owner é aplicada em Python (não via .in_() no Postgrest):
+        # um owner com centenas de afiliados gera uma URL grande demais pro
+        # gateway do Supabase e derruba a query com um 400 sem corpo JSON.
+        if owner_scope["restricted"]:
+            owned_set = set(owned_ids)
+            level1 = [r for r in level1 if r.get("affiliate_id") in owned_set]
+            level2 = [r for r in level2 if r.get("affiliate_id") in owned_set]
+            level3 = [r for r in level3 if r.get("affiliate_id") in owned_set]
+
         return {
-            "level1": self.db.get_affiliate_product_network_snapshot(
-                start_date,
-                end_date,
-                network_id=network_id,
-                product_id=product_id,
-                affiliate_id=affiliate_id,
-            ),
-            "level2": self.db.get_affiliate_product_funnel_network_snapshot(
-                start_date,
-                end_date,
-                network_id=network_id,
-                product_id=product_id,
-                affiliate_id=affiliate_id,
-            ),
-            "level3": self.db.get_affiliate_quantity_snapshot(
-                start_date,
-                end_date,
-                network_id=network_id,
-                product_id=product_id,
-                affiliate_id=affiliate_id,
-            ),
+            "level1": level1,
+            "level2": level2,
+            "level3": level3,
             "affiliates": self.db.get_affiliates_lookup(),
             "products": self.db.get_products_lookup(),
             "networks": self.db.get_networks_lookup(),
@@ -485,9 +486,49 @@ class ReportService:
         self, target_emails: list[str], filters: dict
     ):
         """
-        Gera o .xlsx do Relatório de Afiliados (Visão Geral, Detalhado por Funil,
-        Detalhado por Pote, Resumo/KPIs e Metadados) e envia por e-mail.
+        Gera o .xlsx do Relatório de Afiliados e envia por e-mail. Qualquer
+        falha (dado inesperado, indisponibilidade do Supabase, etc.) é
+        reportada por e-mail ao solicitante em vez de falhar em silêncio —
+        e depois relançada, pra o ARQ ainda registrar/tentar de novo.
         """
+        try:
+            return await self._generate_and_send_affiliate_xlsx_report(
+                target_emails, filters
+            )
+        except Exception as e:
+            logger.exception(f"Falha ao gerar Relatório de Afiliados (.xlsx): {e}")
+            period = filters.get("period", {})
+            start_date = str(period.get("start_date", "?"))
+            end_date = str(period.get("end_date", "?"))
+            try:
+                params = {
+                    "from": self.settings.email_from,
+                    "to": target_emails,
+                    "subject": (
+                        f"Relatório de Afiliados ({start_date} a {end_date}) — Falhou"
+                    ),
+                    "html": f"""
+                    <p>Olá,</p>
+                    <p>Não foi possível gerar o <strong>Relatório de Afiliados</strong>
+                    para o período <strong>{start_date}</strong> a
+                    <strong>{end_date}</strong>.</p>
+                    <p>Detalhe técnico: <code>{type(e).__name__}: {e}</code></p>
+                    <p>Verifique os filtros enviados (IDs de plataforma/produto/usuário
+                    precisam ser UUIDs válidos) ou tente novamente em alguns minutos.</p>
+                    <br>
+                    <p>Atenciosamente,<br><strong>Tiger Offers Team</strong></p>
+                    """,
+                }
+                await asyncio.to_thread(resend.Emails.send, params)
+            except Exception:
+                logger.exception(
+                    "Falha ao notificar por e-mail o erro do Relatório de Afiliados."
+                )
+            raise
+
+    async def _generate_and_send_affiliate_xlsx_report(
+        self, target_emails: list[str], filters: dict
+    ):
         period = filters.get("period", {})
         start_date = str(period["start_date"])
         end_date = str(period["end_date"])
@@ -533,31 +574,11 @@ class ReportService:
         )
         kpis = aggregator.build_kpis(visao_geral_df)
 
-        network_id = filters.get("network_id")
-        platform_filter = (
-            data["networks"].get(network_id, network_id) if network_id else "Todas"
-        )
-        product_ids = filters.get("product_id")
-        product_filter = (
-            ", ".join(
-                data["products"].get(pid, pid) for pid in product_ids
-            )
-            if product_ids
-            else "Todos"
-        )
-
         xlsx_bytes = await asyncio.to_thread(
             build_affiliate_report_workbook,
             visao_geral_df,
             detalhado_funil_df,
             detalhado_pote_df,
-            kpis,
-            start_date,
-            end_date,
-            datetime.now(),
-            platform_filter,
-            product_filter,
-            owner_scope["owner_label"],
         )
 
         scope_html = (
@@ -577,8 +598,8 @@ class ReportService:
             <p>Resumo do período: <strong>{kpis['total_afiliados']} afiliados</strong>,
             faturamento total de <strong>${kpis['faturamento_total']:,.2f}</strong> e
             lucro líquido de <strong>${kpis['lucro_liquido_total']:,.2f}</strong>.</p>
-            <p>O arquivo em anexo contém as abas: Resumo e KPIs, Visão Geral,
-            Detalhado por Funil, Detalhado por Pote e Metadados.</p>
+            <p>O arquivo em anexo contém as abas: Visão Geral, Detalhado por Funil
+            e Detalhado por Pote.</p>
             <br>
             <p>Atenciosamente,<br><strong>Tiger Offers Team</strong></p>
             """,
