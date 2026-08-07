@@ -78,6 +78,7 @@ def _autofit_columns(
     extra_values: dict[str, list] | None = None,
     min_width: int = 10,
     max_width: int = 42,
+    padding: int = 3,
 ) -> None:
     """Larguras baseadas no maior valor formatado de cada coluna (+ header)."""
     for col_idx, col_name in enumerate(columns, start=1):
@@ -91,7 +92,7 @@ def _autofit_columns(
         for value in (extra_values or {}).get(col_name, []):
             widest = max(widest, _formatted_width(value, fmt))
 
-        width = max(min_width, min(widest + 3, max_width))
+        width = max(min_width, min(widest + padding, max_width))
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
 
@@ -166,7 +167,7 @@ def _write_flat_sheet(
             ws.add_table(table)
 
     ws.freeze_panes = f"B{data_start_row}"
-    _autofit_columns(ws, df, columns)
+    _autofit_columns(ws, df, columns, padding=7, max_width=46)
 
     if "Lucro Líquido" in columns:
         col_letter = get_column_letter(columns.index("Lucro Líquido") + 1)
