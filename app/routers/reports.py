@@ -40,6 +40,7 @@ class AffiliateXlsxReportRequest(BaseModel):
     period: DatePeriod
     network_id: Optional[str] = None
     product_id: Optional[list[str]] = None
+    requesting_user_id: Optional[str] = None
 
 
 @router.post(

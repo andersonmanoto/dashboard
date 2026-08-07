@@ -2,6 +2,7 @@ import asyncio
 import io
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from weasyprint import HTML
 import resend
@@ -403,6 +404,30 @@ class ReportService:
         await asyncio.to_thread(resend.Emails.send, email_params)
         logger.success("Relatório de Net Revenue gerado e enviado com sucesso!")
 
+    def _resolve_owner_scope(self, requesting_user_id: Optional[str]) -> dict:
+        """
+        Decide se o pedido deve ser restrito aos afiliados do usuário solicitante.
+
+        Regra espelha o `profiles.owner_filter` já usado no frontend: se o
+        usuário tiver `owner_filter = true`, o relatório só pode conter
+        afiliados cujo `owner` seja ele mesmo. Sem `requesting_user_id` (ou
+        profile inexistente), mantém o comportamento atual sem restrição —
+        preserva chamadas administrativas/crons que não enviam esse campo.
+        """
+        if not requesting_user_id:
+            return {"restricted": False, "affiliate_ids": None, "owner_label": "Todos"}
+
+        profile = self.db.get_profile(requesting_user_id)
+        if not profile or not profile.get("owner_filter"):
+            return {"restricted": False, "affiliate_ids": None, "owner_label": "Todos"}
+
+        owner_ids = self.db.get_affiliate_ids_by_owner(requesting_user_id)
+        return {
+            "restricted": True,
+            "affiliate_ids": owner_ids,
+            "owner_label": f"Apenas afiliados de {profile.get('name') or requesting_user_id}",
+        }
+
     def _fetch_affiliate_report_data(self, filters: dict) -> dict:
         """Busca (sincronamente) os 3 níveis de snapshot + lookups + % de COGS."""
         period = filters.get("period", {})
@@ -411,20 +436,49 @@ class ReportService:
         network_id = filters.get("network_id")
         product_id = filters.get("product_id")
 
+        owner_scope = self._resolve_owner_scope(filters.get("requesting_user_id"))
+        affiliate_id = owner_scope["affiliate_ids"]
+
+        # Owner sem nenhum afiliado atribuído: não há o que buscar.
+        if owner_scope["restricted"] and not affiliate_id:
+            return {
+                "level1": [],
+                "level2": [],
+                "level3": [],
+                "affiliates": {},
+                "products": self.db.get_products_lookup(),
+                "networks": self.db.get_networks_lookup(),
+                "cogs_pct": self.db.get_cogs_percentage(),
+                "owner_scope": owner_scope,
+            }
+
         return {
             "level1": self.db.get_affiliate_product_network_snapshot(
-                start_date, end_date, network_id=network_id, product_id=product_id
+                start_date,
+                end_date,
+                network_id=network_id,
+                product_id=product_id,
+                affiliate_id=affiliate_id,
             ),
             "level2": self.db.get_affiliate_product_funnel_network_snapshot(
-                start_date, end_date, network_id=network_id, product_id=product_id
+                start_date,
+                end_date,
+                network_id=network_id,
+                product_id=product_id,
+                affiliate_id=affiliate_id,
             ),
             "level3": self.db.get_affiliate_quantity_snapshot(
-                start_date, end_date, network_id=network_id, product_id=product_id
+                start_date,
+                end_date,
+                network_id=network_id,
+                product_id=product_id,
+                affiliate_id=affiliate_id,
             ),
             "affiliates": self.db.get_affiliates_lookup(),
             "products": self.db.get_products_lookup(),
             "networks": self.db.get_networks_lookup(),
             "cogs_pct": self.db.get_cogs_percentage(),
+            "owner_scope": owner_scope,
         }
 
     async def generate_and_send_affiliate_xlsx_report(
@@ -439,15 +493,21 @@ class ReportService:
         end_date = str(period["end_date"])
 
         data = await asyncio.to_thread(self._fetch_affiliate_report_data, filters)
+        owner_scope = data["owner_scope"]
 
         visao_geral_df = aggregator.build_visao_geral(
             data["level1"], data["affiliates"], data["cogs_pct"]
         )
 
         if visao_geral_df.empty:
+            scope_note = (
+                f" (escopo: {owner_scope['owner_label']})"
+                if owner_scope["restricted"]
+                else ""
+            )
             logger.info(
-                f"Sem dados de afiliados no período {start_date} a {end_date}. "
-                "Relatório xlsx não enviado."
+                f"Sem dados de afiliados no período {start_date} a {end_date}"
+                f"{scope_note}. Relatório xlsx não enviado."
             )
             params = {
                 "from": self.settings.email_from,
@@ -456,7 +516,7 @@ class ReportService:
                 "html": f"""
                 <p>Olá,</p>
                 <p>Não foram encontradas vendas de afiliados no período
-                <strong>{start_date}</strong> a <strong>{end_date}</strong>.</p>
+                <strong>{start_date}</strong> a <strong>{end_date}</strong>{scope_note}.</p>
                 <p>Nenhum arquivo foi gerado.</p>
                 <br>
                 <p>Atenciosamente,<br><strong>Tiger Offers Team</strong></p>
@@ -497,8 +557,14 @@ class ReportService:
             datetime.now(),
             platform_filter,
             product_filter,
+            owner_scope["owner_label"],
         )
 
+        scope_html = (
+            f"<p>Escopo: <strong>{owner_scope['owner_label']}</strong>.</p>"
+            if owner_scope["restricted"]
+            else ""
+        )
         email_params = {
             "from": self.settings.email_from,
             "to": target_emails,
@@ -507,6 +573,7 @@ class ReportService:
             <p>Olá,</p>
             <p>O <strong>Relatório de Afiliados</strong> referente ao período
             <strong>{start_date}</strong> a <strong>{end_date}</strong> está pronto.</p>
+            {scope_html}
             <p>Resumo do período: <strong>{kpis['total_afiliados']} afiliados</strong>,
             faturamento total de <strong>${kpis['faturamento_total']:,.2f}</strong> e
             lucro líquido de <strong>${kpis['lucro_liquido_total']:,.2f}</strong>.</p>

@@ -299,6 +299,7 @@ def _write_metadados_sheet(
     generated_at: datetime,
     platform_filter: str,
     product_filter: str,
+    owner_scope_label: str = "Todos",
 ) -> None:
     ws.column_dimensions["A"].width = 26
     ws.column_dimensions["B"].width = 50
@@ -307,6 +308,7 @@ def _write_metadados_sheet(
         ("Período (início)", start_date),
         ("Período (fim)", end_date),
         ("Data de geração", generated_at.strftime("%Y-%m-%d %H:%M:%S")),
+        ("Escopo de afiliados", owner_scope_label),
         ("Plataforma(s) filtrada(s)", platform_filter),
         ("Produto(s) filtrado(s)", product_filter),
         (
@@ -336,6 +338,7 @@ def build_affiliate_report_workbook(
     generated_at: datetime,
     platform_filter: str = "Todas",
     product_filter: str = "Todos",
+    owner_scope_label: str = "Todos",
 ) -> bytes:
     from app.services.affiliate_report_aggregator import (
         DETALHADO_FUNIL_COLUMNS,
@@ -372,7 +375,13 @@ def build_affiliate_report_workbook(
 
     ws_meta = wb.create_sheet("Metadados")
     _write_metadados_sheet(
-        ws_meta, start_date, end_date, generated_at, platform_filter, product_filter
+        ws_meta,
+        start_date,
+        end_date,
+        generated_at,
+        platform_filter,
+        product_filter,
+        owner_scope_label,
     )
 
     buffer = io.BytesIO()

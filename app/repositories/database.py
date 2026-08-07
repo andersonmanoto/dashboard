@@ -575,6 +575,7 @@ class DatabaseRepository:
         end_date: str,
         network_id: Optional[str] = None,
         product_id: Optional[list[str]] = None,
+        affiliate_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """Snapshot diário Afiliado + Produto + Plataforma (Nível 1 do relatório)."""
 
@@ -586,6 +587,8 @@ class DatabaseRepository:
                 query = query.eq("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
+            if affiliate_id:
+                query = query.in_("affiliate_id", affiliate_id)
             return query
 
         try:
@@ -602,6 +605,7 @@ class DatabaseRepository:
         end_date: str,
         network_id: Optional[str] = None,
         product_id: Optional[list[str]] = None,
+        affiliate_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """Snapshot diário Afiliado + Produto + Funil + Plataforma (Nível 2 do relatório)."""
 
@@ -613,6 +617,8 @@ class DatabaseRepository:
                 query = query.eq("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
+            if affiliate_id:
+                query = query.in_("affiliate_id", affiliate_id)
             return query
 
         try:
@@ -629,6 +635,7 @@ class DatabaseRepository:
         end_date: str,
         network_id: Optional[str] = None,
         product_id: Optional[list[str]] = None,
+        affiliate_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """Snapshot diário Afiliado + Produto + Funil + Pote/Quantidade (Nível 3 do relatório)."""
 
@@ -640,6 +647,8 @@ class DatabaseRepository:
                 query = query.eq("network_id", network_id)
             if product_id:
                 query = query.in_("product_id", product_id)
+            if affiliate_id:
+                query = query.in_("affiliate_id", affiliate_id)
             return query
 
         try:
@@ -647,6 +656,34 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao buscar snapshot de potes por afiliado: {e}")
             raise e
+
+    def get_profile(self, user_id: str) -> Optional[dict]:
+        """Busca o perfil (role, owner_filter, nome) de um usuário pelo id."""
+        try:
+            response = (
+                self.client.table("profiles")
+                .select("id, name, role, owner_filter")
+                .eq("id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            return response.data if response else None
+        except Exception as e:
+            logger.error(f"Erro ao buscar profile '{user_id}': {e}")
+            return None
+
+    def get_affiliate_ids_by_owner(self, owner_id: str) -> list[str]:
+        """Lista os ids de afiliados pertencentes a um owner (usuário) específico."""
+
+        def build(query):
+            return query.eq("owner", owner_id)
+
+        try:
+            rows = self._fetch_all_paginated("affiliates", build, select="id")
+            return [row["id"] for row in rows]
+        except Exception as e:
+            logger.error(f"Erro ao buscar afiliados do owner '{owner_id}': {e}")
+            return []
 
     def get_cogs_percentage(self) -> float:
         """Busca o percentual de COGS mais recente configurado no sistema."""
