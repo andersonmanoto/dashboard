@@ -80,6 +80,12 @@ SLICKTEXT_ABANDONED_LISTS = {
     "breatheasex": 129605,
     "visiumpro": 135593,
     "pressurecalmx": 139758,
+    "floarenew": 148046,
+    "boosterxt": 148049,
+    "marobrain": 148051,
+    "alphaerec": 148058,
+    "nailscleanpro": 148060,
+    "lipopeak": 148062
 }
 
 # Mapeamento para Compra Aprovada
@@ -90,6 +96,12 @@ SLICKTEXT_APPROVED_LISTS = {
     "breatheasex": 129604,
     "visiumpro": 135594,
     "pressurecalmx": 139759,
+    "floarenew": 148045,
+    "boosterxt": 148048,
+    "marobrain": 148050,
+    "alphaerec": 148057,
+    "nailscleanpro": 148059,
+    "lipopeak": 148061
 }
 
 
