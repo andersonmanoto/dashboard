@@ -18,7 +18,7 @@ from phonenumbers import NumberParseException, PhoneNumberFormat
 # Importação do client ASSÍNCRONO do Supabase
 from supabase import AsyncClient, create_async_client
 
-from app.config import get_settings, get_approved_list_id_for_product
+from app.config import get_settings
 
 SETTINGS = get_settings()
 
@@ -251,7 +251,7 @@ async def process_queue_item(item: dict) -> None:
     checkouts_data = event_data.get("checkouts") or {}
     quantity = checkouts_data.get("quantity")
 
-    list_id = get_approved_list_id_for_product(product_name)
+    list_id = products_data.get("slicktext_approved_list_id")
     if not list_id:
         logger.warning(f"Lista não mapeada para o produto: {product_name}")
         await (
@@ -373,7 +373,7 @@ async def process_single_item(queue_id: str) -> None:
     res = await (
         db.table("slicktext_sync_queue")
         .select(
-            "event_id, attempts, events(customer_name, customer_phone, products(name), checkouts(quantity))"
+            "event_id, attempts, events(customer_name, customer_phone, products(name, slicktext_approved_list_id), checkouts(quantity))"
         )
         .eq("event_id", queue_id)
         .single()

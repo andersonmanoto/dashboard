@@ -4,7 +4,7 @@ import requests
 import phonenumbers
 from phonenumbers import NumberParseException, PhoneNumberFormat
 
-from app.config import get_list_id_for_product, Settings
+from app.config import Settings
 from app.repositories.database import DatabaseRepository
 
 logger = logging.getLogger(__name__)
@@ -229,7 +229,7 @@ async def process_slicktext_sync_task(
     try:
         res = (
             db_repo.client.table("checkouts")
-            .select("url, quantity, products(name, aff_id_sms)")
+            .select("url, quantity, products(name, aff_id_sms, slicktext_abandoned_list_id)")
             .eq("checkout_code", product_codename)
             .limit(1)
             .execute()
@@ -270,7 +270,7 @@ async def process_slicktext_sync_task(
         return
 
     # 2. Pega ID da lista
-    list_id = get_list_id_for_product(product_name)
+    list_id = product_info.get("slicktext_abandoned_list_id")
     if not list_id:
         logger.warning(f"SlickText: Lista não mapeada para o produto '{product_name}'.")
         return

@@ -72,55 +72,6 @@ class Settings(BaseSettings):
     slicktext_api_url: str = "https://api.slicktext.com/v1"
 
 
-# Dicionário mapeando o nome do produto (em minúsculas) para o ID da lista (Carrinho Abandonado) no SlickText
-SLICKTEXT_ABANDONED_LISTS = {
-    "prostafense": 129612,
-    "audileaf": 129610,
-    "nervolyn": 129608,
-    "breatheasex": 129605,
-    "visiumpro": 135593,
-    "pressurecalmx": 139758,
-    "floranew": 148046,
-    "boosterxt": 148049,
-    "marobrain": 148051,
-    "alphaerec": 148058,
-    "nailscleanpro": 148060,
-    "lipopeak": 148062
-}
-
-# Mapeamento para Compra Aprovada
-SLICKTEXT_APPROVED_LISTS = {
-    "prostafense": 129611,
-    "audileaf": 129609,
-    "nervolyn": 129607,
-    "breatheasex": 129604,
-    "visiumpro": 135594,
-    "pressurecalmx": 139759,
-    "floranew": 148045,
-    "boosterxt": 148048,
-    "marobrain": 148050,
-    "alphaerec": 148057,
-    "nailscleanpro": 148059,
-    "lipopeak": 148061
-}
-
-
-def get_list_id_for_product(product_name: str) -> int | None:
-    """Busca o ID da lista ignorando case sensitive e espaços extras."""
-    if not product_name:
-        return None
-    normalized_name = product_name.strip().lower()
-    return SLICKTEXT_ABANDONED_LISTS.get(normalized_name)
-
-
-def get_approved_list_id_for_product(product_name: str) -> int | None:
-    """Busca o ID da lista de compra aprovada ignorando case sensitive."""
-    if not product_name:
-        return None
-    normalized_name = product_name.strip().lower()
-    return SLICKTEXT_APPROVED_LISTS.get(normalized_name)
-
-
 @lru_cache
 def get_settings() -> Settings:
     """
