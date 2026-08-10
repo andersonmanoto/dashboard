@@ -235,8 +235,8 @@ def _write_pote_sheet(ws: Worksheet, df: pd.DataFrame, columns: list[str]) -> No
     """
     Nível 3 com agrupamento nativo do Excel (Dados > Agrupar): cada bloco
     Afiliado+Produto+Funil vira uma linha-resumo (nível 0, sempre visível) e as
-    linhas de Pote ficam recolhidas por padrão (nível 1), recriando o
-    comportamento de expandir/colapsar do dashboard.
+    linhas de Pote (nível 1) ficam expandidas por padrão, mas continuam
+    agrupadas para quem quiser recolher via Dados > Agrupar.
     """
     _write_header(ws, columns, row=1)
     ws.sheet_properties.outlinePr.summaryBelow = False
@@ -282,7 +282,6 @@ def _write_pote_sheet(ws: Worksheet, df: pd.DataFrame, columns: list[str]) -> No
                 if fmt:
                     cell.number_format = fmt
             ws.row_dimensions[row].outlineLevel = 1
-            ws.row_dimensions[row].hidden = True
             row += 1
 
     last_row = row - 1

@@ -1,5 +1,6 @@
 import asyncio
 import io
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -536,6 +537,13 @@ class ReportService:
         data = await asyncio.to_thread(self._fetch_affiliate_report_data, filters)
         owner_scope = data["owner_scope"]
 
+        product_ids = filters.get("product_id") or []
+        if product_ids:
+            product_label = data["products"].get(str(product_ids[0]), str(product_ids[0]))
+            product_label = re.sub(r"\s+", "", product_label)
+        else:
+            product_label = "allProducts"
+
         visao_geral_df = aggregator.build_visao_geral(
             data["level1"], data["affiliates"], data["cogs_pct"]
         )
@@ -611,7 +619,7 @@ class ReportService:
             "attachments": [
                 {
                     "filename": (
-                        f"relatorio_afiliados_{start_date}_a_{end_date}.xlsx"
+                        f"relatorio_afiliados_{product_label}_{start_date}_a_{end_date}.xlsx"
                     ),
                     "content": list(xlsx_bytes),
                 }
