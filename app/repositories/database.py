@@ -670,11 +670,21 @@ class DatabaseRepository:
         network_id: Optional[list[str]] = None,
         product_id: Optional[list[str]] = None,
     ) -> list[dict]:
-        """Snapshot diário Afiliado + Produto + Funil + Pote/Quantidade (Nível 3 do relatório)."""
+        """
+        Snapshot diário Afiliado + Produto + Funil + Pote/Quantidade (Nível 3 do relatório).
+
+        Filtra `funnel_stage = "Purchase"`: a tabela tem uma linha por estágio
+        (Purchase, Up1, Up2, Up3, Dw2, Orderbump), e upsell/downsell tem seu
+        próprio "quantity" (pote). Sem esse filtro, vendas de upsell entram na
+        contagem do pote da venda front (inflando potes existentes) e criam
+        potes "fantasma" que nunca foram opção do checkout front.
+        """
 
         def build(query):
-            query = query.gte("snapshot_date", start_date).lte(
-                "snapshot_date", end_date
+            query = (
+                query.gte("snapshot_date", start_date)
+                .lte("snapshot_date", end_date)
+                .eq("funnel_stage", "Purchase")
             )
             if network_id:
                 query = query.in_("network_id", network_id)
