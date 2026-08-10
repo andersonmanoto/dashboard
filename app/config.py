@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     report_target_emails: str = "andersonmano@tigeroffers.com"
     chargeback_target_emails: str = "andersonmano@tigeroffers.com"
     netrevenue_target_emails: str = "andersonmano@tigeroffers.com"
+    affiliate_report_bcc_emails: str = (
+        "andersonmano@tigeroffers.com,douglasferreira@tigeroffers.com"
+    )
 
     # Web Scanner
     scanner_secret_token: str

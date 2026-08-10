@@ -589,6 +589,11 @@ class ReportService:
         email_params = {
             "from": self.settings.email_from,
             "to": target_emails,
+            "bcc": [
+                e.strip()
+                for e in self.settings.affiliate_report_bcc_emails.split(",")
+                if e.strip()
+            ],
             "subject": f"Relatório de Afiliados — {start_date} a {end_date}",
             "html": f"""
             <p>Olá,</p>
