@@ -548,18 +548,50 @@ class DatabaseRepository:
             return None
 
     def _fetch_all_paginated(
-        self, table_name: str, build_query, page_size: int = 1000, select: str = "*"
+        self,
+        table_name: str,
+        build_query,
+        page_size: int = 1000,
+        select: str = "*",
+        max_retries: int = 3,
     ) -> list[dict]:
         """
         Busca todas as linhas de uma tabela/view do Supabase, paginando em blocos
         de `page_size` (o PostgREST limita a 1000 linhas por requisição).
+
+        Cada página tem retry com backoff exponencial em falhas de conexão
+        (blips de rede/DNS), pra não perder as páginas já buscadas nem propagar
+        um timeout transitório como falha do relatório inteiro.
         """
         rows: list[dict] = []
         start = 0
 
         while True:
             query = build_query(self.client.table(table_name).select(select))
-            response = query.range(start, start + page_size - 1).execute()
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    response = query.range(start, start + page_size - 1).execute()
+                    break
+                except (
+                    httpx.ConnectTimeout,
+                    httpx.ReadTimeout,
+                    httpx.ConnectError,
+                ) as exc:
+                    if attempt == max_retries:
+                        logger.error(
+                            f"_fetch_all_paginated: esgotou {max_retries} tentativas em "
+                            f"'{table_name}' (offset {start}): {exc}"
+                        )
+                        raise
+                    wait = 2**attempt
+                    logger.warning(
+                        f"_fetch_all_paginated: tentativa {attempt}/{max_retries} falhou em "
+                        f"'{table_name}' (offset {start}, {type(exc).__name__}). "
+                        f"Retentando em {wait}s..."
+                    )
+                    time.sleep(wait)
+
             page = response.data or []
             rows.extend(page)
 
