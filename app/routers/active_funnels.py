@@ -3,7 +3,7 @@ from uuid import UUID
 from arq.jobs import Job, JobStatus
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.dependencies import verify_funnel_sync_key
 from app.services.funnel_sync_service import FunnelSyncError
@@ -21,6 +21,14 @@ class FunnelSyncRequest(BaseModel):
     active_funnel: int
     product_network_active_funnels_id: UUID
     previous_funnel: int | None = None
+
+    @field_validator("previous_funnel", mode="before")
+    @classmethod
+    def _blank_previous_funnel_as_none(cls, v):
+        """Primeira ativação (sem funil anterior) — o frontend manda "" em vez de omitir/null."""
+        if v == "":
+            return None
+        return v
 
 
 @router.post(
