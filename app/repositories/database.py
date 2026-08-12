@@ -531,21 +531,45 @@ class DatabaseRepository:
             logger.error(f"Erro ao buscar Net Revenue negativo: {e}")
             return []
 
-    def insert_abandoned_cart(self, cart_data: dict) -> Optional[dict]:
+    def insert_abandoned_cart(
+        self, cart_data: dict, max_retries: int = 3
+    ) -> Optional[dict]:
         """
         Insere um registro de carrinho abandonado na tabela abandoned_carts.
+
+        Retry com backoff exponencial em falhas de conexão (blip de rede/DNS,
+        ou conexão presa no pool do httpx) — mesmo padrão de
+        _fetch_all_paginated, já validado em produção pra esse tipo de erro.
         """
-        try:
-            response = self.client.table("abandoned_carts").insert(cart_data).execute()
-            if response.data:
-                logger.info(
-                    f"Carrinho abandonado salvo | Email: {cart_data.get('customer_email')}"
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = (
+                    self.client.table("abandoned_carts").insert(cart_data).execute()
                 )
-                return response.data[0]
-            return None
-        except Exception as e:
-            logger.error(f"Erro ao inserir carrinho abandonado: {e}")
-            return None
+                if response.data:
+                    logger.info(
+                        f"Carrinho abandonado salvo | Email: {cart_data.get('customer_email')}"
+                    )
+                    return response.data[0]
+                return None
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
+                if attempt == max_retries:
+                    logger.error(
+                        f"Erro ao inserir carrinho abandonado: esgotou {max_retries} "
+                        f"tentativas ({type(exc).__name__}): {exc}"
+                    )
+                    return None
+                wait = 2**attempt
+                logger.warning(
+                    f"Erro ao inserir carrinho abandonado: tentativa {attempt}/"
+                    f"{max_retries} falhou ({type(exc).__name__}). "
+                    f"Retentando em {wait}s..."
+                )
+                time.sleep(wait)
+            except Exception as e:
+                logger.error(f"Erro ao inserir carrinho abandonado: {e}")
+                return None
+        return None
 
     def _fetch_all_paginated(
         self,
