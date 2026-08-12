@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     webhook_secret: str
     upload_api_key: str
     reports_api_key: str
+    funnel_sync_api_key: str = ""
 
     # Supabase
     supabase_url: str
@@ -55,6 +56,7 @@ class Settings(BaseSettings):
     ssh_password: str
     ssh_port: int = 65002
     remote_script_path: str = "/home/u463185610/scripts/get_codenames"
+    hosting_base: str = "/home/u463185610/domains"
 
     # Slack
     slack_bot_token: str

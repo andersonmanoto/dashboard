@@ -94,6 +94,17 @@ async def get_api_key_scanner(
     raise HTTPException(status.HTTP_403_FORBIDDEN, "Acesso Negado")
 
 
+async def verify_funnel_sync_key(
+    x_api_key: str = Header(None), settings: Settings = Depends(get_settings)
+) -> None:
+    """Valida chave de API para o Sync de Funil (troca de links de checkout)."""
+    if not settings.funnel_sync_api_key:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Config Error")
+
+    if x_api_key != settings.funnel_sync_api_key:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Credenciais inválidas")
+
+
 async def verify_reports_key(
     x_api_key: Annotated[str, Header(alias="X-API-KEY")] = None,
     settings: Settings = Depends(get_settings),

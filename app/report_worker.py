@@ -5,6 +5,7 @@ from loguru import logger
 from app.config import get_settings
 from app.repositories.database import DatabaseRepository
 from app.services.report_service import ReportService
+from app.services.funnel_sync_service import FunnelSyncService
 
 
 async def task_generate_pdf_report(ctx, user_email: str, filters: dict):
@@ -30,6 +31,7 @@ async def startup(ctx):
 
     # Injetamos o serviço de relatórios no Contexto (ctx) do ARQ
     ctx["report_service"] = ReportService(settings, db_repo)
+    ctx["funnel_sync_service"] = FunnelSyncService(settings, db_repo)
 
     logger.info("Report Worker pronto e a escutar a fila 'reports_queue'!")
 
@@ -169,6 +171,40 @@ async def cron_maxweb_refund_warning(ctx):
     await report_service.generate_and_send_maxweb_refund_warning()
 
 
+async def task_funnel_sync(
+    ctx,
+    product_id: str,
+    network_id: str,
+    domain: str,
+    user_id: str,
+    active_funnel_number: int,
+    previous_funnel_number: int | None,
+    active_funnel_row_id: str,
+):
+    """
+    Tarefa sob demanda disparada pela API (POST /active-funnels/sync).
+
+    Roda em background porque a varredura via SFTP de um domínio inteiro
+    pode levar minutos (medido ~2-4min para o AlphaErec) — enfileirar evita
+    prender a requisição HTTP e o risco de timeout de proxy/frontend nesse
+    meio tempo.
+    """
+    logger.info(
+        f"[Report Worker] Job de funnel-sync | product_id={product_id} "
+        f"network_id={network_id} domain={domain}"
+    )
+    service: FunnelSyncService = ctx["funnel_sync_service"]
+    return await service.apply(
+        product_id,
+        network_id,
+        domain,
+        user_id,
+        active_funnel_number,
+        previous_funnel_number,
+        active_funnel_row_id,
+    )
+
+
 class ReportWorkerSettings:
     """Configurações exclusivas para este Worker de relatórios."""
 
@@ -189,6 +225,7 @@ class ReportWorkerSettings:
         task_generate_chargeback_report,
         task_generate_netrevenue_report,
         task_generate_affiliate_xlsx_report,
+        task_funnel_sync,
     ]
 
     # AGENDAMENTO DO CRON
@@ -204,6 +241,8 @@ class ReportWorkerSettings:
     ]
 
     max_jobs = 5
-    job_timeout = 300
+    # 480s dá folga pro funnel-sync (medido ~107s só de listagem SFTP recursiva
+    # de um domínio médio, antes de ler/gravar os arquivos .html)
+    job_timeout = 480
     retry_jobs = True
     max_tries = 2
