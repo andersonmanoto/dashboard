@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 from uuid import UUID
 
@@ -354,8 +355,10 @@ class EventProcessor:
                 "is_recovered": False,
             }
 
-            # Usa o repositório instanciado
-            result = self.db.insert_abandoned_cart(cart_data)
+            # Usa o repositório instanciado — chamada síncrona/bloqueante do
+            # client Supabase, offload pra thread pra não travar o event
+            # loop (e outros requests concorrentes) se o Supabase demorar.
+            result = await asyncio.to_thread(self.db.insert_abandoned_cart, cart_data)
 
             return bool(result)
 
