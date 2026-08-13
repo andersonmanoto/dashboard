@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     upload_api_key: str
     reports_api_key: str
     funnel_sync_api_key: str = ""
+    redtrack_offers_api_key: str = ""
 
     # Supabase
     supabase_url: str
@@ -75,6 +76,10 @@ class Settings(BaseSettings):
     slicktext_api_key: str = ""
     slicktext_brand_id: str = ""
     slicktext_api_url: str = "https://api.slicktext.com/v1"
+
+    # RedTrack
+    redtrack_api_key: str = ""
+    redtrack_user_id: str = ""
 
 
 @lru_cache

@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.routers import health, webhooks, tools, reports, active_funnels
+from app.routers import health, webhooks, tools, reports, active_funnels, redtrack
 
 api_router = APIRouter()
 
@@ -17,3 +17,6 @@ api_router.include_router(reports.router)
 
 # Funil ativo por produto/rede (troca de links de checkout)
 api_router.include_router(active_funnels.router)
+
+# RedTrack (criação automática de offers)
+api_router.include_router(redtrack.router)
