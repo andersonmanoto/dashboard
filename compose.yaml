@@ -4,16 +4,14 @@ services:
     image: localhost/dashhook/api:2.3.0
     container_name: dashhook-api
     restart: unless-stopped
+    network_mode: host
 
     env_file:
       - .env
 
     environment:
       - PYTHONPATH=/app:/app/app
-      - REDIS_HOST=redis
-
-    ports:
-      - "8000:8000"
+      - REDIS_HOST=127.0.0.1
 
     command: >
       uvicorn app.main:app
@@ -52,13 +50,14 @@ services:
     image: localhost/dashhook/api:2.3.0
     container_name: dashhook-report-worker
     restart: unless-stopped
+    network_mode: host
 
     env_file:
       - .env
 
     environment:
       - PYTHONPATH=/app:/app/app
-      - REDIS_HOST=redis
+      - REDIS_HOST=127.0.0.1
 
     command: arq app.report_worker.ReportWorkerSettings
 
