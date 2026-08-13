@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+import httpx
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from weasyprint import HTML
 import resend
@@ -649,12 +650,34 @@ class ReportService:
             )
             slack_svc = SlackService(self.settings, repo)
 
-            # 1. Busca os dados usando a RPC do Supabase
-            db_async = await create_async_client(
-                self.settings.supabase_url, self.settings.supabase_key
-            )
-            response = await db_async.rpc("get_maxweb_high_refunds").execute()
-            resultados = response.data
+            # 1. Busca os dados usando a RPC do Supabase.
+            # Retry com backoff em falha de transporte (blip de rede/DNS) —
+            # visto em produção: RPC travou 121s até estourar o timeout numa
+            # única tentativa. Recria o client a cada tentativa pra não reusar
+            # uma conexão possivelmente presa.
+            resultados = None
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                try:
+                    db_async = await create_async_client(
+                        self.settings.supabase_url, self.settings.supabase_key
+                    )
+                    response = await db_async.rpc("get_maxweb_high_refunds").execute()
+                    resultados = response.data
+                    break
+                except httpx.TransportError as exc:
+                    if attempt == max_retries:
+                        logger.error(
+                            f"MaxWeb refund warning: esgotou {max_retries} tentativas "
+                            f"na RPC get_maxweb_high_refunds ({type(exc).__name__}): {exc}"
+                        )
+                        return
+                    wait = 2**attempt
+                    logger.warning(
+                        f"MaxWeb refund warning: tentativa {attempt}/{max_retries} falhou "
+                        f"na RPC ({type(exc).__name__}). Retentando em {wait}s..."
+                    )
+                    await asyncio.sleep(wait)
 
             if not resultados:
                 logger.info(
