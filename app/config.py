@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     redtrack_api_key: str = ""
     redtrack_user_id: str = ""
 
+    # AutoPages (projeto Supabase separado)
+    autopages_supabase_url: str = ""
+    autopages_supabase_service_role: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
