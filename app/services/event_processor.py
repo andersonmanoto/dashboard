@@ -116,8 +116,15 @@ class EventProcessor:
             return True
 
         except Exception as e:
+            # Propaga em vez de engolir: erro de infra (ex: Supabase indisponível)
+            # não pode virar "False" indistinguível de um skip legítimo (CANCEL) —
+            # isso fazia o job em worker.py ser dado como concluído com sucesso,
+            # sem retry do ARQ e sem marcar o inbox como "failed" (visto em
+            # produção: pedidos reais perdidos silenciosamente numa instabilidade
+            # do Supabase em 2026-08-14). Quem chama (task_process_webhook,
+            # retro_service) já trata exceção corretamente.
             logger.exception(f"Erro fatal ao processar evento {event.order_id}: {e}")
-            return False
+            raise
 
     async def _enrich_affiliate(self, event: NormalizedEvent) -> None:
         """
