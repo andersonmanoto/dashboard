@@ -5,7 +5,9 @@ RedTrack.
 
 `checkouts` é uma lista fixa/curada de plataformas (Buygoods, Digistore24,
 CartPanda, ...) — este serviço só faz lookup nela, nunca cria uma linha
-nova. `products` é find-or-create, usando `code` como chave.
+nova. `products` é find-or-create: busca por `name` (case-insensitive —
+já não há mais inconsistência de espaçamento, só de maiúsculas/minúsculas)
+e cai pra `code` se não achar por nome.
 """
 
 from loguru import logger
@@ -53,8 +55,27 @@ class AutoPagesService:
         return response.data[0]
 
     async def get_or_create_product(self, code: str, name: str) -> str:
-        """Retorna products.id, criando o produto se ainda não existir (chave: code)."""
+        """
+        Retorna products.id.
+
+        Tenta por `name` primeiro (case-insensitive — os nomes ainda têm
+        inconsistência de maiúsculas/minúsculas entre chamadas, mas o
+        espaçamento já está sanado, então ilike exato resolve). Se não
+        achar por nome, cai pra `code`. Só cria o produto se nenhum dos
+        dois bater.
+        """
         client = await self._get_client()
+
+        response = (
+            await client.table("products")
+            .select("id")
+            .ilike("name", name)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return response.data[0]["id"]
+
         response = (
             await client.table("products")
             .select("id")
