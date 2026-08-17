@@ -27,7 +27,11 @@ Como funciona:
      active_funnel_row_id). Em caso de sucesso e se o funil realmente mudou
      (previous_funnel_number != active_funnel_number), registra a transição
      em `active_funnel_history` — essa tabela continua de responsabilidade
-     do backend.
+     do backend. O status gravado ali reflete se todos os arquivos tocados
+     passaram na verificação pós-escrita (não é sobre o sync como um todo,
+     que só chega a esse ponto sem ter lançado exceção); link_changes guarda
+     um jsonb { "dominio/subdiretorio": { switchLink_id: nova_url, ... } }
+     com o que foi trocado em cada página.
 
 Porta a lógica do script standalone /python/funil/sync.py para dentro do
 dashboard, reaproveitando o client Supabase do DatabaseRepository e as
@@ -72,13 +76,18 @@ def _parse_attrs(tag_text: str) -> dict:
 
 def _build_new_content(
     original: str, checkout_map: dict, remote_path: str, warnings: list[str]
-) -> str | None:
-    """Troca hrefs nas tags <a id="..."> cujo id bate com switch_link. Retorna None se nada mudou."""
+) -> tuple[str | None, dict[str, str]]:
+    """Troca hrefs nas tags <a id="..."> cujo id bate com switch_link.
+
+    Retorna (novo_conteudo, changed_links). novo_conteudo é None se nada mudou
+    nesse arquivo. changed_links mapeia switch_link -> nova url, só com os que
+    realmente mudaram (pra alimentar active_funnel_history.link_changes).
+    """
     known_switch_links = {switch_link for (_, switch_link) in checkout_map}
 
     parts = []
     last_end = 0
-    changed = False
+    changed_links: dict[str, str] = {}
 
     for m in TAG_RE.finditer(original):
         tag_text = m.group(0)
@@ -114,13 +123,13 @@ def _build_new_content(
         parts.append(original[last_end:href_value_start])
         parts.append(new_url)
         last_end = href_value_end
-        changed = True
+        changed_links[switch_link] = new_url
 
-    if not changed:
-        return None
+    if not changed_links:
+        return None, {}
 
     parts.append(original[last_end:])
-    return "".join(parts)
+    return "".join(parts), changed_links
 
 
 class FunnelSyncService:
@@ -196,6 +205,8 @@ class FunnelSyncService:
         previous_funnel: int | None,
         new_funnel: int,
         user_id: str,
+        status: str,
+        link_changes: dict,
     ) -> None:
         try:
             self.db_repo.client.table("active_funnel_history").insert(
@@ -205,6 +216,8 @@ class FunnelSyncService:
                     "active_funnel_number": new_funnel,
                     "previous_active_funnel_number": previous_funnel,
                     "changed_by": user_id,
+                    "status": status,
+                    "link_changes": link_changes or None,
                 }
             ).execute()
         except Exception as e:
@@ -264,6 +277,7 @@ class FunnelSyncService:
     ) -> dict:
         warnings: list[str] = []
         files_changed: list[dict] = []
+        link_changes: dict[str, dict[str, str]] = {}
         checkout_map: dict = {}
 
         try:
@@ -289,7 +303,7 @@ class FunnelSyncService:
             try:
                 for remote_path in self._walk_remote_html_files(sftp, remote_root):
                     original = self._read_remote_file(sftp, remote_path)
-                    new_content = _build_new_content(
+                    new_content, changed_links = _build_new_content(
                         original, checkout_map, remote_path, warnings
                     )
                     if new_content is None:
@@ -318,6 +332,13 @@ class FunnelSyncService:
                             "diff": diff,
                         }
                     )
+
+                    rel_dir = posixpath.dirname(
+                        posixpath.relpath(remote_path, remote_root)
+                    )
+                    page_key = f"{domain}/{rel_dir}" if rel_dir else domain
+                    link_changes.setdefault(page_key, {}).update(changed_links)
+
                     log = logger.info if ok else logger.error
                     log(
                         f"[funnel-sync] {'OK' if ok else 'FALHOU'} {remote_path} "
@@ -332,12 +353,17 @@ class FunnelSyncService:
         else:
             self._update_sync_status(active_funnel_row_id, "success", None)
             if previous_funnel_number != active_funnel_number:
+                history_status = (
+                    "success" if all(f["ok"] for f in files_changed) else "error"
+                )
                 self._log_funnel_change(
                     product_id,
                     network_id,
                     previous_funnel_number,
                     active_funnel_number,
                     user_id,
+                    history_status,
+                    link_changes,
                 )
 
         return {
