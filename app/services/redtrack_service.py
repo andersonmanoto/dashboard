@@ -1,5 +1,7 @@
 """Cliente para criar recursos no RedTrack via API (offers, por enquanto)."""
 
+import json
+
 import httpx
 from loguru import logger
 
@@ -63,4 +65,16 @@ class RedTrackAPI:
                 f"'{title}': {response.text}"
             )
 
-        return response.json()
+        try:
+            return response.json()
+        except UnicodeDecodeError:
+            # RedTrack já criou a offer (status 200/201) — o corpo só tem
+            # algum byte não-UTF-8 (ex: caractere acentuado mal codificado
+            # em algum campo). Decodifica tolerando isso em vez de perder a
+            # resposta (e o id da offer criada) por causa de um campo cosmético.
+            logger.warning(
+                f"[redtrack] resposta ao criar offer '{title}' com bytes "
+                "não-UTF-8; decodificando com substituição de caracteres inválidos"
+            )
+            text = response.content.decode("utf-8", errors="replace")
+            return json.loads(text)
