@@ -268,20 +268,24 @@ class FunnelSyncService:
         Nem toda página hospedada é UTF-8 de fato (export de Word/Windows
         costuma vir em windows-1252/latin-1, mesmo declarando outra coisa ou
         nada no <meta charset>). Detecta pelo <meta charset> quando possível;
-        se os bytes não baterem com a codificação detectada (ou não houver
-        declaração), cai pra cp1252 — mapeia todos os 256 valores de byte,
-        então nunca lança UnicodeDecodeError. O encoding devolvido precisa
-        ser reusado na escrita, senão o conteúdo não tocado pelo swap de link
-        é corrompido ao ser re-salvo em UTF-8.
+        se os bytes não baterem, tenta cp1252 (cobre os bytes "tipográficos"
+        0x80-0x9F que exports do Windows costumam usar) e por fim latin-1 —
+        que mapeia todos os 256 valores de byte e nunca lança
+        UnicodeDecodeError (diferente de cp1252, que tem alguns pontos
+        indefinidos, ex: 0x81, 0x8D, 0x8F, 0x90, 0x9D). O encoding devolvido
+        precisa ser reusado na escrita, senão o conteúdo não tocado pelo
+        swap de link é corrompido ao ser re-salvo em UTF-8.
         """
         with sftp.open(remote_path, "rb") as f:
             raw = f.read()
 
         encoding = _detect_encoding(raw)
-        try:
-            return raw.decode(encoding), encoding
-        except UnicodeDecodeError:
-            return raw.decode("cp1252"), "cp1252"
+        for candidate in dict.fromkeys([encoding, "cp1252", "latin-1"]):
+            try:
+                return raw.decode(candidate), candidate
+            except UnicodeDecodeError:
+                continue
+        return raw.decode("latin-1"), "latin-1"  # inalcançável: latin-1 não falha
 
     def _backup_file(self, remote_path: str, content: str) -> str:
         backup_dir = os.path.join(self.settings.temp_dir, "funnel_sync_backups")
