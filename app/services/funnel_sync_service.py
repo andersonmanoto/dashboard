@@ -169,7 +169,7 @@ class FunnelSyncService:
     def _fetch_checkout_map(
         self, product_id: str, network_id: str, funnel_number: int
     ) -> dict:
-        """Retorna { (funnel_stage, switch_link): url }.
+        """Retorna { (funnel_stage, switch_link): url }, só do estágio Purchase.
 
         switch_link não é mais uma coluna própria — é derivado de
         checkouts.quantity, já que o id da tag no HTML sempre segue o padrão
@@ -178,6 +178,12 @@ class FunnelSyncService:
         checkout com o mesmo (funnel_stage, quantity) — ex: a variante _sms
         de um mesmo pote — e só a linha "principal" (allow_aff_link=true)
         deve virar o switchLink do HTML.
+
+        Restrito a funnel_stage=Purchase de propósito: só as páginas de
+        front (Purchase) seguem a convenção switchLink-Nb de forma
+        consistente entre produtos. Páginas de upsell/downsell variam
+        demais (id="add", sem id nenhum, links em variável JS) pra esse
+        parser genérico mexer nelas com segurança.
         """
         response = (
             self.db_repo.client.table("checkouts")
@@ -194,9 +200,11 @@ class FunnelSyncService:
             quantity = row.get("quantity")
             if not quantity:
                 continue
+            stage = row["funnel_stage"] or "Purchase"
+            if stage != "Purchase":
+                continue
             switch_link = f"switchLink-{quantity}b"
-            key = (row["funnel_stage"] or "Purchase", switch_link)
-            mapping[key] = row["url"]
+            mapping[(stage, switch_link)] = row["url"]
         return mapping
 
     # --- Supabase: escrita (não deve derrubar o sync se falhar) ---
