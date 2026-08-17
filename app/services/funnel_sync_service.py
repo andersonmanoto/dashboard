@@ -58,10 +58,26 @@ ATTR_RE = re.compile(
     r"|([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*'([^']*)'"
 )
 HREF_RE = re.compile(r'(href\s*=\s*)(["\'])(.*?)\2', re.IGNORECASE | re.DOTALL)
+META_CHARSET_RE = re.compile(
+    rb'<meta[^>]+charset\s*=\s*["\']?\s*([a-zA-Z0-9_-]+)', re.IGNORECASE
+)
 
 
 class FunnelSyncError(Exception):
     """Erro esperado (produto/checkout não encontrado, config faltando)."""
+
+
+def _detect_encoding(raw: bytes) -> str:
+    """Tenta achar o charset declarado em <meta> nos primeiros bytes do HTML."""
+    match = META_CHARSET_RE.search(raw[:4096])
+    if match:
+        name = match.group(1).decode("ascii", "ignore")
+        try:
+            "".encode(name)
+            return name
+        except LookupError:
+            pass
+    return "utf-8"
 
 
 def _parse_attrs(tag_text: str) -> dict:
@@ -246,12 +262,26 @@ class FunnelSyncService:
                 yield remote_path
 
     @staticmethod
-    def _read_remote_file(sftp, remote_path: str) -> str:
-        with sftp.open(remote_path, "r") as f:
-            content = f.read()
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-        return content
+    def _read_remote_file(sftp, remote_path: str) -> tuple[str, str]:
+        """Lê o arquivo remoto e devolve (conteudo, encoding usado).
+
+        Nem toda página hospedada é UTF-8 de fato (export de Word/Windows
+        costuma vir em windows-1252/latin-1, mesmo declarando outra coisa ou
+        nada no <meta charset>). Detecta pelo <meta charset> quando possível;
+        se os bytes não baterem com a codificação detectada (ou não houver
+        declaração), cai pra cp1252 — mapeia todos os 256 valores de byte,
+        então nunca lança UnicodeDecodeError. O encoding devolvido precisa
+        ser reusado na escrita, senão o conteúdo não tocado pelo swap de link
+        é corrompido ao ser re-salvo em UTF-8.
+        """
+        with sftp.open(remote_path, "rb") as f:
+            raw = f.read()
+
+        encoding = _detect_encoding(raw)
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError:
+            return raw.decode("cp1252"), "cp1252"
 
     def _backup_file(self, remote_path: str, content: str) -> str:
         backup_dir = os.path.join(self.settings.temp_dir, "funnel_sync_backups")
@@ -302,7 +332,7 @@ class FunnelSyncService:
             sftp, transport = self._connect_sftp()
             try:
                 for remote_path in self._walk_remote_html_files(sftp, remote_root):
-                    original = self._read_remote_file(sftp, remote_path)
+                    original, encoding = self._read_remote_file(sftp, remote_path)
                     new_content, changed_links = _build_new_content(
                         original, checkout_map, remote_path, warnings
                     )
@@ -310,10 +340,13 @@ class FunnelSyncService:
                         continue
 
                     backup_path = self._backup_file(remote_path, original)
-                    with sftp.open(remote_path, "w") as f:
-                        f.write(new_content)
+                    # Escreve bytes na mesma codificação da leitura — se
+                    # passássemos str, o paramiko sempre re-codifica em
+                    # UTF-8, corrompendo páginas que não são UTF-8 de fato.
+                    with sftp.open(remote_path, "wb") as f:
+                        f.write(new_content.encode(encoding))
 
-                    verify = self._read_remote_file(sftp, remote_path)
+                    verify, _ = self._read_remote_file(sftp, remote_path)
                     ok = verify == new_content
 
                     diff = "".join(
