@@ -180,6 +180,7 @@ async def task_funnel_sync(
     active_funnel_number: int,
     previous_funnel_number: int | None,
     active_funnel_row_id: str,
+    active_funnel_history_id: str | None = None,
 ):
     """
     Tarefa sob demanda disparada pela API (POST /active-funnels/sync).
@@ -202,6 +203,7 @@ async def task_funnel_sync(
         active_funnel_number,
         previous_funnel_number,
         active_funnel_row_id,
+        active_funnel_history_id,
     )
 
 

@@ -214,30 +214,26 @@ class FunnelSyncService:
                 f"product_network_active_funnels (id={active_funnel_row_id}): {e}"
             )
 
-    def _log_funnel_change(
+    def _update_funnel_history_status(
         self,
-        product_id: str,
-        network_id: str,
-        previous_funnel: int | None,
-        new_funnel: int,
-        user_id: str,
+        history_id: str,
         status: str,
         link_changes: dict,
     ) -> None:
+        """Atualiza a linha em active_funnel_history criada como 'processing'
+        pelo router assim que o POST chegou (ver app/routers/active_funnels.py)."""
         try:
-            self.db_repo.client.table("active_funnel_history").insert(
+            self.db_repo.client.table("active_funnel_history").update(
                 {
-                    "product_id": product_id,
-                    "network_id": network_id,
-                    "active_funnel_number": new_funnel,
-                    "previous_active_funnel_number": previous_funnel,
-                    "changed_by": user_id,
                     "status": status,
                     "link_changes": link_changes or None,
                 }
-            ).execute()
+            ).eq("id", history_id).execute()
         except Exception as e:
-            logger.error(f"[funnel-sync] falha ao registrar active_funnel_history: {e}")
+            logger.error(
+                f"[funnel-sync] falha ao atualizar active_funnel_history "
+                f"(id={history_id}): {e}"
+            )
 
     # --- SFTP ---
 
@@ -308,6 +304,7 @@ class FunnelSyncService:
         active_funnel_number: int,
         previous_funnel_number: int | None,
         active_funnel_row_id: str,
+        active_funnel_history_id: str | None,
     ) -> dict:
         warnings: list[str] = []
         files_changed: list[dict] = []
@@ -386,21 +383,19 @@ class FunnelSyncService:
                 transport.close()
         except Exception as e:
             self._update_sync_status(active_funnel_row_id, "error", str(e))
+            if active_funnel_history_id is not None:
+                self._update_funnel_history_status(
+                    active_funnel_history_id, "error", link_changes
+                )
             raise
         else:
             self._update_sync_status(active_funnel_row_id, "success", None)
-            if previous_funnel_number != active_funnel_number:
+            if active_funnel_history_id is not None:
                 history_status = (
                     "success" if all(f["ok"] for f in files_changed) else "error"
                 )
-                self._log_funnel_change(
-                    product_id,
-                    network_id,
-                    previous_funnel_number,
-                    active_funnel_number,
-                    user_id,
-                    history_status,
-                    link_changes,
+                self._update_funnel_history_status(
+                    active_funnel_history_id, history_status, link_changes
                 )
 
         return {
@@ -422,6 +417,7 @@ class FunnelSyncService:
         active_funnel_number: int,
         previous_funnel_number: int | None,
         active_funnel_row_id: str,
+        active_funnel_history_id: str | None = None,
     ) -> dict:
         """Offload da operação bloqueante (SSH/SFTP) para uma thread separada."""
         return await asyncio.to_thread(
@@ -433,4 +429,5 @@ class FunnelSyncService:
             active_funnel_number,
             previous_funnel_number,
             active_funnel_row_id,
+            active_funnel_history_id,
         )

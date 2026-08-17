@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from arq.jobs import Job, JobStatus
@@ -5,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 from pydantic import BaseModel, field_validator
 
-from app.dependencies import verify_funnel_sync_key
+from app.dependencies import get_database_repository, verify_funnel_sync_key
+from app.repositories.database import DatabaseRepository
 from app.services.funnel_sync_service import FunnelSyncError
 
 router = APIRouter(tags=["Active Funnels"])
@@ -36,7 +38,11 @@ class FunnelSyncRequest(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(verify_funnel_sync_key)],
 )
-async def sync_active_funnel(request: Request, payload: FunnelSyncRequest):
+async def sync_active_funnel(
+    request: Request,
+    payload: FunnelSyncRequest,
+    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
+):
     """
     Enfileira a sincronização dos links de checkout (switch-link) das páginas
     HTML publicadas de um produto com o que está cadastrado em `checkouts`
@@ -54,13 +60,38 @@ async def sync_active_funnel(request: Request, payload: FunnelSyncRequest):
     `product_network_active_funnels_id`) já foi inserida por uma Edge
     Function antes dessa chamada — este endpoint só atualiza `status`
     ('success'/'error') e `error_message` nela ao final. Se o funil ativo
-    mudar de fato (`previous_funnel` != `active_funnel`), a transição fica
-    registrada em `active_funnel_history`.
+    mudar de fato (`previous_funnel` != `active_funnel`), a transição já
+    nasce registrada em `active_funnel_history` com status 'processing'
+    (o worker atualiza pro status final ao terminar).
     """
     redis_pool = getattr(request.app.state, "redis_pool", None)
     if not redis_pool:
         logger.error("Redis pool não encontrado no app.state")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Serviço de fila indisponível.")
+
+    active_funnel_history_id = None
+    if payload.previous_funnel != payload.active_funnel:
+        try:
+            history_row = (
+                db_repo.client.table("active_funnel_history")
+                .insert(
+                    {
+                        "product_id": str(payload.product),
+                        "network_id": str(payload.network),
+                        "active_funnel_number": payload.active_funnel,
+                        "previous_active_funnel_number": payload.previous_funnel,
+                        "changed_by": str(payload.user_id),
+                        "status": "processing",
+                    }
+                )
+                .execute()
+            )
+            active_funnel_history_id = history_row.data[0]["id"]
+        except Exception as e:
+            logger.error(
+                f"[active-funnels] falha ao criar active_funnel_history "
+                f"(status=processing): {e}"
+            )
 
     job = await redis_pool.enqueue_job(
         "task_funnel_sync",
@@ -71,6 +102,7 @@ async def sync_active_funnel(request: Request, payload: FunnelSyncRequest):
         payload.active_funnel,
         payload.previous_funnel,
         str(payload.product_network_active_funnels_id),
+        active_funnel_history_id,
         _queue_name=FUNNEL_SYNC_QUEUE,
     )
 
