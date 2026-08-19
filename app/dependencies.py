@@ -116,6 +116,17 @@ async def verify_redtrack_offers_key(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Credenciais inválidas")
 
 
+async def verify_widget_sync_key(
+    x_api_key: str = Header(None), settings: Settings = Depends(get_settings)
+) -> None:
+    """Valida chave de API para o Sync de Widgets (puxar script do CDN pro Supabase)."""
+    if not settings.widget_sync_api_key:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Config Error")
+
+    if x_api_key != settings.widget_sync_api_key:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Credenciais inválidas")
+
+
 async def verify_reports_key(
     x_api_key: Annotated[str, Header(alias="X-API-KEY")] = None,
     settings: Settings = Depends(get_settings),
