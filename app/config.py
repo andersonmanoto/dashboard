@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     reports_api_key: str
     funnel_sync_api_key: str = ""
     redtrack_offers_api_key: str = ""
-    widget_sync_api_key: str = ""
 
     # Supabase
     supabase_url: str
@@ -85,9 +84,6 @@ class Settings(BaseSettings):
     # AutoPages (projeto Supabase separado)
     autopages_supabase_url: str = ""
     autopages_supabase_service_role: str = ""
-
-    # Widgets (tigeroffers_widget — Cloudflare Pages)
-    widget_cdn_host: str = "cdn.tigeroffers.com"
 
 
 @lru_cache

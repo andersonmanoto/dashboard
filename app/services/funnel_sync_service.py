@@ -22,13 +22,6 @@ Como funciona:
      arquivo não é tocado. O estágio do funil (Purchase, Up1, Dw1, ...) vem
      do atributo data-funnel-stage da mesma tag (default "Purchase" se
      ausente).
-     Também troca, nas tags <script src="https://{WIDGET_CDN_HOST}/...">
-     que embedam um widget do tigeroffers_widget, os atributos
-     data-url{quantity}b (ex: data-url2b) pela mesma URL de checkout —
-     o widget compilado só tem placeholders __URL2B__ no HTML, quem
-     preenche em runtime é esse data-attr da tag <script> (ver
-     builder/compiler.py no repo tigeroffers_widget). Mesma convenção de
-     quantity que o switchLink-{quantity}b já usa.
   5. Ao final, sempre atualiza status ('success' ou 'error') e
      error_message em `product_network_active_funnels` (via
      active_funnel_row_id). Em caso de sucesso e se o funil realmente mudou
@@ -65,12 +58,6 @@ ATTR_RE = re.compile(
     r"|([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*'([^']*)'"
 )
 HREF_RE = re.compile(r'(href\s*=\s*)(["\'])(.*?)\2', re.IGNORECASE | re.DOTALL)
-
-SCRIPT_TAG_RE = re.compile(r"<script\b[^>]*?>", re.IGNORECASE | re.DOTALL)
-SRC_RE = re.compile(r'src\s*=\s*(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL)
-DATA_URL_ATTR_RE = re.compile(
-    r'data-url(\d+)b\s*=\s*(["\'])(.*?)\2', re.IGNORECASE | re.DOTALL
-)
 META_CHARSET_RE = re.compile(
     rb'<meta[^>]+charset\s*=\s*["\']?\s*([a-zA-Z0-9_-]+)', re.IGNORECASE
 )
@@ -103,13 +90,20 @@ def _parse_attrs(tag_text: str) -> dict:
     return attrs
 
 
-def _find_anchor_replacements(
+def _build_new_content(
     original: str, checkout_map: dict, remote_path: str, warnings: list[str]
-) -> list[tuple[int, int, str, str]]:
-    """Acha, nas tags <a id="..."> cujo id bate com switch_link, o span do
-    valor do href a trocar. Retorna [(value_start, value_end, new_url, key)]."""
+) -> tuple[str | None, dict[str, str]]:
+    """Troca hrefs nas tags <a id="..."> cujo id bate com switch_link.
+
+    Retorna (novo_conteudo, changed_links). novo_conteudo é None se nada mudou
+    nesse arquivo. changed_links mapeia switch_link -> nova url, só com os que
+    realmente mudaram (pra alimentar active_funnel_history.link_changes).
+    """
     known_switch_links = {switch_link for (_, switch_link) in checkout_map}
-    replacements: list[tuple[int, int, str, str]] = []
+
+    parts = []
+    last_end = 0
+    changed_links: dict[str, str] = {}
 
     for m in TAG_RE.finditer(original):
         tag_text = m.group(0)
@@ -139,101 +133,16 @@ def _find_anchor_replacements(
             continue
 
         tag_start = m.start()
-        replacements.append(
-            (
-                tag_start + href_match.start(3),
-                tag_start + href_match.end(3),
-                new_url,
-                switch_link,
-            )
-        )
+        href_value_start = tag_start + href_match.start(3)
+        href_value_end = tag_start + href_match.end(3)
 
-    return replacements
-
-
-def _find_widget_script_replacements(
-    original: str,
-    checkout_map: dict,
-    widget_cdn_host: str,
-    remote_path: str,
-    warnings: list[str],
-) -> list[tuple[int, int, str, str]]:
-    """Acha, nas tags <script src="https://{widget_cdn_host}/...">, os spans
-    dos atributos data-url{quantity}b a trocar pela URL de checkout do
-    quantity correspondente (mesmo mapa/convenção do switchLink-{quantity}b).
-    """
-    replacements: list[tuple[int, int, str, str]] = []
-
-    for m in SCRIPT_TAG_RE.finditer(original):
-        tag_text = m.group(0)
-        src_match = SRC_RE.search(tag_text)
-        if not src_match or widget_cdn_host not in src_match.group(2):
-            continue
-
-        tag_start = m.start()
-        for attr_match in DATA_URL_ATTR_RE.finditer(tag_text):
-            quantity = attr_match.group(1)
-            switch_link = f"switchLink-{quantity}b"
-            new_url = checkout_map.get(("Purchase", switch_link))
-            if not new_url:
-                warnings.append(
-                    f"{remote_path}: widget sem checkout cadastrado para "
-                    f"quantity={quantity} — data-url{quantity}b mantido como está"
-                )
-                continue
-
-            old_url = attr_match.group(3)
-            if old_url == new_url:
-                continue
-
-            replacements.append(
-                (
-                    tag_start + attr_match.start(3),
-                    tag_start + attr_match.end(3),
-                    new_url,
-                    f"data-url{quantity}b",
-                )
-            )
-
-    return replacements
-
-
-def _build_new_content(
-    original: str,
-    checkout_map: dict,
-    remote_path: str,
-    warnings: list[str],
-    widget_cdn_host: str | None = None,
-) -> tuple[str | None, dict[str, str]]:
-    """Troca hrefs nas tags <a id="..."> cujo id bate com switch_link, e
-    data-url{quantity}b nas tags <script> de embed de widget.
-
-    Retorna (novo_conteudo, changed_links). novo_conteudo é None se nada mudou
-    nesse arquivo. changed_links mapeia switch_link/data-url{q}b -> nova url,
-    só com os que realmente mudaram (pra alimentar
-    active_funnel_history.link_changes).
-    """
-    replacements = _find_anchor_replacements(
-        original, checkout_map, remote_path, warnings
-    )
-    if widget_cdn_host:
-        replacements += _find_widget_script_replacements(
-            original, checkout_map, widget_cdn_host, remote_path, warnings
-        )
-
-    if not replacements:
-        return None, {}
-
-    replacements.sort(key=lambda r: r[0])
-
-    parts = []
-    last_end = 0
-    changed_links: dict[str, str] = {}
-    for value_start, value_end, new_url, key in replacements:
-        parts.append(original[last_end:value_start])
+        parts.append(original[last_end:href_value_start])
         parts.append(new_url)
-        last_end = value_end
-        changed_links[key] = new_url
+        last_end = href_value_end
+        changed_links[switch_link] = new_url
+
+    if not changed_links:
+        return None, {}
 
     parts.append(original[last_end:])
     return "".join(parts), changed_links
@@ -434,11 +343,7 @@ class FunnelSyncService:
                 for remote_path in self._walk_remote_html_files(sftp, remote_root):
                     original, encoding = self._read_remote_file(sftp, remote_path)
                     new_content, changed_links = _build_new_content(
-                        original,
-                        checkout_map,
-                        remote_path,
-                        warnings,
-                        widget_cdn_host=self.settings.widget_cdn_host,
+                        original, checkout_map, remote_path, warnings
                     )
                     if new_content is None:
                         continue

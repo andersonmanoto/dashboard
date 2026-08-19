@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.routers import health, webhooks, tools, reports, active_funnels, redtrack, widgets
+from app.routers import health, webhooks, tools, reports, active_funnels, redtrack
 
 api_router = APIRouter()
 
@@ -20,6 +20,3 @@ api_router.include_router(active_funnels.router)
 
 # RedTrack (criação automática de offers)
 api_router.include_router(redtrack.router)
-
-# Widgets (sync do script publicado no CDN pro Supabase)
-api_router.include_router(widgets.router)
