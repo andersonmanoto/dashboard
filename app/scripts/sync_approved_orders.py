@@ -99,6 +99,7 @@ async def validate_phone_abstract(formatted_phone: str) -> Optional[bool]:
         return None
     except httpx.HTTPStatusError as exc:
         logger.error(f"Erro HTTP na AbstractAPI: {exc}")
+        logger.error(f"Resposta de erro da AbstractAPI: {exc.response.text}")
         return None
 
 

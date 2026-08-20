@@ -58,6 +58,8 @@ def validate_phone_abstract(formatted_phone: str, api_key: str) -> Optional[bool
         return False
     except requests.RequestException as exc:
         logger.error(f"Erro AbstractAPI: {exc}")
+        if exc.response is not None:
+            logger.error(f"Resposta de erro da AbstractAPI: {exc.response.text}")
         return None
 
 
