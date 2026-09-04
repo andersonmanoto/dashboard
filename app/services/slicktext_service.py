@@ -283,23 +283,16 @@ async def process_slicktext_sync_task(
         )
         return
 
-    # 2. Pega ID da lista e a conta SlickText responsável pelo produto
-    slicktext_mapping = product_info.get("slicktext_product_lists") or {}
-    list_id = slicktext_mapping.get("abandoned_list_id")
-    if not list_id:
+    # 2. Pega as contas SlickText mapeadas pro produto (pode ser mais de uma
+    # -- ex: conta principal + conta de contingência -- e envia a MESMA
+    # informação pra cada uma, cada qual com seu próprio list_id)
+    raw_mappings = product_info.get("slicktext_product_lists") or []
+    if isinstance(raw_mappings, dict):
+        raw_mappings = [raw_mappings]
+
+    mappings = [m for m in raw_mappings if m.get("abandoned_list_id")]
+    if not mappings:
         logger.warning(f"SlickText: Lista não mapeada para o produto '{product_name}'.")
-        return
-
-    account_info = slicktext_mapping.get("slicktext_accounts") or {}
-    account_name = account_info.get("name")
-    brand_id = account_info.get("brand_id")
-    api_key = get_slicktext_api_key(brand_id, settings)
-
-    if not api_key or not brand_id:
-        logger.error(
-            f"[SlickText] Credenciais não configuradas para a conta '{account_name}' "
-            f"(brand_id '{brand_id}', produto '{product_name}')."
-        )
         return
 
     # 3. Valida telefone
@@ -321,11 +314,25 @@ async def process_slicktext_sync_task(
         "bottles": str(bottles_quantity),
     }
 
-    _sync_to_slicktext(
-        slicktext_payload,
-        customer_name,
-        list_id,
-        api_key=api_key,
-        brand_id=brand_id,
-        api_url=settings.slicktext_api_url,
-    )
+    for mapping in mappings:
+        list_id = mapping.get("abandoned_list_id")
+        account_info = mapping.get("slicktext_accounts") or {}
+        account_name = account_info.get("name")
+        brand_id = account_info.get("brand_id")
+        api_key = get_slicktext_api_key(brand_id, settings)
+
+        if not api_key or not brand_id:
+            logger.error(
+                f"[SlickText] Credenciais não configuradas para a conta '{account_name}' "
+                f"(brand_id '{brand_id}', produto '{product_name}')."
+            )
+            continue
+
+        _sync_to_slicktext(
+            slicktext_payload,
+            customer_name,
+            list_id,
+            api_key=api_key,
+            brand_id=brand_id,
+            api_url=settings.slicktext_api_url,
+        )

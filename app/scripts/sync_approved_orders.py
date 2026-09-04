@@ -257,31 +257,19 @@ async def process_queue_item(item: dict) -> None:
     checkouts_data = event_data.get("checkouts") or {}
     quantity = checkouts_data.get("quantity")
 
-    slicktext_mapping = products_data.get("slicktext_product_lists") or {}
-    list_id = slicktext_mapping.get("approved_list_id")
-    if not list_id:
+    # Pega as contas SlickText mapeadas pro produto (pode ser mais de uma --
+    # ex: conta principal + conta de contingência -- envia a MESMA informação
+    # pra cada uma, cada qual com seu próprio list_id)
+    raw_mappings = products_data.get("slicktext_product_lists") or []
+    if isinstance(raw_mappings, dict):
+        raw_mappings = [raw_mappings]
+
+    mappings = [m for m in raw_mappings if m.get("approved_list_id")]
+    if not mappings:
         logger.warning(f"Lista não mapeada para o produto: {product_name}")
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": "lista_nao_encontrada"})
-            .eq("event_id", queue_id)
-            .execute()
-        )
-        return
-
-    account_info = slicktext_mapping.get("slicktext_accounts") or {}
-    account_name = account_info.get("name")
-    brand_id = account_info.get("brand_id")
-    api_key = get_slicktext_api_key(brand_id, SETTINGS)
-
-    if not api_key or not brand_id:
-        logger.error(
-            f"Credenciais SlickText não configuradas para a conta '{account_name}' "
-            f"(brand_id '{brand_id}', produto '{product_name}')."
-        )
-        await (
-            db.table("slicktext_sync_queue")
-            .update({"status": "failed", "last_error": "credenciais_nao_configuradas"})
             .eq("event_id", queue_id)
             .execute()
         )
@@ -325,36 +313,58 @@ async def process_queue_item(item: dict) -> None:
         "bottles": str(quantity),
     }
 
-    # Sincronização
-    result = await sync_contact_to_slicktext(
-        payload, customer, list_id, api_key=api_key, brand_id=brand_id
-    )
+    # Sincronização: envia a mesma informação pra cada conta mapeada
+    results = []
+    for mapping in mappings:
+        list_id = mapping.get("approved_list_id")
+        account_info = mapping.get("slicktext_accounts") or {}
+        account_name = account_info.get("name")
+        brand_id = account_info.get("brand_id")
+        api_key = get_slicktext_api_key(brand_id, SETTINGS)
 
-    if result == SyncResult.SUCCESS:
-        await (
-            db.table("slicktext_sync_queue")
-            .update({"status": "synced", "last_error": None})
-            .eq("event_id", queue_id)
-            .execute()
+        if not api_key or not brand_id:
+            logger.error(
+                f"Credenciais SlickText não configuradas para a conta '{account_name}' "
+                f"(brand_id '{brand_id}', produto '{product_name}')."
+            )
+            results.append(SyncResult.MISSING_CREDENTIALS)
+            continue
+
+        result = await sync_contact_to_slicktext(
+            payload, customer, list_id, api_key=api_key, brand_id=brand_id
         )
-    elif result == SyncResult.UNSUPPORTED_REGION:
-        await (
-            db.table("slicktext_sync_queue")
-            .update({"status": "failed", "last_error": "regiao_nao_suportada"})
-            .eq("event_id", queue_id)
-            .execute()
-        )
-    elif result == SyncResult.API_ERROR:
+        results.append(result)
+
+    # Agrega o resultado de todas as contas num status só: se qualquer uma
+    # deu erro de rede/API, tenta tudo de novo (SlickText já lida com
+    # duplicidade via upsert, então reenviar pra quem já deu certo é
+    # inofensivo); região não suportada é uma característica do telefone,
+    # não da conta, então nenhuma tentativa nova resolve.
+    if SyncResult.API_ERROR in results:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "retry", "last_error": "slicktext_api_error"})
             .eq("event_id", queue_id)
             .execute()
         )
-    elif result == SyncResult.MISSING_CREDENTIALS:
+    elif SyncResult.UNSUPPORTED_REGION in results:
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": "regiao_nao_suportada"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
+    elif SyncResult.MISSING_CREDENTIALS in results:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "synced", "last_error": "missing_credentials_simulacao"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
+    else:
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "synced", "last_error": None})
             .eq("event_id", queue_id)
             .execute()
         )
