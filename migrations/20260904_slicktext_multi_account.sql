@@ -3,7 +3,9 @@
 -- Introduz suporte a múltiplas contas SlickText. Hoje só existia 1 conta
 -- global (via SLICKTEXT_API_KEY/SLICKTEXT_BRAND_ID no .env) e 2 colunas fixas
 -- em products (slicktext_approved_list_id / slicktext_abandoned_list_id).
--- Isso substitui essas colunas por uma tabela de mapeamento produto -> conta.
+-- Isso substitui essas colunas por uma tabela de mapeamento produto -> conta,
+-- e toda conta (a original inclusive) resolve a api_key da mesma forma:
+-- SLICKTEXT_API_KEY_<BRAND_ID> no .env (sem caso especial pra "conta padrão").
 --
 -- Um produto pode estar mapeado em MAIS DE UMA conta ao mesmo tempo (ex: a
 -- conta original -- "SMS TIGER CONTIGENCIA" -- funciona como contingência e
@@ -64,11 +66,8 @@ create trigger trg_slicktext_product_lists_updated_at
     for each row
     execute function public.set_slicktext_product_lists_updated_at();
 
--- Conta original ("contingência"), a mesma já usada via
--- SLICKTEXT_API_KEY/SLICKTEXT_BRAND_ID no .env. O código continua lendo a
--- api_key dessa conta a partir dessas variáveis (sem sufixo) quando
--- slicktext_accounts.brand_id = SLICKTEXT_BRAND_ID -- o brand_id que já
--- está no .env atual é '34641'.
+-- Conta original ("contingência"), a mesma já usada antes desta migration.
+-- api_key vive em SLICKTEXT_API_KEY_34641 no .env.
 insert into public.slicktext_accounts (name, brand_id)
 select 'SMS TIGER CONTIGENCIA', '34641'
 where not exists (select 1 from public.slicktext_accounts where brand_id = '34641');

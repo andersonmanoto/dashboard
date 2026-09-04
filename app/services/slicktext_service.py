@@ -319,7 +319,7 @@ async def process_slicktext_sync_task(
         account_info = mapping.get("slicktext_accounts") or {}
         account_name = account_info.get("name")
         brand_id = account_info.get("brand_id")
-        api_key = get_slicktext_api_key(brand_id, settings)
+        api_key = get_slicktext_api_key(brand_id)
 
         if not api_key or not brand_id:
             logger.error(
