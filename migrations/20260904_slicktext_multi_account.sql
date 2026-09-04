@@ -15,6 +15,14 @@
 -- slicktext_abandoned_list_id) NÃO são dropadas aqui de propósito -- ficam
 -- como deprecated até o cutover no código ser validado em produção. Dropar
 -- em uma migration separada depois.
+--
+-- Dropa slicktext_accounts/slicktext_product_lists antes de recriar: uma
+-- versão anterior deste script (schema com code/label/adspower_profile) já
+-- rodou nesse banco, então "create table if not exists" sozinho não
+-- adicionaria as colunas novas (id/name/account_id). Seguro dropar porque
+-- são tabelas novas, sem nenhum outro código/dado dependendo delas ainda.
+drop table if exists public.slicktext_product_lists cascade;
+drop table if exists public.slicktext_accounts cascade;
 
 create table if not exists public.slicktext_accounts (
     id uuid primary key default gen_random_uuid(),
