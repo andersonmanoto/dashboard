@@ -1,3 +1,4 @@
+import os
 import tempfile
 from functools import lru_cache
 
@@ -84,6 +85,23 @@ class Settings(BaseSettings):
     # AutoPages (projeto Supabase separado)
     autopages_supabase_url: str = ""
     autopages_supabase_service_role: str = ""
+
+
+def get_slicktext_api_key(account_code: str | None, settings: "Settings") -> str:
+    """
+    Resolve a api_key do SlickText para uma conta específica.
+
+    A conta 'default' usa slicktext_api_key (mantém compatibilidade com o .env
+    atual). Demais contas (cadastradas em slicktext_accounts) usam a env var
+    SLICKTEXT_API_KEY_<CODE em maiúsculo>, ex: conta 'velupet' ->
+    SLICKTEXT_API_KEY_VELUPET. O brand_id de cada conta não é segredo e fica
+    no banco (slicktext_accounts.brand_id), só a api_key vive no .env.
+    """
+    if not account_code:
+        return ""
+    if account_code == "default":
+        return settings.slicktext_api_key
+    return os.environ.get(f"SLICKTEXT_API_KEY_{account_code.upper()}", "")
 
 
 @lru_cache

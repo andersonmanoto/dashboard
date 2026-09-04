@@ -18,7 +18,7 @@ from phonenumbers import NumberParseException, PhoneNumberFormat
 # Importação do client ASSÍNCRONO do Supabase
 from supabase import AsyncClient, create_async_client
 
-from app.config import get_settings
+from app.config import get_settings, get_slicktext_api_key
 
 SETTINGS = get_settings()
 
@@ -104,18 +104,23 @@ async def validate_phone_abstract(formatted_phone: str) -> Optional[bool]:
 
 
 async def sync_contact_to_slicktext(
-    payload: dict, customer: str, target_list_id: int
+    payload: dict,
+    customer: str,
+    target_list_id: int,
+    *,
+    api_key: str,
+    brand_id: str,
 ) -> SyncResult:
-    if not SETTINGS.slicktext_api_key or not SETTINGS.slicktext_brand_id:
+    if not api_key or not brand_id:
         logger.error("Credenciais do SlickText não configuradas.")
         return SyncResult.MISSING_CREDENTIALS
 
     headers = {
-        "Authorization": f"Bearer {SETTINGS.slicktext_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
-    base_url = f"{SETTINGS.slicktext_api_url}/brands/{SETTINGS.slicktext_brand_id}"
+    base_url = f"{SETTINGS.slicktext_api_url}/brands/{brand_id}"
     mobile_number = payload.get("mobile_number")
     contact_id = None
 
@@ -252,12 +257,31 @@ async def process_queue_item(item: dict) -> None:
     checkouts_data = event_data.get("checkouts") or {}
     quantity = checkouts_data.get("quantity")
 
-    list_id = products_data.get("slicktext_approved_list_id")
+    slicktext_mapping = products_data.get("slicktext_product_lists") or {}
+    list_id = slicktext_mapping.get("approved_list_id")
     if not list_id:
         logger.warning(f"Lista não mapeada para o produto: {product_name}")
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": "lista_nao_encontrada"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
+        return
+
+    account_code = slicktext_mapping.get("account_code")
+    account_info = slicktext_mapping.get("slicktext_accounts") or {}
+    brand_id = account_info.get("brand_id")
+    api_key = get_slicktext_api_key(account_code, SETTINGS)
+
+    if not api_key or not brand_id:
+        logger.error(
+            f"Credenciais SlickText não configuradas para a conta '{account_code}' "
+            f"(produto '{product_name}')."
+        )
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": "credenciais_nao_configuradas"})
             .eq("event_id", queue_id)
             .execute()
         )
@@ -302,7 +326,9 @@ async def process_queue_item(item: dict) -> None:
     }
 
     # Sincronização
-    result = await sync_contact_to_slicktext(payload, customer, list_id)
+    result = await sync_contact_to_slicktext(
+        payload, customer, list_id, api_key=api_key, brand_id=brand_id
+    )
 
     if result == SyncResult.SUCCESS:
         await (
@@ -374,7 +400,9 @@ async def process_single_item(queue_id: str) -> None:
     res = await (
         db.table("slicktext_sync_queue")
         .select(
-            "event_id, attempts, events(customer_name, customer_phone, products(name, slicktext_approved_list_id), checkouts(quantity))"
+            "event_id, attempts, events(customer_name, customer_phone, "
+            "products(name, slicktext_product_lists(account_code, approved_list_id, "
+            "slicktext_accounts(brand_id))), checkouts(quantity))"
         )
         .eq("event_id", queue_id)
         .single()

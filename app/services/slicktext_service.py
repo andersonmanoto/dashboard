@@ -4,7 +4,7 @@ import requests
 import phonenumbers
 from phonenumbers import NumberParseException, PhoneNumberFormat
 
-from app.config import Settings
+from app.config import Settings, get_slicktext_api_key
 from app.repositories.database import DatabaseRepository
 
 logger = logging.getLogger(__name__)
@@ -64,18 +64,24 @@ def validate_phone_abstract(formatted_phone: str, api_key: str) -> Optional[bool
 
 
 def _sync_to_slicktext(
-    payload: dict, customer: str, target_list_id: int, settings: Settings
+    payload: dict,
+    customer: str,
+    target_list_id: int,
+    *,
+    api_key: str,
+    brand_id: str,
+    api_url: str,
 ) -> bool:
-    if not settings.slicktext_api_key or not settings.slicktext_brand_id:
+    if not api_key or not brand_id:
         logger.error("[SlickText] Credenciais não configuradas. Abortando.")
         return False
 
     headers = {
-        "Authorization": f"Bearer {settings.slicktext_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
-    base_url = f"{settings.slicktext_api_url}/brands/{settings.slicktext_brand_id}"
+    base_url = f"{api_url}/brands/{brand_id}"
     contact_id = None
     mobile_number = payload.get("mobile_number")
 
@@ -227,11 +233,17 @@ async def process_slicktext_sync_task(
     product_codename = payload.get("product_codename", "")
     country = payload.get("country", "US")
 
-    # 1. Busca nome real do produto, URL, quantity e o aff_id_sms no Supabase
+    # 1. Busca nome real do produto, URL, quantity, aff_id_sms e o mapeamento
+    # de lista/conta SlickText (slicktext_product_lists -> slicktext_accounts)
+    # no Supabase
     try:
         res = (
             db_repo.client.table("checkouts")
-            .select("url, quantity, products(name, aff_id_sms, slicktext_abandoned_list_id)")
+            .select(
+                "url, quantity, products(name, aff_id_sms, "
+                "slicktext_product_lists(account_code, abandoned_list_id, "
+                "slicktext_accounts(brand_id)))"
+            )
             .eq("checkout_code", product_codename)
             .limit(1)
             .execute()
@@ -271,10 +283,23 @@ async def process_slicktext_sync_task(
         )
         return
 
-    # 2. Pega ID da lista
-    list_id = product_info.get("slicktext_abandoned_list_id")
+    # 2. Pega ID da lista e a conta SlickText responsável pelo produto
+    slicktext_mapping = product_info.get("slicktext_product_lists") or {}
+    list_id = slicktext_mapping.get("abandoned_list_id")
     if not list_id:
         logger.warning(f"SlickText: Lista não mapeada para o produto '{product_name}'.")
+        return
+
+    account_code = slicktext_mapping.get("account_code")
+    account_info = slicktext_mapping.get("slicktext_accounts") or {}
+    brand_id = account_info.get("brand_id")
+    api_key = get_slicktext_api_key(account_code, settings)
+
+    if not api_key or not brand_id:
+        logger.error(
+            f"[SlickText] Credenciais não configuradas para a conta '{account_code}' "
+            f"(produto '{product_name}')."
+        )
         return
 
     # 3. Valida telefone
@@ -296,4 +321,11 @@ async def process_slicktext_sync_task(
         "bottles": str(bottles_quantity),
     }
 
-    _sync_to_slicktext(slicktext_payload, customer_name, list_id, settings)
+    _sync_to_slicktext(
+        slicktext_payload,
+        customer_name,
+        list_id,
+        api_key=api_key,
+        brand_id=brand_id,
+        api_url=settings.slicktext_api_url,
+    )
