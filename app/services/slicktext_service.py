@@ -241,8 +241,8 @@ async def process_slicktext_sync_task(
             db_repo.client.table("checkouts")
             .select(
                 "url, quantity, products(name, aff_id_sms, "
-                "slicktext_product_lists(account_code, abandoned_list_id, "
-                "slicktext_accounts(brand_id)))"
+                "slicktext_product_lists(abandoned_list_id, "
+                "slicktext_accounts(name, brand_id)))"
             )
             .eq("checkout_code", product_codename)
             .limit(1)
@@ -290,14 +290,14 @@ async def process_slicktext_sync_task(
         logger.warning(f"SlickText: Lista não mapeada para o produto '{product_name}'.")
         return
 
-    account_code = slicktext_mapping.get("account_code")
     account_info = slicktext_mapping.get("slicktext_accounts") or {}
+    account_name = account_info.get("name")
     brand_id = account_info.get("brand_id")
-    api_key = get_slicktext_api_key(account_code, settings)
+    api_key = get_slicktext_api_key(account_name, settings)
 
     if not api_key or not brand_id:
         logger.error(
-            f"[SlickText] Credenciais não configuradas para a conta '{account_code}' "
+            f"[SlickText] Credenciais não configuradas para a conta '{account_name}' "
             f"(produto '{product_name}')."
         )
         return
