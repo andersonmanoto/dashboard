@@ -88,22 +88,25 @@ class Settings(BaseSettings):
     autopages_supabase_service_role: str = ""
 
 
-def get_slicktext_api_key(account_name: str | None, settings: "Settings") -> str:
+def get_slicktext_api_key(brand_id: str | None, settings: "Settings") -> str:
     """
-    Resolve a api_key do SlickText para uma conta específica.
+    Resolve a api_key do SlickText para uma conta específica, a partir do
+    brand_id (identificador estável da conta no SlickText). De propósito NÃO
+    usa slicktext_accounts.name pra isso -- name é só um rótulo humano,
+    editável livremente (ex: "SMS TIGER CONTIGENCIA"), e usá-lo pra derivar a
+    env var quebraria a integração toda vez que alguém renomear a conta.
 
-    A conta 'default' usa slicktext_api_key (mantém compatibilidade com o .env
-    atual). Demais contas (cadastradas em slicktext_accounts) usam a env var
-    SLICKTEXT_API_KEY_<NOME em maiúsculo, sem espaços/acentos>, ex: conta
-    'Velupet' -> SLICKTEXT_API_KEY_VELUPET. O brand_id de cada conta não é
-    segredo e fica no banco (slicktext_accounts.brand_id), só a api_key vive
-    no .env.
+    A conta cujo brand_id bate com SLICKTEXT_BRAND_ID usa slicktext_api_key
+    (mantém compatibilidade com o .env atual, é a conta original). Demais
+    contas usam a env var SLICKTEXT_API_KEY_<BRAND_ID em maiúsculo>, ex:
+    brand_id '35016' -> SLICKTEXT_API_KEY_35016. O brand_id não é segredo e
+    fica no banco (slicktext_accounts.brand_id), só a api_key vive no .env.
     """
-    if not account_name:
+    if not brand_id:
         return ""
-    if account_name.strip().lower() == "default":
+    if brand_id == settings.slicktext_brand_id:
         return settings.slicktext_api_key
-    env_suffix = re.sub(r"[^A-Za-z0-9]+", "_", account_name).strip("_").upper()
+    env_suffix = re.sub(r"[^A-Za-z0-9]+", "_", brand_id).strip("_").upper()
     return os.environ.get(f"SLICKTEXT_API_KEY_{env_suffix}", "")
 
 

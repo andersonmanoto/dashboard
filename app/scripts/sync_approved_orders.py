@@ -272,12 +272,12 @@ async def process_queue_item(item: dict) -> None:
     account_info = slicktext_mapping.get("slicktext_accounts") or {}
     account_name = account_info.get("name")
     brand_id = account_info.get("brand_id")
-    api_key = get_slicktext_api_key(account_name, SETTINGS)
+    api_key = get_slicktext_api_key(brand_id, SETTINGS)
 
     if not api_key or not brand_id:
         logger.error(
             f"Credenciais SlickText não configuradas para a conta '{account_name}' "
-            f"(produto '{product_name}')."
+            f"(brand_id '{brand_id}', produto '{product_name}')."
         )
         await (
             db.table("slicktext_sync_queue")

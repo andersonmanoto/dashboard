@@ -293,12 +293,12 @@ async def process_slicktext_sync_task(
     account_info = slicktext_mapping.get("slicktext_accounts") or {}
     account_name = account_info.get("name")
     brand_id = account_info.get("brand_id")
-    api_key = get_slicktext_api_key(account_name, settings)
+    api_key = get_slicktext_api_key(brand_id, settings)
 
     if not api_key or not brand_id:
         logger.error(
             f"[SlickText] Credenciais não configuradas para a conta '{account_name}' "
-            f"(produto '{product_name}')."
+            f"(brand_id '{brand_id}', produto '{product_name}')."
         )
         return
 
