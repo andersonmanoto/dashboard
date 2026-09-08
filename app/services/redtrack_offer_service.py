@@ -3,10 +3,11 @@ Cria offers no RedTrack a partir do payload de "oferta nova" (plataforma,
 produto, funil, aff_id + lista de potes/urls do BuyGoods) e, pra cada uma,
 sincroniza `products`/`checkout_links` no Supabase do AutoPages.
 
-Monta a URL de tracking (URL do checkout + aff_id do payload + macros do
-RedTrack) e o título da offer, cria a offer via POST /offers e, com o
-offer_id retornado, grava a linha correspondente em `checkout_links`
-(criando o produto em `products` se ainda não existir).
+Monta a URL de tracking (URL do checkout + macros do RedTrack, com aff_id
+do payload só quando a plataforma é BuyGoods) e o título da offer, cria a
+offer via POST /offers e, com o offer_id retornado, grava a linha
+correspondente em `checkout_links` (criando o produto em `products` se
+ainda não existir).
 """
 
 from loguru import logger
@@ -15,10 +16,21 @@ from app.config import Settings
 from app.services.autopages_service import AutoPagesError, AutoPagesService
 from app.services.redtrack_service import RedTrackAPI, RedTrackAPIError
 
-# Offer source (program) do BuyGoods no RedTrack. Fixo por enquanto — só
-# existe essa origem cadastrada; quando surgir uma segunda rede, isso vira
-# um lookup por `plataforma`.
-BUYGOODS_OFFER_SOURCE_ID = "6685d5cfb9b57400016a1a95"
+# Offer source (program) de cada rede no RedTrack, por `plataforma`.
+_OFFER_SOURCE_ID_BY_PLATAFORMA = {
+    "buygoods": "6685d5cfb9b57400016a1a95",
+    "pagamerican": "6a9affa8cbd0b6a371635f4b",
+}
+
+
+def _get_offer_source_id(plataforma: str) -> str:
+    offer_source_id = _OFFER_SOURCE_ID_BY_PLATAFORMA.get(plataforma.strip().lower())
+    if offer_source_id is None:
+        raise RedTrackAPIError(
+            f"Plataforma '{plataforma}' não tem offer source do RedTrack cadastrado."
+        )
+    return offer_source_id
+
 
 # Macros do RedTrack — ficam literais na URL, o RedTrack substitui no clique.
 _TRACKING_MACROS = (
@@ -26,8 +38,14 @@ _TRACKING_MACROS = (
     "&subid3={rt_ad}&subid5={sub20}"
 )
 
+# Networks que não usam aff_id na URL de tracking — aff_id é um parâmetro
+# específico do checkout da BuyGoods, outras redes (ex.: PagAmerican) não têm.
+_NETWORKS_WITHOUT_AFF_ID = {"pagamerican"}
 
-def _build_offer_url(checkout_url: str, aff_id: str) -> str:
+
+def _build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
+    if plataforma.strip().lower() in _NETWORKS_WITHOUT_AFF_ID:
+        return f"{checkout_url}{_TRACKING_MACROS}"
     return f"{checkout_url}&aff_id={aff_id}{_TRACKING_MACROS}"
 
 
@@ -61,6 +79,7 @@ class RedTrackOfferService:
         # Resolvidos uma vez só — compartilhados por todas as ofertas do payload.
         checkout = await self.autopages.get_checkout(plataforma)
         product_id = await self.autopages.get_or_create_product(codigo_produto, produto)
+        offer_source_id = _get_offer_source_id(plataforma)
 
         created: list[dict] = []
         for oferta in payload["ofertas"]:
@@ -68,12 +87,12 @@ class RedTrackOfferService:
             checkout_url = oferta["url"]
 
             title = _build_offer_title(plataforma, produto, numero_de_potes, funil)
-            tracking_url = _build_offer_url(checkout_url, aff_id)
+            tracking_url = _build_offer_url(checkout_url, aff_id, plataforma)
 
             offer_id = None
             try:
                 redtrack_response = await self.redtrack.create_offer(
-                    title=title, url=tracking_url, program_id=BUYGOODS_OFFER_SOURCE_ID
+                    title=title, url=tracking_url, program_id=offer_source_id
                 )
                 offer_id = redtrack_response.get("id")
 
