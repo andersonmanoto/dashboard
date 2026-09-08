@@ -367,6 +367,24 @@ class DatabaseRepository:
             logger.error(f"Erro na transação RPC: {e}")
             raise e
 
+    def event_exists(self, order_id: str, action_type: str) -> bool:
+        """
+        Verifica se já existe um evento com esse order_id + action_type.
+
+        Usado pela importação retroativa de planilhas (SpreadsheetRetro), que
+        não tem rastro no webhook_inbox pra detectar reprocessamento de uma
+        mesma linha/relatório.
+        """
+        response = (
+            self.client.table("events")
+            .select("id")
+            .eq("order_id", order_id)
+            .eq("action_type", action_type)
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data)
+
     def register_missing_codename(self, data: MissingCodename) -> None:
         """
         Registra falha na identificação de produto.

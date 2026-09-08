@@ -83,6 +83,14 @@ class SpreadsheetRetro:
             try:
                 event = self._transform_row_to_event(row, network)
 
+                if self.processor.db.event_exists(event.order_id, event.action_type.value):
+                    logger.warning(
+                        f"Linha ignorada (já existe em events): "
+                        f"order_id={event.order_id} action_type={event.action_type.value}"
+                    )
+                    skipped_count += 1
+                    continue
+
                 processed = await self.processor.process_event(event)
 
                 if processed:
