@@ -3,11 +3,11 @@ Cria offers no RedTrack a partir do payload de "oferta nova" (plataforma,
 produto, funil, aff_id + lista de potes/urls do BuyGoods) e, pra cada uma,
 sincroniza `products`/`checkout_links` no Supabase do AutoPages.
 
-Monta a URL de tracking (URL do checkout + macros do RedTrack, com aff_id
-do payload só quando a plataforma é BuyGoods) e o título da offer, cria a
-offer via POST /offers e, com o offer_id retornado, grava a linha
-correspondente em `checkout_links` (criando o produto em `products` se
-ainda não existir).
+Monta a URL de tracking (URL do checkout + macros do RedTrack — aff_id do
+payload e macros completos pra BuyGoods, só `?clickid={clickid}` pra
+PagAmerican) e o título da offer, cria a offer via POST /offers e, com o
+offer_id retornado, grava a linha correspondente em `checkout_links`
+(criando o produto em `products` se ainda não existir).
 """
 
 from loguru import logger
@@ -38,14 +38,13 @@ _TRACKING_MACROS = (
     "&subid3={rt_ad}&subid5={sub20}"
 )
 
-# Networks que não usam aff_id na URL de tracking — aff_id é um parâmetro
-# específico do checkout da BuyGoods, outras redes (ex.: PagAmerican) não têm.
-_NETWORKS_WITHOUT_AFF_ID = {"pagamerican"}
+# PagAmerican só aceita clickid — não usa aff_id nem os demais macros da BuyGoods.
+_PAGAMERICAN_TRACKING_PARAMS = "?clickid={clickid}"
 
 
 def _build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
-    if plataforma.strip().lower() in _NETWORKS_WITHOUT_AFF_ID:
-        return f"{checkout_url}{_TRACKING_MACROS}"
+    if plataforma.strip().lower() == "pagamerican":
+        return f"{checkout_url}{_PAGAMERICAN_TRACKING_PARAMS}"
     return f"{checkout_url}&aff_id={aff_id}{_TRACKING_MACROS}"
 
 
