@@ -151,6 +151,162 @@ PAYLOAD_BUYGOODS_REAL = {
     "total_amount_charged_in_currency": "0.00",
 }
 
+PAYLOAD_PAGAMERICAN_PURCHASE = {
+    "_pa_event": "order.purchase.created.v1",
+    "orderId": "34885",
+    "platform": "PagAmerican",
+    "paymentMethod": "credit_card",
+    "status": "paid",
+    "createdAt": "2026-02-20 22:03:32",
+    "approvedDate": "2026-02-20 22:03:32",
+    "customer": {
+        "name": "Jane Doe",
+        "email": "jane.doe@example.com",
+        "phone": "5551234567",
+        "country": "US",
+        "ip": "",
+    },
+    "shipping": {
+        "address1": "100 Example St",
+        "address2": "",
+        "city": "Rohnert Park",
+        "state": "CA",
+        "zipCode": "94928",
+        "country": "US",
+    },
+    "products": [
+        {
+            "id": "1630",
+            "name": "Example Product - 2 bottles - [U3]",
+            "sku": "PAGMINCAL2BOTTLE",
+            "offerCode": "cEy6BQCE",
+            "quantity": 1,
+            "priceInCents": 13800,
+        }
+    ],
+    "trackingParameters": {
+        "src": "v3_5a96ae1a-9041-48a3-9471",
+        "sck": None,
+        "utm_source": "YouTube-GH",
+        "utm_campaign": "[TOPAF]-[GH]-[NEUROMAX3.0]-C4456",
+        "utm_medium": "23487389193",
+        "utm_content": "AF 5.2 NC-YT-CV_SD-4",
+        "utm_term": "6998da300d7afbce80ada6db",
+    },
+    "commission": {
+        "totalPriceInCents": 13800,
+        "gatewayFeeInCents": 947,
+        "userCommissionInCents": 12853,
+        "currency": "USD",
+    },
+    "amounts": {
+        "itemsGrossInCents": 13800,
+        "itemsCouponInCents": 0,
+        "itemsNetInCents": 13800,
+        "shippingGrossInCents": 0,
+        "shippingCouponInCents": 0,
+        "shippingNetInCents": 0,
+        "taxesInCents": 828,
+        "totalInCents": 14628,
+        "currency": "USD",
+    },
+    "isTest": False,
+}
+
+PAYLOAD_PAGAMERICAN_REFUND = {
+    "_pa_event": "refund.transaction.confirmed.v1",
+    "version": "v1",
+    "orderId": "79204",
+    "platform": "PagAmerican",
+    "paymentMethod": "credit_card",
+    "status": "refunded",
+    "createdAt": "1970-01-01 00:00:00",
+    "approvedDate": "1970-01-01 00:00:00",
+    "refundedAt": "2026-05-14 00:59:52",
+    "customer": {
+        "name": "Jane Doe",
+        "email": "jane.doe@example.com",
+        "phone": "5551234567",
+        "document": None,
+        "country": "US",
+        "ip": "",
+    },
+    "shipping": {
+        "address1": "100 Example St",
+        "address2": "Apt 803",
+        "city": "Belo Horizonte",
+        "state": "MS",
+        "country": "US",
+        "zipCode": "30130",
+    },
+    "products": [
+        {
+            "id": "1306",
+            "name": "Example Product - Default Offer 2",
+            "offerCode": "dVsaQ1Ce",
+            "sku": "PAGPRIBRA1BOTTLE",
+            "planId": None,
+            "planName": None,
+            "quantity": 1,
+            "priceInCents": 500,
+        }
+    ],
+    "trackingParameters": {
+        "src": None,
+        "sck": None,
+        "utm_source": None,
+        "utm_campaign": None,
+        "utm_medium": None,
+        "utm_content": None,
+        "utm_term": None,
+    },
+    "commission": {
+        "totalPriceInCents": 500,
+        "gatewayFeeInCents": 88,
+        "userCommissionInCents": 412,
+        "currency": "USD",
+    },
+    "amounts": {
+        "itemsGrossInCents": 500,
+        "itemsCouponInCents": 0,
+        "itemsNetInCents": 500,
+        "shippingGrossInCents": 0,
+        "shippingCouponInCents": 0,
+        "shippingNetInCents": 0,
+        "taxesInCents": 0,
+        "totalInCents": 500,
+        "currency": "USD",
+    },
+    "isTest": False,
+    "refund": {
+        "orderUcode": "ord_019e23a1-d2f3-758a-974b-93d259aae3b9",
+        "userAuditId": 1,
+        "source": "creator",
+        "type": "totally_refunded",
+        "reason": "defective_product",
+        "description": "Reason provided in the refund request",
+        "refundableBalance": 5,
+        "rateType": "percent",
+        "rateCurrency": "usd",
+        "rateValue": 100,
+        "amountRequested": 5,
+        "amountRefunded": 5,
+        "checkoutInitializedAt": "2026-05-13T23:17:48.000Z",
+        "requestedAt": "2026-05-14T00:59:50.000Z",
+        "transactions": [
+            {
+                "status": "refunded",
+                "createdAt": "2026-05-14T00:59:50.000Z",
+                "updatedAt": "2026-05-14T00:59:52.000Z",
+                "amountRequested": 5,
+                "refundableBalance": 5,
+                "creatorAmountRefunded": 5,
+                "affiliateAmountRefunded": 0,
+            }
+        ],
+    },
+}
+
 PAYLOAD_DIGISTORE_SALE = {
     "order_id": "DS-ABCDE",
     "transaction_type": "sale",
@@ -211,3 +367,59 @@ def test_normalize_digistore_sale(normalizer):
     assert event.event_date == "2024-03-20"
     assert event.sale_total == 49.90
     assert event.is_test is True
+
+
+# ========== TESTES PAGAMERICAN ==========
+def test_normalize_pagamerican_purchase(normalizer):
+    event = normalizer.normalize(NetworkType.PAGAMERICAN, PAYLOAD_PAGAMERICAN_PURCHASE)
+
+    assert event.network == NetworkType.PAGAMERICAN
+    assert event.order_id == "34885"
+    assert event.action_type == ActionType.NEWORDER
+
+    assert event.event_date == "2026-02-20"
+    assert event.event_time == "22:03:32"
+
+    # Valores em centavos -> dólares
+    assert event.sale_total == 146.28  # amounts.totalInCents
+    assert event.tax_amount == 8.28
+    assert event.aff_commission == 128.53
+    assert event.merchant_commission == 9.47
+    assert event.product_price == 138.0
+
+    assert event.customer_name == "Jane Doe"
+    assert event.customer_email == "jane.doe@example.com"
+
+    assert event.order_details.external_checkout_code == "cEy6BQCE"  # offerCode
+    assert event.order_details.product_name == "Example Product - 2 bottles - [U3]"
+    assert event.order_details.external_affiliate_id == "0"
+    assert event.order_details.external_affiliate_name == "Tiger Offers"
+
+    assert event.click_id == "v3_5a96ae1a-9041-48a3-9471"
+    assert event.is_upsell is False
+    assert event.is_test is False
+
+
+def test_normalize_pagamerican_refund(normalizer):
+    event = normalizer.normalize(NetworkType.PAGAMERICAN, PAYLOAD_PAGAMERICAN_REFUND)
+
+    assert event.network == NetworkType.PAGAMERICAN
+    assert event.order_id == "79204"
+    assert event.action_type == ActionType.REFUND
+
+    # createdAt/approvedDate zerados -> usa refundedAt
+    assert event.event_date == "2026-05-14"
+    assert event.event_time == "00:59:52"
+
+    # refund.amountRefunded (dólares) sobrescreve amounts.totalInCents/100
+    assert event.sale_total == 5.0
+
+    assert event.order_details.external_checkout_code == "dVsaQ1Ce"  # offerCode
+    assert event.order_details.external_affiliate_id == "0"
+    assert event.order_details.external_affiliate_name == "Tiger Offers"
+
+
+def test_normalize_pagamerican_unknown_event(normalizer):
+    payload = {**PAYLOAD_PAGAMERICAN_PURCHASE, "_pa_event": "some.other.event.v1"}
+    with pytest.raises(ValueError):
+        normalizer.normalize(NetworkType.PAGAMERICAN, payload)

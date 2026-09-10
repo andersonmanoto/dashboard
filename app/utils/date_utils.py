@@ -18,13 +18,16 @@ def parse_date(date_str: str, network: NetworkType) -> tuple[str | None, str | N
     Returns:
         tuple[str | None, str | None]: Par (YYYY-MM-DD, HH:MM:SS) ou (None, None).
     """
-    if not date_str or date_str == "0000-00-00 00:00:00":
+    # PagAmerican usa "1970-01-01 00:00:00" como placeholder de campo vazio
+    # (ex: createdAt/approvedDate em payloads de refund), igual ao
+    # "0000-00-00 00:00:00" da BuyGoods.
+    if not date_str or date_str in ("0000-00-00 00:00:00", "1970-01-01 00:00:00"):
         return None, None
 
     try:
         dt = None
 
-        if network == NetworkType.BUYGOODS:
+        if network in (NetworkType.BUYGOODS, NetworkType.PAGAMERICAN):
             dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
         elif network == NetworkType.DIGISTORE24:
             dt = datetime.fromisoformat(date_str)

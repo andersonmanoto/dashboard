@@ -84,6 +84,77 @@ async def webhook_buygoods(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@router.post("/pagamerican/{secret_token}")
+async def webhook_pagamerican(
+    secret_token: str,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    auth: None = Depends(verify_secret_token),
+) -> dict:
+    """Recebe Webhooks da PagAmerican."""
+    try:
+        raw_payload = await extract_payload(request)
+
+        # A PagAmerican manda um ARRAY de eventos por chamada
+        # (ex: [{"event": "order.purchase.created.v1", "body": {...}}]),
+        # diferente da BuyGoods que manda um único objeto form-encoded.
+        events = raw_payload if isinstance(raw_payload, list) else [raw_payload]
+
+        inbox_ids = []
+        for item in events:
+            body = item.get("body") if isinstance(item, dict) else None
+            if not isinstance(body, dict):
+                logger.warning(
+                    f"PagAmerican: item de payload inválido, ignorado: {item}"
+                )
+                continue
+
+            # Injeta o nome do evento no payload achatado — o normalizer usa
+            # isso pra decidir o action_type (a PagAmerican não manda um
+            # campo tipo "action_type" como a BuyGoods, e sim o nome do
+            # evento no envelope).
+            payload = {**body, "_pa_event": item.get("event")}
+            inbox_id = None
+
+            # 1. Tenta salvar na Inbox
+            try:
+                db_async = await get_inbox_supabase(settings)
+                response = (
+                    await db_async.table("webhook_inbox")
+                    .insert(
+                        {
+                            "network": NetworkType.PAGAMERICAN.value,
+                            "payload": payload,
+                            "status": "pending",
+                        }
+                    )
+                    .execute()
+                )
+                inbox_id = response.data[0]["id"] if response.data else None
+            except Exception as db_err:
+                logger.warning(
+                    f"Falha ao salvar na inbox (Supabase indisponível). Seguindo para o Redis... Erro: {db_err}"
+                )
+
+            # 2. Enfileira no Redis GARANTIDAMENTE
+            await request.app.state.redis_pool.enqueue_job(
+                "task_process_webhook",
+                network_str=NetworkType.PAGAMERICAN.value,
+                payload=payload,
+                inbox_id=inbox_id,
+            )
+            inbox_ids.append(inbox_id)
+
+        return {"status": "queued", "inbox_ids": inbox_ids}
+
+    except ClientDisconnect:
+        logger.warning("PagAmerican: Cliente desconectou.")
+        return {"status": "incomplete", "message": "Client disconnected"}
+    except Exception as e:
+        logger.exception(f"Erro PagAmerican: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @router.get("/digistore24/{secret_token}")
 async def webhook_digistore24(
     secret_token: str,

@@ -329,6 +329,12 @@ class EventProcessor:
                     amount = safe_float(payload.get("total_amount_charged"))
                     return amount or safe_float(payload.get("total_clean"))
 
+            if event.network == NetworkType.PAGAMERICAN:
+                # `event.sale_total` já foi ajustado na normalização (refund
+                # usa `refund.amountRefunded`, em dólares); pra ações de perda
+                # ainda não mapeadas (ex: chargeback), cai no total do pedido.
+                return event.sale_total
+
             amount = safe_float(payload.get("amount"))
             return abs(amount) if amount < 0 else amount
 

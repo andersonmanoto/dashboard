@@ -10,6 +10,7 @@ class NetworkType(str, Enum):
 
     BUYGOODS = "BuyGoods"
     DIGISTORE24 = "DigiStore24"
+    PAGAMERICAN = "PagAmerican"
 
 
 class ActionType(str, Enum):

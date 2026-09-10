@@ -44,6 +44,8 @@ class PayloadNormalizer:
             return self._normalize_buygoods(payload, order_id)
         elif network == NetworkType.DIGISTORE24:
             return self._normalize_digistore24(payload, order_id)
+        elif network == NetworkType.PAGAMERICAN:
+            return self._normalize_pagamerican(payload, order_id)
         else:
             raise ValueError(f"Rede desconhecida: {network}")
 
@@ -51,9 +53,14 @@ class PayloadNormalizer:
         """
         Extrai o ID do pedido de forma agnóstica à rede.
 
-        Tenta buscar 'order_id_global' (comum em agregadores) ou 'order_id'.
+        Tenta buscar 'order_id_global' (comum em agregadores), 'order_id' ou
+        'orderId' (camelCase, usado pela PagAmerican).
         """
-        order_id = payload.get("order_id_global") or payload.get("order_id")
+        order_id = (
+            payload.get("order_id_global")
+            or payload.get("order_id")
+            or payload.get("orderId")
+        )
         return str(order_id) if order_id else None
 
     def _parse_is_test(self, payload: dict, field: str = "is_test") -> bool:
@@ -274,6 +281,122 @@ class PayloadNormalizer:
                 merchant_id=payload.get("merchant_id"),
             ),
             shipping_details=ShippingDetails(country=payload.get("country")),
+            payload=payload,
+        )
+
+    # ========== PAGAMERICAN ==========
+
+    # A PagAmerican não manda um campo tipo "action_type": o tipo do evento
+    # vem no envelope ("event"), que o router injeta em payload["_pa_event"]
+    # antes de enfileirar. Só os dois eventos documentados até agora estão
+    # mapeados; qualquer outro estoura ValueError (job cai como "failed" na
+    # inbox pra triagem, sem derrubar o worker).
+    _PAGAMERICAN_EVENT_ACTION_MAP = {
+        "order.purchase.created.v1": ActionType.NEWORDER,
+        "refund.transaction.confirmed.v1": ActionType.REFUND,
+    }
+
+    def _normalize_pagamerican(self, payload: dict, order_id: str) -> NormalizedEvent:
+        """
+        Aplica regras de mapeamento específicas da PagAmerican.
+
+        Diferenças-chave em relação à BuyGoods/DigiStore:
+        - `amounts`/`commission` vêm em centavos; `refund.*` já vem em dólares.
+        - Não existe aff_id/aff_name no payload (tracking é só via `clickid`) —
+          por ora todo evento é atribuído ao afiliado fixo "Tiger Offers"
+          (aff_id "0"), sem account_id (conceito exclusivo da BuyGoods, onde
+          cada produto é uma conta separada).
+        - Não há sinalização explícita de upsell -> assume front (is_upsell=False).
+        - Checkout leva direto pro checkout de 1 produto só, então `products`
+          sempre tem um único item.
+        """
+        pa_event = payload.get("_pa_event", "")
+        action_type = self._PAGAMERICAN_EVENT_ACTION_MAP.get(pa_event)
+        if action_type is None:
+            raise ValueError(f"Evento PagAmerican desconhecido: '{pa_event}'")
+
+        customer = payload.get("customer") or {}
+        shipping = payload.get("shipping") or {}
+        amounts = payload.get("amounts") or {}
+        commission = payload.get("commission") or {}
+        tracking = payload.get("trackingParameters") or {}
+        refund = payload.get("refund") or {}
+
+        products = payload.get("products") or []
+        product = products[0] if products else {}
+
+        # Data do evento: refund usa refundedAt; purchase usa approvedDate
+        # (createdAt como fallback). Em refunds, createdAt/approvedDate vêm
+        # zerados ("1970-01-01 00:00:00").
+        if action_type == ActionType.REFUND:
+            date_raw = payload.get("refundedAt") or payload.get("createdAt")
+        else:
+            date_raw = payload.get("approvedDate") or payload.get("createdAt")
+        event_date, event_time = parse_date(date_raw or "", NetworkType.PAGAMERICAN)
+
+        sale_total = safe_float(amounts.get("totalInCents")) / 100
+        tax_amount = safe_float(amounts.get("taxesInCents")) / 100
+        shipping_cost = safe_float(amounts.get("shippingGrossInCents")) / 100
+        product_price = safe_float(product.get("priceInCents")) / 100
+        aff_commission = safe_float(commission.get("userCommissionInCents")) / 100
+        merchant_commission = safe_float(commission.get("gatewayFeeInCents")) / 100
+        merchant_rate = (
+            round(merchant_commission / sale_total, 4) if sale_total > 0 else 0.0
+        )
+
+        if action_type == ActionType.REFUND and refund.get("amountRefunded") is not None:
+            # `refund.amountRefunded` já vem em dólares (não em centavos como
+            # `amounts`/`commission`) e é o valor efetivamente devolvido —
+            # mais preciso que `amounts.totalInCents` pra refunds parciais.
+            sale_total = safe_float(refund.get("amountRefunded"))
+
+        return NormalizedEvent(
+            network=NetworkType.PAGAMERICAN,
+            order_id=order_id,
+            action_type=action_type,
+            event_date=event_date,
+            event_time=event_time,
+            # Cliente
+            customer_name=customer.get("name"),
+            customer_email=customer.get("email"),
+            customer_phone=customer.get("phone"),
+            # Financeiro
+            currency=amounts.get("currency") or commission.get("currency"),
+            sale_total=sale_total,
+            product_price=product_price,
+            aff_commission=aff_commission,
+            tax_amount=tax_amount,
+            merchant_commission=merchant_commission,
+            merchant_commission_rate=merchant_rate,
+            shipping_cost=shipping_cost,
+            # Pagamento
+            payment_method=payload.get("paymentMethod"),
+            # Tracking (PagAmerican só recebe ?clickid={clickid} do RedTrack;
+            # os demais utm_* são captados nativamente pela PagAmerican)
+            click_id=tracking.get("src"),
+            sub_tiger_2=tracking.get("utm_campaign"),
+            sub_tiger_3=tracking.get("utm_content"),
+            sub_tiger_4=tracking.get("utm_source"),
+            sub_tiger_5=tracking.get("utm_term"),
+            # Flags
+            is_upsell=False,
+            is_test=bool(payload.get("isTest")),
+            # Detalhes
+            order_details=OrderDetails(
+                external_product_id=product.get("id"),
+                external_checkout_code=product.get("offerCode"),
+                external_affiliate_id="0",
+                external_affiliate_name="Tiger Offers",
+                product_name=product.get("name"),
+                sku=product.get("sku"),
+            ),
+            shipping_details=ShippingDetails(
+                address=shipping.get("address1"),
+                city=shipping.get("city"),
+                state=shipping.get("state"),
+                zip=shipping.get("zipCode"),
+                country=shipping.get("country"),
+            ),
             payload=payload,
         )
 
