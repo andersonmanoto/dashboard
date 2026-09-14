@@ -302,10 +302,22 @@ class PayloadNormalizer:
 
         Diferenças-chave em relação à BuyGoods/DigiStore:
         - `amounts`/`commission` vêm em centavos; `refund.*` já vem em dólares.
-        - Não existe aff_id/aff_name no payload (tracking é só via `clickid`) —
-          por ora todo evento é atribuído ao afiliado fixo "Tiger Offers"
-          (aff_id "0"), sem account_id (conceito exclusivo da BuyGoods, onde
-          cada produto é uma conta separada).
+        - Afiliado real vem no bloco `affiliation` (code/name), só presente
+          quando um afiliado de terceiros -- de fora do tráfego próprio da
+          Tiger -- gerou a venda pelo marketplace de afiliados da própria
+          PagAmerican. Nesse caso a comissão dele é
+          `affiliation.commission.userCommissionInCents`, NÃO o
+          `commission.userCommissionInCents` do topo -- esse é o líquido que
+          sobra pra Tiger depois de pagar a taxa da plataforma E o afiliado
+          (confirmado num pedido real: amountTransaction - gatewayFeeInCents
+          - affiliation.commission.userCommissionInCents ==
+          commission.userCommissionInCents). Sem `affiliation` no payload,
+          mantém o fallback pro afiliado fixo "Tiger Offers" (aff_id "0",
+          tráfego próprio), sem account_id (conceito exclusivo da BuyGoods,
+          onde cada produto é uma conta separada). auto-provisioning de
+          afiliado (criar se não existir, reusar affiliate_id se já existir)
+          é genérico em `_enrich_affiliate` -- mesmo mecanismo já usado pela
+          BuyGoods, nada específico de rede aqui.
         - Não há sinalização explícita de upsell -> assume front (is_upsell=False).
         - Checkout leva direto pro checkout de 1 produto só, então `products`
           sempre tem um único item.
@@ -321,6 +333,7 @@ class PayloadNormalizer:
         commission = payload.get("commission") or {}
         tracking = payload.get("trackingParameters") or {}
         refund = payload.get("refund") or {}
+        affiliation = payload.get("affiliation") or {}
 
         products = payload.get("products") or []
         product = products[0] if products else {}
@@ -338,11 +351,22 @@ class PayloadNormalizer:
         tax_amount = safe_float(amounts.get("taxesInCents")) / 100
         shipping_cost = safe_float(amounts.get("shippingGrossInCents")) / 100
         product_price = safe_float(product.get("priceInCents")) / 100
-        aff_commission = safe_float(commission.get("userCommissionInCents")) / 100
         merchant_commission = safe_float(commission.get("gatewayFeeInCents")) / 100
         merchant_rate = (
             round(merchant_commission / sale_total, 4) if sale_total > 0 else 0.0
         )
+
+        if affiliation:
+            affiliation_commission = affiliation.get("commission") or {}
+            aff_commission = (
+                safe_float(affiliation_commission.get("userCommissionInCents")) / 100
+            )
+            external_affiliate_id = affiliation.get("code") or "0"
+            external_affiliate_name = affiliation.get("name") or "Tiger Offers"
+        else:
+            aff_commission = safe_float(commission.get("userCommissionInCents")) / 100
+            external_affiliate_id = "0"
+            external_affiliate_name = "Tiger Offers"
 
         if action_type == ActionType.REFUND and refund.get("amountRefunded") is not None:
             # `refund.amountRefunded` já vem em dólares (não em centavos como
@@ -385,8 +409,8 @@ class PayloadNormalizer:
             order_details=OrderDetails(
                 external_product_id=product.get("id"),
                 external_checkout_code=product.get("offerCode"),
-                external_affiliate_id="0",
-                external_affiliate_name="Tiger Offers",
+                external_affiliate_id=external_affiliate_id,
+                external_affiliate_name=external_affiliate_name,
                 product_name=product.get("name"),
                 sku=product.get("sku"),
             ),
