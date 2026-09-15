@@ -150,6 +150,23 @@ class EventProcessor:
         if not affiliate:
             aff_name = event.order_details.external_affiliate_name or "Tiger Offers"
 
+            # 3. Fallback por nome (mesmo network/account_id) antes de criar --
+            # cobre o caso de uma mesma plataforma expor o mesmo afiliado real
+            # com esquemas de ID diferentes em endpoints diferentes (ex: a
+            # PagAmerican usa `affiliateId` numérico no REST e
+            # `affiliation.code` alfanumérico no webhook). Sem isso, cada
+            # esquema criaria sua própria linha duplicada pro mesmo afiliado.
+            # Não afeta a BuyGoods na prática: lá, contas diferentes com o
+            # mesmo aff_name ("Tiger Offers") continuam em linhas separadas
+            # porque o account_id (que aqui entra no mesmo filtro) já as
+            # diferencia.
+            affiliate = self.db.get_affiliate_by_name(
+                network=network, aff_name=aff_name, account_id=account_id
+            )
+
+        if not affiliate:
+            aff_name = event.order_details.external_affiliate_name or "Tiger Offers"
+
             # Busca o ID do Tear 0
             default_tear_id = self.db.get_default_tear_id()
 

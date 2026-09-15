@@ -181,6 +181,56 @@ class DatabaseRepository:
             )
             return None
 
+    def get_affiliate_by_name(
+        self,
+        network: Union[NetworkType, str],
+        aff_name: str,
+        account_id: Optional[str] = None,
+    ) -> Optional[Affiliate]:
+        """
+        Busca um afiliado pelo nome exato (mesmo network/account_id).
+
+        Fallback usado quando a mesma plataforma expõe o mesmo afiliado real
+        com esquemas de ID diferentes em endpoints diferentes (ex: a
+        PagAmerican usa `affiliateId` numérico no REST e `affiliation.code`
+        alfanumérico no webhook, pro mesmo afiliado) -- sem isso, cada
+        esquema criaria sua própria linha duplicada em `affiliates` pro
+        mesmo afiliado. Escopado por account_id igual `get_affiliate_by_external_id`
+        de propósito: BuyGoods depende de manter contas diferentes com o
+        mesmo aff_name ("Tiger Offers") como linhas separadas, e isso só
+        funciona porque cada uma tem seu próprio account_id.
+        """
+        network_value = network.value if isinstance(network, NetworkType) else network
+
+        try:
+            net_id_str = self.get_network_id(network)
+
+            query = (
+                self.client.table("affiliates")
+                .select("*")
+                .eq("aff_name", aff_name)
+                .eq("network_id", net_id_str)
+            )
+
+            if account_id:
+                query = query.eq("account_id", str(account_id))
+
+            response = query.limit(1).execute()
+
+            if response.data:
+                row_data = response.data[0]
+                row_data["network"] = network_value
+                return Affiliate(**row_data)
+
+            return None
+
+        except Exception as e:
+            logger.error(
+                f"Erro ao buscar afiliado por nome '{aff_name}' "
+                f"(network={network_value}, account={account_id}): {e}"
+            )
+            return None
+
     def create_affiliate(self, affiliate: Affiliate) -> Optional[Affiliate]:
         """
         Cadastra um novo afiliado no banco de dados.

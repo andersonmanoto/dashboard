@@ -104,6 +104,20 @@ def _build_event(item: dict) -> NormalizedEvent:
 
     product_id = item.get("productId")
 
+    # `affiliateName` só vem preenchido quando um afiliado real (do
+    # marketplace da própria PagAmerican) gerou a venda -- mesmo conceito do
+    # `affiliation` do webhook, mas com esquema de ID diferente (`affiliateId`
+    # numérico aqui vs `affiliation.code` alfanumérico no webhook, pro mesmo
+    # afiliado real). O fallback por nome em `_enrich_affiliate` evita
+    # duplicar a linha em `affiliates` quando os dois esquemas colidem.
+    affiliate_name = item.get("affiliateName") or ""
+    if affiliate_name:
+        external_affiliate_id = str(item.get("affiliateId") or "")
+        external_affiliate_name = affiliate_name
+    else:
+        external_affiliate_id = "0"
+        external_affiliate_name = "Tiger Offers"
+
     return NormalizedEvent(
         network=NetworkType.PAGAMERICAN,
         order_id=purchase_id,
@@ -131,8 +145,8 @@ def _build_event(item: dict) -> NormalizedEvent:
         order_details=OrderDetails(
             external_product_id=str(product_id) if product_id else None,
             external_checkout_code=item.get("offerCode"),
-            external_affiliate_id="0",
-            external_affiliate_name="Tiger Offers",
+            external_affiliate_id=external_affiliate_id,
+            external_affiliate_name=external_affiliate_name,
             product_name=item.get("productName"),
         ),
         payload=item,
