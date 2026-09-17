@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 from arq.connections import RedisSettings
 from arq import cron
 from loguru import logger
@@ -138,6 +139,48 @@ async def cron_sync_slicktext_approved(ctx):
     )
 
 
+async def cron_send_zapier_webhooks(ctx):
+    """
+    Lê a fila zapier_webhook_queue (leads de neworder/abandon já montados
+    pelo EventProcessor) e faz o POST de verdade pro Zapier. Mantém o
+    caminho do webhook/carrinho rápido -- a chamada HTTP externa acontece
+    só aqui, isolada, com retry via reprocessamento no próximo tick.
+    """
+    db_repo: DatabaseRepository = ctx["db_repo"]
+    settings = get_settings()
+
+    if not settings.zapier_webhook_url:
+        return
+
+    pending = await asyncio.to_thread(db_repo.fetch_pending_zapier_webhooks, limit=50)
+    if not pending:
+        return
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for row in pending:
+            queue_id = row["id"]
+            attempts = row.get("attempts", 0)
+            try:
+                response = await client.post(
+                    settings.zapier_webhook_url, json=row["payload"]
+                )
+                if response.status_code == 200:
+                    await asyncio.to_thread(db_repo.mark_zapier_webhook_sent, queue_id)
+                else:
+                    error = f"HTTP {response.status_code}: {response.text[:200]}"
+                    logger.warning(f"Zapier recusou webhook {queue_id}: {error}")
+                    await asyncio.to_thread(
+                        db_repo.mark_zapier_webhook_failed, queue_id, attempts, error
+                    )
+            except httpx.RequestError as exc:
+                logger.warning(f"Erro de rede ao enviar webhook Zapier {queue_id}: {exc}")
+                await asyncio.to_thread(
+                    db_repo.mark_zapier_webhook_failed, queue_id, attempts, str(exc)
+                )
+
+    logger.info(f"{len(pending)} lead(s) processado(s) pro Zapier.")
+
+
 class WorkerSettings:
     settings = get_settings()
 
@@ -153,6 +196,11 @@ class WorkerSettings:
     # AGENDAMENTO DO CRON: só enfileira, timeout curto é suficiente
     cron_jobs = [
         cron(cron_sync_slicktext_approved, minute={0, 15, 30, 45}, timeout=35),
+        cron(
+            cron_send_zapier_webhooks,
+            minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+            timeout=60,
+        ),
     ]
 
     max_jobs = 20  # quantos jobs (incluindo os de sync) rodam em paralelo

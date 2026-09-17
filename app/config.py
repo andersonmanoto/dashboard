@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     autopages_supabase_url: str = ""
     autopages_supabase_service_role: str = ""
 
+    # Zapier (leads: novos pedidos e carrinhos abandonados)
+    zapier_webhook_url: str = ""
+
 
 def get_slicktext_api_key(brand_id: str | None) -> str:
     """

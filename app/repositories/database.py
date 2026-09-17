@@ -1,6 +1,7 @@
 from functools import lru_cache
 import time
 import httpx
+from datetime import datetime, timezone
 from typing import Dict, Optional, Union
 from uuid import UUID
 
@@ -638,6 +639,92 @@ class DatabaseRepository:
                 logger.error(f"Erro ao inserir carrinho abandonado: {e}")
                 return None
         return None
+
+    def enqueue_zapier_webhook(
+        self, payload: dict, max_retries: int = 3
+    ) -> Optional[dict]:
+        """
+        Insere o JSON (já pronto pro formato do Zapier) na fila
+        zapier_webhook_queue. O envio HTTP de verdade é feito depois, pelo
+        cron (worker.py) -- aqui é só um insert, pra não travar o
+        processamento do webhook/carrinho.
+
+        Mesmo padrão de retry de insert_abandoned_cart.
+        """
+        row = {"payload": payload}
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = (
+                    self.client.table("zapier_webhook_queue").insert(row).execute()
+                )
+                return response.data[0] if response.data else None
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
+                if attempt == max_retries:
+                    logger.error(
+                        f"Erro ao enfileirar webhook Zapier: esgotou {max_retries} "
+                        f"tentativas ({type(exc).__name__}): {exc}"
+                    )
+                    return None
+                wait = 2**attempt
+                logger.warning(
+                    f"Erro ao enfileirar webhook Zapier: tentativa {attempt}/"
+                    f"{max_retries} falhou ({type(exc).__name__}). "
+                    f"Retentando em {wait}s..."
+                )
+                time.sleep(wait)
+            except Exception as e:
+                logger.error(f"Erro ao enfileirar webhook Zapier: {e}")
+                return None
+        return None
+
+    def fetch_pending_zapier_webhooks(self, limit: int = 50) -> list[dict]:
+        try:
+            response = (
+                self.client.table("zapier_webhook_queue")
+                .select("id, payload, attempts")
+                .eq("status", "pending")
+                .order("created_at")
+                .limit(limit)
+                .execute()
+            )
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Erro ao buscar fila de webhooks Zapier: {e}")
+            return []
+
+    def mark_zapier_webhook_sent(self, queue_id: str) -> None:
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            (
+                self.client.table("zapier_webhook_queue")
+                .update({"status": "sent", "sent_at": now, "updated_at": now})
+                .eq("id", queue_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Erro ao marcar webhook Zapier {queue_id} como enviado: {e}")
+
+    def mark_zapier_webhook_failed(
+        self, queue_id: str, attempts: int, error: str, max_attempts: int = 5
+    ) -> None:
+        try:
+            new_attempts = attempts + 1
+            status = "failed" if new_attempts >= max_attempts else "pending"
+            (
+                self.client.table("zapier_webhook_queue")
+                .update(
+                    {
+                        "status": status,
+                        "attempts": new_attempts,
+                        "last_error": error[:500],
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                .eq("id", queue_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Erro ao marcar webhook Zapier {queue_id} como falho: {e}")
 
     def _fetch_all_paginated(
         self,

@@ -170,7 +170,9 @@ async def main():
 
     db_repo = DatabaseRepository(settings)
     # slack_service=None: evita flood de notificações durante importação em massa
-    processor = EventProcessor(db_repo, slack_service=None)
+    processor = EventProcessor(
+        db_repo, slack_service=None, zapier_webhook_enabled=False
+    )
 
     logger.info(f"Buscando compras da PagAmerican de {date_from} a {date_to}...")
 

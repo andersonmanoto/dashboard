@@ -13,6 +13,7 @@ from models.enums import (
 from models.schemas import Affiliate, CheckoutInfo, NormalizedEvent, SalesStatus
 from repositories.database import DatabaseRepository
 from services.slack_service import SlackService
+from services.zapier_service import build_abandoned_cart_payload, build_order_payload
 from utils.date_utils import parse_date
 from utils.formatters import safe_float
 
@@ -29,7 +30,10 @@ class EventProcessor:
     """
 
     def __init__(
-        self, db_repo: DatabaseRepository, slack_service: Optional[SlackService] = None
+        self,
+        db_repo: DatabaseRepository,
+        slack_service: Optional[SlackService] = None,
+        zapier_webhook_enabled: bool = True,
     ):
         """
         Inicializa o processador.
@@ -38,9 +42,24 @@ class EventProcessor:
             db_repo (DatabaseRepository): Repositório para persistência.
             slack_service (Optional[SlackService]): Serviço de notificações (pode ser
                 None em scripts de importação retroativa).
+            zapier_webhook_enabled (bool): Se True, enfileira neworder/abandon pro
+                Zapier. Scripts de backfill/retro devem passar False -- eles
+                reprocessam eventos antigos, e o lead já foi (ou deveria ter sido)
+                enviado quando o evento aconteceu de verdade.
         """
         self.db = db_repo
         self.slack = slack_service
+        self.zapier_webhook_enabled = zapier_webhook_enabled
+
+    def _enqueue_zapier_webhook(self, payload: dict, context: str) -> None:
+        """
+        Enfileira o lead pro Zapier. Nunca deixa uma falha aqui derrubar o
+        processamento do evento/carrinho -- é um efeito colateral opcional.
+        """
+        try:
+            self.db.enqueue_zapier_webhook(payload)
+        except Exception:
+            logger.exception(f"Falha ao enfileirar webhook Zapier ({context})")
 
     @staticmethod
     def _network_value(network):
@@ -112,6 +131,16 @@ class EventProcessor:
 
             if not result:
                 return False
+
+            # 5. Lead pro Zapier: só neworder ao vivo, nunca teste nem backfill/retro
+            if (
+                self.zapier_webhook_enabled
+                and not event.is_test
+                and event.action_type == ActionType.NEWORDER
+            ):
+                self._enqueue_zapier_webhook(
+                    build_order_payload(event), context=f"order {order_id}"
+                )
 
             return True
 
@@ -389,6 +418,12 @@ class EventProcessor:
             # client Supabase, offload pra thread pra não travar o event
             # loop (e outros requests concorrentes) se o Supabase demorar.
             result = await asyncio.to_thread(self.db.insert_abandoned_cart, cart_data)
+
+            if result and self.zapier_webhook_enabled:
+                self._enqueue_zapier_webhook(
+                    build_abandoned_cart_payload(cart_data),
+                    context=f"abandon {customer_email}",
+                )
 
             return bool(result)
 

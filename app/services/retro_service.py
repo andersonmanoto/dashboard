@@ -334,7 +334,9 @@ async def run_retro_background(file_path: str, db_repo: DatabaseRepository):
         from models.enums import NetworkType
         from services.event_processor import EventProcessor
 
-        processor = EventProcessor(db_repo, slack_service=None)
+        processor = EventProcessor(
+            db_repo, slack_service=None, zapier_webhook_enabled=False
+        )
         retro = SpreadsheetRetro(processor)
 
         logger.info(f"Background Task: Processando: {file_path}")
