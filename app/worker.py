@@ -166,6 +166,12 @@ async def cron_send_zapier_webhooks(ctx):
                 )
                 if response.status_code == 200:
                     await asyncio.to_thread(db_repo.mark_zapier_webhook_sent, queue_id)
+                    payload = row.get("payload") or {}
+                    logger.info(
+                        f"Lead enviado ao Zapier | lead_type={payload.get('lead_type')} "
+                        f"| order_id={payload.get('order_id') or 'N/A'} "
+                        f"| email={payload.get('email')} | queue_id={queue_id}"
+                    )
                 else:
                     error = f"HTTP {response.status_code}: {response.text[:200]}"
                     logger.warning(f"Zapier recusou webhook {queue_id}: {error}")

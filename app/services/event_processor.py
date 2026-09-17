@@ -57,7 +57,14 @@ class EventProcessor:
         processamento do evento/carrinho -- é um efeito colateral opcional.
         """
         try:
-            self.db.enqueue_zapier_webhook(payload)
+            result = self.db.enqueue_zapier_webhook(payload)
+            if result:
+                logger.info(
+                    f"Lead enfileirado pro Zapier | lead_type={payload.get('lead_type')} "
+                    f"| {context}"
+                )
+            else:
+                logger.warning(f"Lead NÃO enfileirado pro Zapier ({context})")
         except Exception:
             logger.exception(f"Falha ao enfileirar webhook Zapier ({context})")
 
