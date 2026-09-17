@@ -68,6 +68,23 @@ class EventProcessor:
         except Exception:
             logger.exception(f"Falha ao enfileirar webhook Zapier ({context})")
 
+    def _resolve_product_name_by_codename(
+        self, codename: str, account_id: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Resolve products.name a partir do codename do checkout (usado pro
+        lead de carrinho abandonado, que só tem o codename, não o product_id
+        já vinculado como o evento de compra tem).
+        """
+        if not codename:
+            return None
+
+        checkout_info = self.db.get_checkout_by_code(codename, account_id)
+        if not checkout_info:
+            return None
+
+        return self.db.get_product_name(checkout_info.product_id)
+
     @staticmethod
     def _network_value(network):
         """Converte Enum de rede para string serializável."""
@@ -145,8 +162,10 @@ class EventProcessor:
                 and not event.is_test
                 and event.action_type == ActionType.NEWORDER
             ):
+                product_name = self.db.get_product_name(event.product_id)
                 self._enqueue_zapier_webhook(
-                    build_order_payload(event), context=f"order {order_id}"
+                    build_order_payload(event, product_name=product_name),
+                    context=f"order {order_id}",
                 )
 
             return True
@@ -427,8 +446,11 @@ class EventProcessor:
             result = await asyncio.to_thread(self.db.insert_abandoned_cart, cart_data)
 
             if result and self.zapier_webhook_enabled:
+                product_name = self._resolve_product_name_by_codename(
+                    cart_data["product_codename"], payload.get("account_id")
+                )
                 self._enqueue_zapier_webhook(
-                    build_abandoned_cart_payload(cart_data),
+                    build_abandoned_cart_payload(cart_data, product_name=product_name),
                     context=f"abandon {customer_email}",
                 )
 

@@ -55,14 +55,19 @@ def _order_date_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def build_order_payload(event: NormalizedEvent) -> dict:
+def build_order_payload(event: NormalizedEvent, product_name: Optional[str] = None) -> dict:
     """
     Monta o JSON de um novo pedido (lead_type=neworder) no formato exigido
     pelo Zapier. Uma linha de `events` (neworder) = um POST -- inclusive
     upsells/orderbumps da mesma compra saem como leads separados, cada um
     com seu próprio order_id.
+
+    `product_name` é o nome canônico (products.name, resolvido pelo
+    chamador via event.product_id) -- usado em vez do nome/variante que a
+    rede manda no payload. Cai pro nome bruto do payload se não resolver.
     """
     raw_payload = event.payload or {}
+    product_name = product_name or event.order_details.product_name or ""
 
     first_name = raw_payload.get("customer_firstname") or ""
     last_name = raw_payload.get("customer_lastname") or ""
@@ -78,7 +83,7 @@ def build_order_payload(event: NormalizedEvent) -> dict:
         "last_name": last_name,
         "email": event.customer_email or "",
         "phone": _format_phone_e164(event.customer_phone),
-        "products_purchased": event.order_details.product_name or "",
+        "products_purchased": product_name,
         "country": country_iso2,
         "countryabbreviation": country_iso2,
         "street": event.shipping_details.address or "",
@@ -91,15 +96,20 @@ def build_order_payload(event: NormalizedEvent) -> dict:
     }
 
 
-def build_abandoned_cart_payload(cart_data: dict) -> dict:
+def build_abandoned_cart_payload(cart_data: dict, product_name: Optional[str] = None) -> dict:
     """
     Monta o JSON de um carrinho abandonado (lead_type=abandon) no mesmo
     formato do Zapier. Não existe pedido ainda, então order_id/order_total
     vão vazios e order_date é o momento do abandono.
+
+    `product_name` é o nome canônico (products.name, resolvido pelo
+    chamador a partir do product_codename) -- cai pro codename cru se não
+    resolver.
     """
     location = cart_data.get("location") or {}
     first_name, last_name = _split_name(cart_data.get("customer_name"))
     country_iso2 = _country_to_alpha2(location.get("country"))
+    product_name = product_name or cart_data.get("product_codename") or ""
 
     return {
         "lead_type": "abandon",
@@ -107,7 +117,7 @@ def build_abandoned_cart_payload(cart_data: dict) -> dict:
         "last_name": last_name,
         "email": cart_data.get("customer_email") or "",
         "phone": _format_phone_e164(cart_data.get("customer_phone")),
-        "products_purchased": cart_data.get("product_codename") or "",
+        "products_purchased": product_name,
         "country": country_iso2,
         "countryabbreviation": country_iso2,
         "street": location.get("address") or "",

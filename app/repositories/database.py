@@ -50,6 +50,7 @@ class DatabaseRepository:
         # Caches de instância
         self._networks_cache: Dict[str, str] = {}
         self._checkout_cache: Dict[str, CheckoutInfo] = {}
+        self._product_name_cache: Dict[str, str] = {}
 
     def load_networks_cache(self) -> None:
         """
@@ -347,6 +348,39 @@ class DatabaseRepository:
 
         except Exception as e:
             logger.error(f"Erro na busca por nome de produto: {e}")
+            return None
+
+    def get_product_name(self, product_id) -> Optional[str]:
+        """
+        Resolve o nome oficial do produto (products.name) a partir do
+        product_id. Usado pro lead do Zapier, que precisa do nome canônico
+        do produto, não do nome/variante que a rede manda no payload.
+        """
+        if not product_id:
+            return None
+
+        cache_key = str(product_id)
+        if cache_key in self._product_name_cache:
+            return self._product_name_cache[cache_key]
+
+        try:
+            response = (
+                self.client.table("products")
+                .select("name")
+                .eq("id", cache_key)
+                .limit(1)
+                .execute()
+            )
+            if not response.data:
+                return None
+
+            name = response.data[0].get("name")
+            if name:
+                self._product_name_cache[cache_key] = name
+            return name
+
+        except Exception as e:
+            logger.error(f"Erro ao buscar nome do produto {product_id}: {e}")
             return None
 
     def _get_checkout_by_product_id(self, product_id: UUID) -> Optional[CheckoutInfo]:
