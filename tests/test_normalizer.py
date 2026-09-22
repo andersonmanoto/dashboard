@@ -320,32 +320,36 @@ PAYLOAD_DIGISTORE_SALE = {
     "is_test_payment": "true",
 }
 
-# Payload de exemplo baseado na doc pública do IPN v2.0 da JVZoo (form-urlencoded).
-# Ainda não validado contra um "Send Test IPN" real -- ver comentário em
-# PayloadNormalizer._normalize_jvzoo.
+# Payload de exemplo baseado nos placeholders reais da tela "Create S2S
+# Postback" (macros na query string). Ainda não validado contra um
+# postback real -- ver comentário em PayloadNormalizer._normalize_jvzoo.
 PAYLOAD_JVZOO_SALE = {
-    "ctransaction": "SALE",
-    "ctransreceipt": "123456789",
-    "ctransamount": "47.00",
-    "cprodtitle": "Example Product - Front",
-    "cproditem": "1",
-    "ccustname": "John Smith",
-    "ccustemail": "john.smith@example.com",
-    "caffiliate": "0",
-    "caffipayamount": "0.00",
-    "ctransaffitrack": "",
+    "currency": "USD",
+    "transaction_id": "TXN_123456789",
+    "transaction_amount": "47.00",
+    "transaction_type": "SALE",
+    "product_id": "PROD_001",
+    "product_name": "Example Product - Front",
+    "customer_name": "John Smith",
+    "customer_email": "john.smith@example.com",
+    "affiliate_id": "0",
+    "affiliate_amount": "0.00",
+    "tid": "click_abc123xyz789",
+    "sub_id1": "placement_homepage",
+    "sub_id2": "audience_segment_1",
 }
 
 PAYLOAD_JVZOO_REFUND = {
-    "ctransaction": "RFND",
-    "ctransreceipt": "123456789",
-    "ctransamount": "47.00",
-    "cprodtitle": "Example Product - Front",
-    "cproditem": "1",
-    "ccustname": "John Smith",
-    "ccustemail": "john.smith@example.com",
-    "caffiliate": "0",
-    "caffipayamount": "0.00",
+    "currency": "USD",
+    "transaction_id": "TXN_123456789",
+    "transaction_amount": "47.00",
+    "transaction_type": "RFND",
+    "product_id": "PROD_001",
+    "product_name": "Example Product - Front",
+    "customer_name": "John Smith",
+    "customer_email": "john.smith@example.com",
+    "affiliate_id": "0",
+    "affiliate_amount": "0.00",
 }
 
 
@@ -458,12 +462,17 @@ def test_normalize_jvzoo_sale(normalizer):
     event = normalizer.normalize(NetworkType.JVZOO, PAYLOAD_JVZOO_SALE)
 
     assert event.network == NetworkType.JVZOO
-    assert event.order_id == "123456789"  # ctransreceipt
+    assert event.order_id == "TXN_123456789"  # transaction_id
     assert event.action_type == ActionType.NEWORDER
 
+    assert event.currency == "USD"
     assert event.sale_total == 47.0
     assert event.customer_name == "John Smith"
     assert event.customer_email == "john.smith@example.com"
+
+    assert event.click_id == "click_abc123xyz789"  # tid
+    assert event.sub_tiger_2 == "placement_homepage"  # sub_id1
+    assert event.sub_tiger_3 == "audience_segment_1"  # sub_id2
 
     assert event.order_details.product_name == "Example Product - Front"
     assert event.order_details.external_affiliate_id == "0"
@@ -477,33 +486,26 @@ def test_normalize_jvzoo_refund(normalizer):
     event = normalizer.normalize(NetworkType.JVZOO, PAYLOAD_JVZOO_REFUND)
 
     assert event.network == NetworkType.JVZOO
-    assert event.order_id == "123456789"
+    assert event.order_id == "TXN_123456789"
     assert event.action_type == ActionType.REFUND
     assert event.sale_total == 47.0
 
 
-def test_normalize_jvzoo_upsell(normalizer):
-    payload = {**PAYLOAD_JVZOO_SALE, "cproditem": "2", "ctransreceipt": "987654321"}
-    event = normalizer.normalize(NetworkType.JVZOO, payload)
-
-    assert event.is_upsell is True
-
-
 def test_normalize_jvzoo_with_affiliate(normalizer):
+    # A JVZoo não manda um placeholder de "nome" do afiliado -- só o ID.
     payload = {
         **PAYLOAD_JVZOO_SALE,
-        "caffiliate": "55821",
-        "caffiliatename": "some-affiliate",
-        "caffipayamount": "18.80",
+        "affiliate_id": "55821",
+        "affiliate_amount": "18.80",
     }
     event = normalizer.normalize(NetworkType.JVZOO, payload)
 
     assert event.aff_commission == 18.80
     assert event.order_details.external_affiliate_id == "55821"
-    assert event.order_details.external_affiliate_name == "some-affiliate"
+    assert event.order_details.external_affiliate_name is None
 
 
 def test_normalize_jvzoo_unknown_transaction(normalizer):
-    payload = {**PAYLOAD_JVZOO_SALE, "ctransaction": "INSF"}
+    payload = {**PAYLOAD_JVZOO_SALE, "transaction_type": "CGBK"}
     with pytest.raises(ValueError):
         normalizer.normalize(NetworkType.JVZOO, payload)

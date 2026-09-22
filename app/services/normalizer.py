@@ -56,14 +56,14 @@ class PayloadNormalizer:
         Extrai o ID do pedido de forma agnóstica à rede.
 
         Tenta buscar 'order_id_global' (comum em agregadores), 'order_id' ou
-        'orderId' (camelCase, usado pela PagAmerican), ou 'ctransreceipt'
-        (identificador único de transação da JVZoo, que não manda order_id).
+        'orderId' (camelCase, usado pela PagAmerican), ou 'transaction_id'
+        (macro do postback JVZoo, que não manda order_id).
         """
         order_id = (
             payload.get("order_id_global")
             or payload.get("order_id")
             or payload.get("orderId")
-            or payload.get("ctransreceipt")
+            or payload.get("transaction_id")
         )
         return str(order_id) if order_id else None
 
@@ -430,72 +430,72 @@ class PayloadNormalizer:
 
     # ========== JVZOO ==========
 
-    # A JVZoo manda o tipo do evento no campo `ctransaction` (POST
-    # form-urlencoded, um evento por chamada). Mapeamento conforme a
-    # documentação pública do IPN v2.0 -- CONFIRMAR contra o payload real
-    # assim que o "Send Test IPN" for disparado do painel deles, os nomes
-    # de campo podem variar entre produtos/versão de IPN configurada.
-    # INSF (rebill que falhou por saldo insuficiente) não é uma transação
-    # completa -> não mapeado de propósito, cai em ValueError p/ triagem.
+    # Postback S2S baseado em macros na query string (GET) -- a URL é
+    # montada manualmente no painel com placeholders tipo {transaction_id},
+    # substituídos pela plataforma antes do disparo (ver comentário na rota
+    # em app/routers/webhooks.py). Só SALE e RFND são documentados na tela
+    # de configuração; qualquer outro valor cai em ValueError p/ triagem
+    # até confirmarmos o que mais pode vir (ex: chargeback).
     _JVZOO_TRANSACTION_ACTION_MAP = {
         "SALE": ActionType.NEWORDER,
-        "BILL": ActionType.REBILL,
         "RFND": ActionType.REFUND,
-        "CGBK": ActionType.CHARGEBACK,
-        "CANCEL-REBILL": ActionType.CANCEL,
     }
 
     def _normalize_jvzoo(self, payload: dict, order_id: str) -> NormalizedEvent:
         """
-        Aplica regras de mapeamento específicas da JVZoo.
+        Aplica regras de mapeamento específicas do postback JVZoo.
 
         Diferenças-chave em relação às demais redes:
-        - `ctransreceipt` é o identificador único da transação (usado como
-          order_id via `_extract_order_id`), a JVZoo não manda "order_id".
-        - Sem campo de data confiável no IPN -- usa o horário de recebimento
-          do webhook (`created_at` default do NormalizedEvent).
-        - `cproditem` indica a posição do produto no funil ("1" = front);
-          usado como proxy de upsell até confirmarmos com um IPN real.
-        - `caffiliate` == "0" (ou ausente) indica tráfego próprio (sem
-          afiliado JVZoo), mantendo o fallback "Tiger Offers" como nas
-          outras redes.
+        - `transaction_id` é o identificador único (usado como order_id via
+          `_extract_order_id`); não há campo "order_id" nativo.
+        - Sem placeholder de data documentado -- usa o horário de
+          recebimento do webhook (`created_at` default do NormalizedEvent).
+        - Não há sinalização explícita de upsell nos placeholders
+          disponíveis -> assume front (is_upsell=False) até confirmarmos
+          algum campo equivalente num postback real.
+        - `affiliate_id` ausente/"0" indica tráfego próprio, mantendo o
+          fallback "Tiger Offers" usado nas outras redes.
+        - `sub_id1`..`sub_id4` mapeados pra sub_tiger_2..5 (analogia direta
+          aos subids numerados de BuyGoods/DigiStore); `sub_id5`, os utm_*
+          e os click IDs de plataforma (gclid/fbclid/...) ficam só no
+          `payload` bruto por enquanto, sem slot dedicado no schema.
         """
-        ctransaction = str(payload.get("ctransaction", "")).upper()
-        action_type = self._JVZOO_TRANSACTION_ACTION_MAP.get(ctransaction)
+        transaction_type = str(payload.get("transaction_type", "")).upper()
+        action_type = self._JVZOO_TRANSACTION_ACTION_MAP.get(transaction_type)
         if action_type is None:
-            raise ValueError(f"ctransaction JVZoo desconhecido/não mapeado: '{ctransaction}'")
+            raise ValueError(
+                f"transaction_type JVZoo desconhecido/não mapeado: '{transaction_type}'"
+            )
 
-        caffiliate = payload.get("caffiliate") or "0"
-        has_affiliate = str(caffiliate) not in ("0", "")
+        affiliate_id = payload.get("affiliate_id") or "0"
+        has_affiliate = str(affiliate_id) not in ("0", "")
 
         return NormalizedEvent(
             network=NetworkType.JVZOO,
             order_id=order_id,
             action_type=action_type,
             # Cliente
-            customer_name=payload.get("ccustname"),
-            customer_email=payload.get("ccustemail"),
+            customer_name=payload.get("customer_name"),
+            customer_email=payload.get("customer_email"),
             # Financeiro
-            sale_total=safe_float(payload.get("ctransamount")),
-            aff_commission=safe_float(payload.get("caffipayamount")),
-            # Tracking (JVZoo repassa o valor cru de `ctransaffitrack`,
-            # usado pra passar o clickid do RedTrack no link de afiliado)
-            click_id=payload.get("ctransaffitrack"),
+            currency=payload.get("currency"),
+            sale_total=safe_float(payload.get("transaction_amount")),
+            aff_commission=safe_float(payload.get("affiliate_amount")),
+            # Tracking
+            click_id=payload.get("tid"),
+            sub_tiger_2=payload.get("sub_id1"),
+            sub_tiger_3=payload.get("sub_id2"),
+            sub_tiger_4=payload.get("sub_id3"),
+            sub_tiger_5=payload.get("sub_id4"),
             # Flags
-            is_upsell=str(payload.get("cproditem", "1")) != "1",
-            # A JVZoo não documenta um campo de flag para transação de teste
-            # no IPN -- o "Send Test IPN" do painel manda um SALE normal com
-            # dados fictícios. Confirmar isso com o primeiro teste real;
-            # por ora sempre False (mesmo default das outras redes).
+            is_upsell=False,
             is_test=False,
             # Detalhes
             order_details=OrderDetails(
-                external_product_id=payload.get("cproditem"),
-                external_affiliate_id=caffiliate if has_affiliate else "0",
-                external_affiliate_name=payload.get("caffiliatename")
-                if has_affiliate
-                else "Tiger Offers",
-                product_name=payload.get("cprodtitle"),
+                external_product_id=payload.get("product_id"),
+                external_affiliate_id=affiliate_id if has_affiliate else "0",
+                external_affiliate_name="Tiger Offers" if not has_affiliate else None,
+                product_name=payload.get("product_name"),
             ),
             payload=payload,
         )

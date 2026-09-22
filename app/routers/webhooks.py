@@ -155,16 +155,25 @@ async def webhook_pagamerican(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@router.post("/jvzoo/{secret_token}")
+@router.get("/jvzoo/{secret_token}")
 async def webhook_jvzoo(
     secret_token: str,
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     auth: None = Depends(verify_secret_token),
 ) -> dict:
-    """Recebe IPN (postback S2S) da JVZoo."""
+    """
+    Recebe Postback S2S da JVZoo.
+
+    Diferente do IPN "cru" (POST form-urlencoded direto da JVZoo), esse
+    postback é baseado em macros na query string (GET) -- a URL é montada
+    manualmente no painel deles com placeholders tipo {transaction_id},
+    que a plataforma substitui antes de disparar. Segue o mesmo padrão da
+    DigiStore24 no nosso código (GET + query_params).
+    """
     try:
-        payload = await extract_payload(request)
+        payload = dict(request.query_params)
+        order_id = payload.get("transaction_id")
         inbox_id = None
 
         # 1. Tenta salvar na Inbox
@@ -195,11 +204,8 @@ async def webhook_jvzoo(
             inbox_id=inbox_id,
         )
 
-        return {"status": "queued", "inbox_id": inbox_id}
+        return {"status": "queued", "id": order_id, "inbox_id": inbox_id}
 
-    except ClientDisconnect:
-        logger.warning("JVZoo: Cliente desconectou.")
-        return {"status": "incomplete", "message": "Client disconnected"}
     except Exception as e:
         logger.exception(f"Erro JVZoo: {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
