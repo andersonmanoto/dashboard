@@ -475,6 +475,7 @@ def test_normalize_jvzoo_sale(normalizer):
     assert event.sub_tiger_3 == "audience_segment_1"  # sub_id2
 
     assert event.order_details.product_name == "Example Product - Front"
+    assert event.order_details.external_checkout_code == "PROD_001"  # product_id
     assert event.order_details.external_affiliate_id == "0"
     assert event.order_details.external_affiliate_name == "Tiger Offers"
 

@@ -493,6 +493,13 @@ class PayloadNormalizer:
             # Detalhes
             order_details=OrderDetails(
                 external_product_id=payload.get("product_id"),
+                # `product_id` também serve de checkout_code -- é o único
+                # identificador de item de funil que a JVZoo expõe no
+                # postback (sem account_id, diferente da BuyGoods). Precisa
+                # estar cadastrado em `checkouts` pra `_enrich_checkout`
+                # casar por código exato em vez de cair no fallback por
+                # nome de produto.
+                external_checkout_code=payload.get("product_id"),
                 external_affiliate_id=affiliate_id if has_affiliate else "0",
                 external_affiliate_name="Tiger Offers" if not has_affiliate else None,
                 product_name=payload.get("product_name"),
