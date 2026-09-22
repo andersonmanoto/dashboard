@@ -17,12 +17,10 @@ from app.services.autopages_service import AutoPagesError, AutoPagesService
 from app.services.redtrack_service import RedTrackAPI, RedTrackAPIError
 
 # Offer source (program) de cada rede no RedTrack, por `plataforma`.
-# JVZoo ainda não tem program_id aqui (ver Offer Sources no RedTrack) --
-# fica de fora do dict de propósito, pra cair no RedTrackAPIError explícito
-# de "plataforma sem offer source" em vez de mandar um program_id vazio.
 _OFFER_SOURCE_ID_BY_PLATAFORMA = {
     "buygoods": "6685d5cfb9b57400016a1a95",
     "pagamerican": "6a9affa8cbd0b6a371635f4b",
+    "jvzoo": "6ab2aca4824bddae486b1c51",
 }
 
 
