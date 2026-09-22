@@ -320,6 +320,34 @@ PAYLOAD_DIGISTORE_SALE = {
     "is_test_payment": "true",
 }
 
+# Payload de exemplo baseado na doc pública do IPN v2.0 da JVZoo (form-urlencoded).
+# Ainda não validado contra um "Send Test IPN" real -- ver comentário em
+# PayloadNormalizer._normalize_jvzoo.
+PAYLOAD_JVZOO_SALE = {
+    "ctransaction": "SALE",
+    "ctransreceipt": "123456789",
+    "ctransamount": "47.00",
+    "cprodtitle": "Example Product - Front",
+    "cproditem": "1",
+    "ccustname": "John Smith",
+    "ccustemail": "john.smith@example.com",
+    "caffiliate": "0",
+    "caffipayamount": "0.00",
+    "ctransaffitrack": "",
+}
+
+PAYLOAD_JVZOO_REFUND = {
+    "ctransaction": "RFND",
+    "ctransreceipt": "123456789",
+    "ctransamount": "47.00",
+    "cprodtitle": "Example Product - Front",
+    "cproditem": "1",
+    "ccustname": "John Smith",
+    "ccustemail": "john.smith@example.com",
+    "caffiliate": "0",
+    "caffipayamount": "0.00",
+}
+
 
 # ========== TESTES BUYGOODS (ATUALIZADO) ==========
 def test_normalize_buygoods_real_payload(normalizer):
@@ -423,3 +451,59 @@ def test_normalize_pagamerican_unknown_event(normalizer):
     payload = {**PAYLOAD_PAGAMERICAN_PURCHASE, "_pa_event": "some.other.event.v1"}
     with pytest.raises(ValueError):
         normalizer.normalize(NetworkType.PAGAMERICAN, payload)
+
+
+# ========== TESTES JVZOO ==========
+def test_normalize_jvzoo_sale(normalizer):
+    event = normalizer.normalize(NetworkType.JVZOO, PAYLOAD_JVZOO_SALE)
+
+    assert event.network == NetworkType.JVZOO
+    assert event.order_id == "123456789"  # ctransreceipt
+    assert event.action_type == ActionType.NEWORDER
+
+    assert event.sale_total == 47.0
+    assert event.customer_name == "John Smith"
+    assert event.customer_email == "john.smith@example.com"
+
+    assert event.order_details.product_name == "Example Product - Front"
+    assert event.order_details.external_affiliate_id == "0"
+    assert event.order_details.external_affiliate_name == "Tiger Offers"
+
+    assert event.is_upsell is False
+    assert event.is_test is False
+
+
+def test_normalize_jvzoo_refund(normalizer):
+    event = normalizer.normalize(NetworkType.JVZOO, PAYLOAD_JVZOO_REFUND)
+
+    assert event.network == NetworkType.JVZOO
+    assert event.order_id == "123456789"
+    assert event.action_type == ActionType.REFUND
+    assert event.sale_total == 47.0
+
+
+def test_normalize_jvzoo_upsell(normalizer):
+    payload = {**PAYLOAD_JVZOO_SALE, "cproditem": "2", "ctransreceipt": "987654321"}
+    event = normalizer.normalize(NetworkType.JVZOO, payload)
+
+    assert event.is_upsell is True
+
+
+def test_normalize_jvzoo_with_affiliate(normalizer):
+    payload = {
+        **PAYLOAD_JVZOO_SALE,
+        "caffiliate": "55821",
+        "caffiliatename": "some-affiliate",
+        "caffipayamount": "18.80",
+    }
+    event = normalizer.normalize(NetworkType.JVZOO, payload)
+
+    assert event.aff_commission == 18.80
+    assert event.order_details.external_affiliate_id == "55821"
+    assert event.order_details.external_affiliate_name == "some-affiliate"
+
+
+def test_normalize_jvzoo_unknown_transaction(normalizer):
+    payload = {**PAYLOAD_JVZOO_SALE, "ctransaction": "INSF"}
+    with pytest.raises(ValueError):
+        normalizer.normalize(NetworkType.JVZOO, payload)

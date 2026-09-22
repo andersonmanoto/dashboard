@@ -155,6 +155,56 @@ async def webhook_pagamerican(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@router.post("/jvzoo/{secret_token}")
+async def webhook_jvzoo(
+    secret_token: str,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    auth: None = Depends(verify_secret_token),
+) -> dict:
+    """Recebe IPN (postback S2S) da JVZoo."""
+    try:
+        payload = await extract_payload(request)
+        inbox_id = None
+
+        # 1. Tenta salvar na Inbox
+        try:
+            db_async = await get_inbox_supabase(settings)
+            response = (
+                await db_async.table("webhook_inbox")
+                .insert(
+                    {
+                        "network": NetworkType.JVZOO.value,
+                        "payload": payload,
+                        "status": "pending",
+                    }
+                )
+                .execute()
+            )
+            inbox_id = response.data[0]["id"] if response.data else None
+        except Exception as db_err:
+            logger.warning(
+                f"Falha ao salvar na inbox (Supabase indisponível). Seguindo para o Redis... Erro: {db_err}"
+            )
+
+        # 2. Enfileira no Redis GARANTIDAMENTE
+        await request.app.state.redis_pool.enqueue_job(
+            "task_process_webhook",
+            network_str=NetworkType.JVZOO.value,
+            payload=payload,
+            inbox_id=inbox_id,
+        )
+
+        return {"status": "queued", "inbox_id": inbox_id}
+
+    except ClientDisconnect:
+        logger.warning("JVZoo: Cliente desconectou.")
+        return {"status": "incomplete", "message": "Client disconnected"}
+    except Exception as e:
+        logger.exception(f"Erro JVZoo: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @router.get("/digistore24/{secret_token}")
 async def webhook_digistore24(
     secret_token: str,

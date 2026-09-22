@@ -46,6 +46,8 @@ class PayloadNormalizer:
             return self._normalize_digistore24(payload, order_id)
         elif network == NetworkType.PAGAMERICAN:
             return self._normalize_pagamerican(payload, order_id)
+        elif network == NetworkType.JVZOO:
+            return self._normalize_jvzoo(payload, order_id)
         else:
             raise ValueError(f"Rede desconhecida: {network}")
 
@@ -54,12 +56,14 @@ class PayloadNormalizer:
         Extrai o ID do pedido de forma agnóstica à rede.
 
         Tenta buscar 'order_id_global' (comum em agregadores), 'order_id' ou
-        'orderId' (camelCase, usado pela PagAmerican).
+        'orderId' (camelCase, usado pela PagAmerican), ou 'ctransreceipt'
+        (identificador único de transação da JVZoo, que não manda order_id).
         """
         order_id = (
             payload.get("order_id_global")
             or payload.get("order_id")
             or payload.get("orderId")
+            or payload.get("ctransreceipt")
         )
         return str(order_id) if order_id else None
 
@@ -420,6 +424,78 @@ class PayloadNormalizer:
                 state=shipping.get("state"),
                 zip=shipping.get("zipCode"),
                 country=shipping.get("country"),
+            ),
+            payload=payload,
+        )
+
+    # ========== JVZOO ==========
+
+    # A JVZoo manda o tipo do evento no campo `ctransaction` (POST
+    # form-urlencoded, um evento por chamada). Mapeamento conforme a
+    # documentação pública do IPN v2.0 -- CONFIRMAR contra o payload real
+    # assim que o "Send Test IPN" for disparado do painel deles, os nomes
+    # de campo podem variar entre produtos/versão de IPN configurada.
+    # INSF (rebill que falhou por saldo insuficiente) não é uma transação
+    # completa -> não mapeado de propósito, cai em ValueError p/ triagem.
+    _JVZOO_TRANSACTION_ACTION_MAP = {
+        "SALE": ActionType.NEWORDER,
+        "BILL": ActionType.REBILL,
+        "RFND": ActionType.REFUND,
+        "CGBK": ActionType.CHARGEBACK,
+        "CANCEL-REBILL": ActionType.CANCEL,
+    }
+
+    def _normalize_jvzoo(self, payload: dict, order_id: str) -> NormalizedEvent:
+        """
+        Aplica regras de mapeamento específicas da JVZoo.
+
+        Diferenças-chave em relação às demais redes:
+        - `ctransreceipt` é o identificador único da transação (usado como
+          order_id via `_extract_order_id`), a JVZoo não manda "order_id".
+        - Sem campo de data confiável no IPN -- usa o horário de recebimento
+          do webhook (`created_at` default do NormalizedEvent).
+        - `cproditem` indica a posição do produto no funil ("1" = front);
+          usado como proxy de upsell até confirmarmos com um IPN real.
+        - `caffiliate` == "0" (ou ausente) indica tráfego próprio (sem
+          afiliado JVZoo), mantendo o fallback "Tiger Offers" como nas
+          outras redes.
+        """
+        ctransaction = str(payload.get("ctransaction", "")).upper()
+        action_type = self._JVZOO_TRANSACTION_ACTION_MAP.get(ctransaction)
+        if action_type is None:
+            raise ValueError(f"ctransaction JVZoo desconhecido/não mapeado: '{ctransaction}'")
+
+        caffiliate = payload.get("caffiliate") or "0"
+        has_affiliate = str(caffiliate) not in ("0", "")
+
+        return NormalizedEvent(
+            network=NetworkType.JVZOO,
+            order_id=order_id,
+            action_type=action_type,
+            # Cliente
+            customer_name=payload.get("ccustname"),
+            customer_email=payload.get("ccustemail"),
+            # Financeiro
+            sale_total=safe_float(payload.get("ctransamount")),
+            aff_commission=safe_float(payload.get("caffipayamount")),
+            # Tracking (JVZoo repassa o valor cru de `ctransaffitrack`,
+            # usado pra passar o clickid do RedTrack no link de afiliado)
+            click_id=payload.get("ctransaffitrack"),
+            # Flags
+            is_upsell=str(payload.get("cproditem", "1")) != "1",
+            # A JVZoo não documenta um campo de flag para transação de teste
+            # no IPN -- o "Send Test IPN" do painel manda um SALE normal com
+            # dados fictícios. Confirmar isso com o primeiro teste real;
+            # por ora sempre False (mesmo default das outras redes).
+            is_test=False,
+            # Detalhes
+            order_details=OrderDetails(
+                external_product_id=payload.get("cproditem"),
+                external_affiliate_id=caffiliate if has_affiliate else "0",
+                external_affiliate_name=payload.get("caffiliatename")
+                if has_affiliate
+                else "Tiger Offers",
+                product_name=payload.get("cprodtitle"),
             ),
             payload=payload,
         )
