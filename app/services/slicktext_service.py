@@ -10,6 +10,9 @@ from app.utils.formatters import country_to_alpha2
 
 logger = logging.getLogger(__name__)
 
+# Escopo de SMS de carrinho abandonado: só EUA e Canadá por enquanto.
+SMS_ALLOWED_COUNTRIES = {"US", "CA"}
+
 
 def format_phone_local(
     raw_phone: Optional[str], country_code: str = "US"
@@ -312,6 +315,14 @@ async def process_slicktext_sync_task(
     # pra praticamente todo telefone em formato local (sem código de país),
     # descartando silenciosamente clientes fora dos EUA. Ver country_to_alpha2.
     country_code = country_to_alpha2(country) or "US"
+
+    if country_code not in SMS_ALLOWED_COUNTRIES:
+        logger.info(
+            f"SlickText ignorado: país '{country}' ({country_code}) fora do "
+            f"escopo {sorted(SMS_ALLOWED_COUNTRIES)} (codename: {product_codename})."
+        )
+        return
+
     formatted_phone = format_phone_local(raw_phone, country_code)
 
     if not formatted_phone or not validate_phone_abstract(
