@@ -7,14 +7,39 @@ Uso típico: um produto ficou sem `aff_id_sms` configurado por um tempo (o
 sync fica silencioso nesse caso -- só loga info e sai) e depois de corrigido
 o campo, as vendas que já chegaram como abandono precisam ser reenviadas.
 
-    PYTHONPATH=app python3 app/scripts/backfill_slicktext_abandoned.py sohp --since-hours 36
+    PYTHONPATH=.:app python3 app/scripts/backfill_slicktext_abandoned.py sohp --since-hours 36
 """
 
 import argparse
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from loguru import logger
+
+
+def _load_dotenv(path: str = ".env") -> None:
+    """
+    Injeta as chaves do .env em os.environ (get_slicktext_api_key() lê de lá
+    direto, e não tem load_dotenv() nenhum no projeto -- em produção o
+    processo já sobe com essas variáveis no ambiente via systemd/docker).
+
+    Não usa `source .env` porque o arquivo tem valores com espaço sem aspas
+    (ex: EMAIL_FROM=Tiger Offers Reports <...>) que quebram o parser do bash.
+    """
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
 
 from config import get_settings
 from repositories.database import DatabaseRepository
