@@ -6,6 +6,7 @@ from phonenumbers import NumberParseException, PhoneNumberFormat
 
 from app.config import Settings, get_slicktext_api_key
 from app.repositories.database import DatabaseRepository
+from app.utils.formatters import country_to_alpha2
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +297,12 @@ async def process_slicktext_sync_task(
         return
 
     # 3. Valida telefone
-    country_code = "US" if country.lower() in ("united states", "us") else country
+    # BUG histórico: antes disso, qualquer país diferente de "US"/"united
+    # states" passava o NOME cru (ex: "United Kingdom") pro phonenumbers,
+    # que exige ISO alpha-2 -- number.parse() estourava NumberParseException
+    # pra praticamente todo telefone em formato local (sem código de país),
+    # descartando silenciosamente clientes fora dos EUA. Ver country_to_alpha2.
+    country_code = country_to_alpha2(country) or "US"
     formatted_phone = format_phone_local(raw_phone, country_code)
 
     if not formatted_phone or not validate_phone_abstract(

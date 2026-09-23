@@ -2,11 +2,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import phonenumbers
-import pycountry
-from loguru import logger
 from phonenumbers import NumberParseException, PhoneNumberFormat
 
 from models.schemas import NormalizedEvent
+from utils.formatters import country_to_alpha2
 
 
 def _format_phone_e164(raw_phone: Optional[str], region: str = "US") -> str:
@@ -28,27 +27,6 @@ def _split_name(full_name: Optional[str]) -> tuple[str, str]:
     if len(parts) == 1:
         return parts[0], ""
     return parts[0], parts[1]
-
-
-def _country_to_alpha2(value: Optional[str]) -> str:
-    """
-    Resolve um país (nome ou código) pro ISO 3166-1 alpha-2 exigido pelo
-    Zapier. Retorna "" se não conseguir identificar -- o endpoint aceita
-    campo vazio, então isso não bloqueia o envio do lead.
-    """
-    if not value:
-        return ""
-
-    value = value.strip()
-    if len(value) == 2:
-        return value.upper()
-
-    try:
-        match = pycountry.countries.search_fuzzy(value)
-        return match[0].alpha_2 if match else ""
-    except LookupError:
-        logger.warning(f"Zapier: país não reconhecido pra ISO2: '{value}'")
-        return ""
 
 
 def _order_date_now() -> str:
@@ -75,7 +53,7 @@ def build_order_payload(event: NormalizedEvent, product_name: Optional[str] = No
         first_name, last_name = _split_name(event.customer_name)
 
     country_raw = raw_payload.get("country_2letter") or event.shipping_details.country
-    country_iso2 = _country_to_alpha2(country_raw)
+    country_iso2 = country_to_alpha2(country_raw)
 
     return {
         "lead_type": "neworder",
@@ -108,7 +86,7 @@ def build_abandoned_cart_payload(cart_data: dict, product_name: Optional[str] = 
     """
     location = cart_data.get("location") or {}
     first_name, last_name = _split_name(cart_data.get("customer_name"))
-    country_iso2 = _country_to_alpha2(location.get("country"))
+    country_iso2 = country_to_alpha2(location.get("country"))
     product_name = product_name or cart_data.get("product_codename") or ""
 
     return {
