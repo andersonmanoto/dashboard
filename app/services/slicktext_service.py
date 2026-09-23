@@ -48,9 +48,18 @@ def validate_phone_abstract(formatted_phone: str, api_key: str) -> Optional[bool
             str(data.get("phone_validation", {}).get("line_status", "")).lower()
             == "active"
         )
-        is_mobile = (
-            str(data.get("phone_carrier", {}).get("line_type", "")).lower() == "mobile"
-        )
+        line_type = str(data.get("phone_carrier", {}).get("line_type", "")).lower()
+        is_mobile = line_type == "mobile"
+
+        # A AbstractAPI não identifica a operadora de número canadense (linha
+        # sempre volta "unknown", mesmo pra celular de verdade -- confirmado
+        # comparando com número de UK, que sempre retorna "mobile" certo;
+        # provável lacuna deles pro NANP/CA). Sem esse relaxamento, 100% dos
+        # números do Canadá são reprovados aqui independente de serem
+        # celular ou não.
+        country_code = str(data.get("phone_location", {}).get("country_code", "")).upper()
+        if country_code == "CA" and line_type == "unknown":
+            is_mobile = True
 
         if is_mobile and is_valid and is_active:
             return True
