@@ -14,6 +14,13 @@ class NetworkType(str, Enum):
     JVZOO = "JVZoo"
 
 
+# Evento de checkout abandonado da PagAmerican -- não é uma transação
+# financeira (não passa por ActionType/PayloadNormalizer), então é
+# desviado antes do normalize() em app/worker.py e processado à parte,
+# igual ao fluxo de abandono da BuyGoods.
+PAGAMERICAN_ABANDON_EVENT = "checkout.session.abandoned.v-1.0.0"
+
+
 class ActionType(str, Enum):
     """
     Tipos de ação possíveis em um evento financeiro.

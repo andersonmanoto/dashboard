@@ -461,3 +461,64 @@ class EventProcessor:
                 f"Erro fatal ao processar abandon cart (Email: {payload.get('emailaddress')}): {e}"
             )
             return False
+
+    async def process_pagamerican_abandon_cart(self, body: dict) -> bool:
+        """
+        Processa o evento de checkout abandonado da PagAmerican
+        (checkout.session.abandoned.v-1.0.0).
+
+        Diferenças em relação à BuyGoods:
+        - Dados do cliente vêm aninhados em `checkoutForm`, não soltos no
+          payload; nome vem em `firstName`/`lastName` separados.
+        - `offerCode` é o equivalente ao `product_codename` (mesmo campo
+          usado como checkout_code nas vendas reais da PagAmerican).
+        - Não tem `account_id` (conceito exclusivo da BuyGoods) nem
+          `ipaddress` nesse evento especificamente.
+        """
+        checkout_form = body.get("checkoutForm") or {}
+        customer_email = checkout_form.get("email", "")
+
+        try:
+            offer_code = body.get("offerCode", "")
+            customer_name = " ".join(
+                filter(
+                    None,
+                    [checkout_form.get("firstName"), checkout_form.get("lastName")],
+                )
+            )
+
+            location = {
+                "address": checkout_form.get("address1", ""),
+                "city": checkout_form.get("city", ""),
+                "state": checkout_form.get("state", ""),
+                "country": checkout_form.get("country", ""),
+            }
+
+            cart_data = {
+                "action_type": "abandon",
+                "customer_name": customer_name,
+                "customer_email": customer_email,
+                "customer_phone": checkout_form.get("phone", ""),
+                "ipaddress": "",
+                "product_codename": offer_code,
+                "location": location,
+                "payload": body,
+                "is_recovered": False,
+            }
+
+            result = await asyncio.to_thread(self.db.insert_abandoned_cart, cart_data)
+
+            if result and self.zapier_webhook_enabled:
+                product_name = self._resolve_product_name_by_codename(offer_code)
+                self._enqueue_zapier_webhook(
+                    build_abandoned_cart_payload(cart_data, product_name=product_name),
+                    context=f"abandon {customer_email}",
+                )
+
+            return bool(result)
+
+        except Exception as e:
+            logger.exception(
+                f"Erro fatal ao processar abandon cart PagAmerican (Email: {customer_email}): {e}"
+            )
+            return False

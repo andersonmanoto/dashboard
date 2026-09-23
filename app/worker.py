@@ -7,13 +7,41 @@ from loguru import logger
 from concurrent.futures import ThreadPoolExecutor
 
 from app.config import get_settings
-from app.models.enums import NetworkType
+from app.models.enums import PAGAMERICAN_ABANDON_EVENT, NetworkType
 from app.repositories.database import DatabaseRepository
 from app.services.event_processor import EventProcessor
 from app.services.normalizer import PayloadNormalizer
 from app.services.slack_service import SlackService
+from app.services.slicktext_service import process_slicktext_sync_task
 
 from app.scripts.sync_approved_orders import fetch_pending_ids, process_single_item
+
+
+async def _sync_pagamerican_abandon_slicktext(
+    payload: dict, db_repo: DatabaseRepository
+) -> None:
+    """
+    Dispara o SlickText pro abandono da PagAmerican, adaptando os campos
+    aninhados dela (checkoutForm.*, offerCode) pro formato flat que
+    process_slicktext_sync_task espera (mesmo formato da BuyGoods).
+    Best-effort: erro aqui não pode derrubar o job principal.
+    """
+    try:
+        checkout_form = payload.get("checkoutForm") or {}
+        slicktext_payload = {
+            "name": " ".join(
+                filter(
+                    None,
+                    [checkout_form.get("firstName"), checkout_form.get("lastName")],
+                )
+            ),
+            "phone": checkout_form.get("phone", ""),
+            "product_codename": payload.get("offerCode", ""),
+            "country": checkout_form.get("country", "US"),
+        }
+        await process_slicktext_sync_task(slicktext_payload, get_settings(), db_repo)
+    except Exception:
+        logger.exception("Falha ao sincronizar SlickText (abandono PagAmerican)")
 
 
 async def task_process_webhook(
@@ -35,16 +63,28 @@ async def task_process_webhook(
         except ValueError:
             raise ValueError(f"Rede desconhecida: {network_str}")
 
-        normalized_event = normalizer.normalize(network, payload)
-
-        success = await processor.process_event(normalized_event)
+        # Checkout abandonado da PagAmerican não é uma transação financeira
+        # (sem action_type/order_id nossos) -- desvia do normalize()/
+        # process_event() antes de chegar lá, igual ao fluxo de abandono da
+        # BuyGoods (que tem rota própria em vez de passar pelo normalizer).
+        if (
+            network == NetworkType.PAGAMERICAN
+            and payload.get("_pa_event") == PAGAMERICAN_ABANDON_EVENT
+        ):
+            success = await processor.process_pagamerican_abandon_cart(payload)
+            await _sync_pagamerican_abandon_slicktext(payload, db_repo)
+            log_id = payload.get("abandonedSaleUcode", "")
+        else:
+            normalized_event = normalizer.normalize(network, payload)
+            success = await processor.process_event(normalized_event)
+            log_id = normalized_event.order_id
 
         if inbox_id:
             status = "processed" if success else "processed_with_ignored"
             msg = None if success else "Ignored/Duplicate/Cancel"
             db_repo.update_inbox_status(inbox_id, status, msg)
 
-        logger.info(f"Job finalizado | Order={normalized_event.order_id}")
+        logger.info(f"Job finalizado | Order={log_id}")
 
     except ValueError as e:
         logger.warning(
