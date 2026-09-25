@@ -246,7 +246,7 @@ async def process_slicktext_sync_task(
     Background task para processar o fluxo do SlickText.
 
     `platform` é a rede de origem do carrinho abandonado (valor de
-    NetworkType) -- vai pro custom field `platforma` do contato e decide
+    NetworkType) -- vai pro custom field `plataforma` do contato e decide
     como montar a url_abandonada.
     """
     customer_name = payload.get("name", "")
@@ -353,10 +353,7 @@ async def process_slicktext_sync_task(
         "produto": product_name,
         "url_abandonada": url_abandonada_final,
         "bottles": str(bottles_quantity),
-        # Chave = internal_name do custom field no SlickText, criado como
-        # "platforma" (sem o segundo "a") -- chave desconhecida é ignorada
-        # silenciosamente pela API.
-        "platforma": platform,
+        "plataforma": platform,
     }
 
     for mapping in mappings:
