@@ -39,7 +39,12 @@ async def _sync_pagamerican_abandon_slicktext(
             "product_codename": payload.get("offerCode", ""),
             "country": checkout_form.get("country", "US"),
         }
-        await process_slicktext_sync_task(slicktext_payload, get_settings(), db_repo)
+        await process_slicktext_sync_task(
+            slicktext_payload,
+            get_settings(),
+            db_repo,
+            platform=NetworkType.PAGAMERICAN.value,
+        )
     except Exception:
         logger.exception("Falha ao sincronizar SlickText (abandono PagAmerican)")
 

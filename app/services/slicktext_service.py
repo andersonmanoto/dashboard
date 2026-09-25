@@ -5,6 +5,7 @@ import phonenumbers
 from phonenumbers import NumberParseException, PhoneNumberFormat
 
 from app.config import Settings, get_slicktext_api_key
+from app.models.enums import NetworkType
 from app.repositories.database import DatabaseRepository
 from app.utils.formatters import country_to_alpha2
 
@@ -236,10 +237,17 @@ def _sync_to_slicktext(
 
 
 async def process_slicktext_sync_task(
-    payload: dict, settings: Settings, db_repo: DatabaseRepository
+    payload: dict,
+    settings: Settings,
+    db_repo: DatabaseRepository,
+    platform: str = NetworkType.BUYGOODS.value,
 ):
     """
     Background task para processar o fluxo do SlickText.
+
+    `platform` é a rede de origem do carrinho abandonado (valor de
+    NetworkType) -- vai pro custom field `plataforma` do contato e decide
+    como montar a url_abandonada.
     """
     customer_name = payload.get("name", "")
     raw_phone = payload.get("phone", "")
@@ -282,13 +290,20 @@ async def process_slicktext_sync_task(
         product_name = product_info.get("name")
         aff_id_sms = product_info.get("aff_id_sms")
 
-        if not aff_id_sms:
-            logger.info(
-                f"SlickText ignorado: 'aff_id_sms' vazio para '{product_name}' (codename: {product_codename})."
-            )
-            return
+        # PagAmerican: checkouts.url é só o link puro do checkout
+        # (https://pay.pagamerican.app/<offerCode>, sem query string), e o
+        # aff_id_sms é um ID de afiliado da BuyGoods -- concatenar
+        # "&aff_id=" ali gerava link quebrado. Vai a url bruta.
+        if platform == NetworkType.PAGAMERICAN.value:
+            url_abandonada_final = checkout_url
+        else:
+            if not aff_id_sms:
+                logger.info(
+                    f"SlickText ignorado: 'aff_id_sms' vazio para '{product_name}' (codename: {product_codename})."
+                )
+                return
 
-        url_abandonada_final = f"{checkout_url}&aff_id={aff_id_sms}"
+            url_abandonada_final = f"{checkout_url}&aff_id={aff_id_sms}"
 
     except Exception as e:
         logger.error(
@@ -338,6 +353,7 @@ async def process_slicktext_sync_task(
         "produto": product_name,
         "url_abandonada": url_abandonada_final,
         "bottles": str(bottles_quantity),
+        "plataforma": platform,
     }
 
     for mapping in mappings:
