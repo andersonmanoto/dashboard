@@ -13,6 +13,10 @@ from models.enums import (
 from models.schemas import Affiliate, CheckoutInfo, NormalizedEvent, SalesStatus
 from repositories.database import DatabaseRepository
 from services.slack_service import SlackService
+from services.redtrack_conversion_service import (
+    REDTRACK_CONVERSION_TYPE,
+    build_conversion_row,
+)
 from services.zapier_service import build_abandoned_cart_payload, build_order_payload
 from utils.date_utils import parse_date
 from utils.formatters import safe_float
@@ -34,6 +38,8 @@ class EventProcessor:
         db_repo: DatabaseRepository,
         slack_service: Optional[SlackService] = None,
         zapier_webhook_enabled: bool = True,
+        redtrack_send_from: Optional[str] = None,
+        redtrack_product_ids: Optional[frozenset[str]] = None,
     ):
         """
         Inicializa o processador.
@@ -46,10 +52,19 @@ class EventProcessor:
                 Zapier. Scripts de backfill/retro devem passar False -- eles
                 reprocessam eventos antigos, e o lead já foi (ou deveria ter sido)
                 enviado quando o evento aconteceu de verdade.
+            redtrack_send_from (Optional[str]): Data de corte (YYYY-MM-DD) pra
+                enfileirar conversões pro RedTrack. None/vazio = desligado, que
+                é o padrão de propósito: só o worker liga (via config), então
+                scripts de retro/backfill nunca mandam venda antiga pro RedTrack.
+            redtrack_product_ids (Optional[frozenset[str]]): products.id
+                liberados pro envio (fase de testes). None/vazio = todos os
+                produtos de internal_aff_ids.
         """
         self.db = db_repo
         self.slack = slack_service
         self.zapier_webhook_enabled = zapier_webhook_enabled
+        self.redtrack_send_from = redtrack_send_from or None
+        self.redtrack_product_ids = redtrack_product_ids or None
 
     def _enqueue_zapier_webhook(self, payload: dict, context: str) -> None:
         """
@@ -67,6 +82,58 @@ class EventProcessor:
                 logger.warning(f"Lead NÃO enfileirado pro Zapier ({context})")
         except Exception:
             logger.exception(f"Falha ao enfileirar webhook Zapier ({context})")
+
+    def enqueue_redtrack_conversion(
+        self, event: NormalizedEvent, event_id: Optional[str] = None
+    ) -> None:
+        """
+        Enfileira o Purchase (só front) pro RedTrack, se a venda for de um par
+        (produto, aff_id) de internal_aff_ids. Venda de afiliado externo não
+        entra na fila. Igual ao Zapier, nunca deixa uma falha aqui derrubar o
+        processamento do evento -- o que ficar de fora a reconciliação
+        (scripts/reconcile_redtrack_conversions.py) enfileira depois.
+
+        Precisa do evento já enriquecido (product_id e funnel_stage).
+        """
+        order_id = event.order_id
+        try:
+            if not self.redtrack_send_from:
+                return
+            if (
+                self._network_value(event.network) != NetworkType.BUYGOODS.value
+                or event.action_type != ActionType.NEWORDER
+                or event.is_test
+                or event.funnel_stage != REDTRACK_CONVERSION_TYPE
+                or not event.event_date
+                or event.event_date < self.redtrack_send_from
+            ):
+                return
+
+            aff_id = event.order_details.external_affiliate_id
+            if not event.product_id or not aff_id:
+                return
+            if (
+                self.redtrack_product_ids
+                and str(event.product_id) not in self.redtrack_product_ids
+            ):
+                return
+            if not self.db.is_internal_aff(event.network, event.product_id, aff_id):
+                return
+
+            row = build_conversion_row(event, event_id)
+            result = self.db.enqueue_redtrack_conversion(row)
+            if result:
+                logger.info(
+                    f"Conversão RedTrack enfileirada | status={row['status']} "
+                    f"| skip_reason={row['skip_reason']} | order {order_id}"
+                )
+            else:
+                logger.info(
+                    f"Conversão RedTrack não enfileirada (já estava na fila ou "
+                    f"falhou) | order {order_id}"
+                )
+        except Exception:
+            logger.exception(f"Falha ao enfileirar conversão RedTrack (order {order_id})")
 
     def _resolve_product_name_by_codename(
         self, codename: str, account_id: Optional[str] = None
@@ -167,6 +234,10 @@ class EventProcessor:
                     build_order_payload(event, product_name=product_name),
                     context=f"order {order_id}",
                 )
+
+            # 6. Purchase pro RedTrack (só front, só afiliado interno)
+            event_id = result.get("id") if isinstance(result, dict) else None
+            self.enqueue_redtrack_conversion(event, event_id)
 
             return True
 

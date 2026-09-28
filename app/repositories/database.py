@@ -760,6 +760,125 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao marcar webhook Zapier {queue_id} como falho: {e}")
 
+    def is_internal_aff(
+        self, network: Union[NetworkType, str], product_id, aff_id: str
+    ) -> bool:
+        """
+        True se o par (produto, aff_id) está cadastrado em internal_aff_ids.
+
+        O aff_id da Tiger muda de conta vendor pra conta vendor (18 numa, 26
+        noutra...) e o mesmo número pode ser um afiliado externo em outra
+        conta -- por isso o filtro é pelo par, não só pelo aff_id.
+        """
+        response = (
+            self.client.table("internal_aff_ids")
+            .select("id")
+            .eq("network_id", self.get_network_id(network))
+            .eq("product_id", str(product_id))
+            .eq("aff_id", str(aff_id))
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data)
+
+    def enqueue_redtrack_conversion(
+        self, row: dict, max_retries: int = 3
+    ) -> Optional[dict]:
+        """
+        Insere a conversão na redtrack_conversion_queue. Se o pedido já estiver
+        na fila (mesmo network + bg_order_id + conversion_type), não faz nada:
+        IPN reenviado, reprocess_inbox e a reconciliação podem chamar isso
+        várias vezes pro mesmo pedido sem duplicar o envio.
+
+        Retorna a linha inserida, ou None se já existia / falhou.
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = (
+                    self.client.table("redtrack_conversion_queue")
+                    .upsert(
+                        row,
+                        on_conflict="network,bg_order_id,conversion_type",
+                        ignore_duplicates=True,
+                    )
+                    .execute()
+                )
+                return response.data[0] if response.data else None
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
+                if attempt == max_retries:
+                    logger.error(
+                        f"Erro ao enfileirar conversão RedTrack: esgotou {max_retries} "
+                        f"tentativas ({type(exc).__name__}): {exc}"
+                    )
+                    return None
+                wait = 2**attempt
+                logger.warning(
+                    f"Erro ao enfileirar conversão RedTrack: tentativa {attempt}/"
+                    f"{max_retries} falhou ({type(exc).__name__}). "
+                    f"Retentando em {wait}s..."
+                )
+                time.sleep(wait)
+            except Exception as e:
+                logger.error(f"Erro ao enfileirar conversão RedTrack: {e}")
+                return None
+        return None
+
+    def fetch_pending_redtrack_conversions(self, limit: int = 50) -> list[dict]:
+        try:
+            response = (
+                self.client.table("redtrack_conversion_queue")
+                .select("id, bg_order_id, payload, attempts")
+                .eq("status", "pending")
+                .order("created_at")
+                .limit(limit)
+                .execute()
+            )
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Erro ao buscar fila de conversões RedTrack: {e}")
+            return []
+
+    def mark_redtrack_conversion_sent(self, queue_id: str, response_text: str) -> None:
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            (
+                self.client.table("redtrack_conversion_queue")
+                .update(
+                    {
+                        "status": "sent",
+                        "sent_at": now,
+                        "updated_at": now,
+                        "response": response_text[:500],
+                    }
+                )
+                .eq("id", queue_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Erro ao marcar conversão RedTrack {queue_id} como enviada: {e}")
+
+    def mark_redtrack_conversion_failed(
+        self, queue_id: str, attempts: int, error: str, max_attempts: int = 5
+    ) -> None:
+        try:
+            new_attempts = attempts + 1
+            status = "failed" if new_attempts >= max_attempts else "pending"
+            (
+                self.client.table("redtrack_conversion_queue")
+                .update(
+                    {
+                        "status": status,
+                        "attempts": new_attempts,
+                        "last_error": error[:500],
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                .eq("id", queue_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Erro ao marcar conversão RedTrack {queue_id} como falha: {e}")
+
     def _fetch_all_paginated(
         self,
         table_name: str,

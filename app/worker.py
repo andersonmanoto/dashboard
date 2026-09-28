@@ -11,6 +11,7 @@ from app.models.enums import PAGAMERICAN_ABANDON_EVENT, NetworkType
 from app.repositories.database import DatabaseRepository
 from app.services.event_processor import EventProcessor
 from app.services.normalizer import PayloadNormalizer
+from app.services.redtrack_service import RedTrackAPI, RedTrackAPIError
 from app.services.slack_service import SlackService
 from app.services.slicktext_service import process_slicktext_sync_task
 
@@ -140,7 +141,12 @@ async def startup(ctx):
 
     ctx["db_repo"] = db_repo
     ctx["normalizer"] = PayloadNormalizer()
-    ctx["processor"] = EventProcessor(db_repo, slack_service=slack)
+    ctx["processor"] = EventProcessor(
+        db_repo,
+        slack_service=slack,
+        redtrack_send_from=settings.redtrack_conversions_send_from,
+        redtrack_product_ids=settings.redtrack_conversions_product_id_set,
+    )
 
     logger.info("Worker pronto e conectado ao Redis.")
 
@@ -232,6 +238,64 @@ async def cron_send_zapier_webhooks(ctx):
     logger.info(f"{len(pending)} lead(s) processado(s) pro Zapier.")
 
 
+async def cron_send_redtrack_conversions(ctx):
+    """
+    Lê a fila redtrack_conversion_queue (Purchases já montados pelo
+    EventProcessor) e faz o POST /conversions no RedTrack. Mesmo esquema do
+    Zapier: o caminho do webhook só insere na fila, a chamada externa
+    acontece só aqui, com retry no próximo tick (até 5 tentativas -> failed).
+    """
+    db_repo: DatabaseRepository = ctx["db_repo"]
+    settings = get_settings()
+
+    if not settings.redtrack_conversions_send_from:
+        return
+
+    pending = await asyncio.to_thread(
+        db_repo.fetch_pending_redtrack_conversions, limit=50
+    )
+    if not pending:
+        return
+
+    try:
+        redtrack = RedTrackAPI(settings)
+    except RedTrackAPIError as exc:
+        logger.error(f"Envio de conversões RedTrack desligado: {exc}")
+        return
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for row in pending:
+            queue_id = row["id"]
+            attempts = row.get("attempts", 0)
+            conversion = row["payload"]
+            try:
+                response = await redtrack.upload_conversion(client, conversion)
+                if response.status_code in (200, 201):
+                    await asyncio.to_thread(
+                        db_repo.mark_redtrack_conversion_sent, queue_id, response.text
+                    )
+                    logger.info(
+                        f"Conversão enviada ao RedTrack | order_id={row.get('bg_order_id')} "
+                        f"| clickid={conversion.get('clickid')} "
+                        f"| payout={conversion.get('payout')} | queue_id={queue_id}"
+                    )
+                else:
+                    error = f"HTTP {response.status_code}: {response.text[:200]}"
+                    logger.warning(f"RedTrack recusou conversão {queue_id}: {error}")
+                    await asyncio.to_thread(
+                        db_repo.mark_redtrack_conversion_failed, queue_id, attempts, error
+                    )
+            except httpx.RequestError as exc:
+                logger.warning(
+                    f"Erro de rede ao enviar conversão RedTrack {queue_id}: {exc}"
+                )
+                await asyncio.to_thread(
+                    db_repo.mark_redtrack_conversion_failed, queue_id, attempts, str(exc)
+                )
+
+    logger.info(f"{len(pending)} conversão(ões) processada(s) pro RedTrack.")
+
+
 class WorkerSettings:
     settings = get_settings()
 
@@ -250,6 +314,11 @@ class WorkerSettings:
         cron(
             cron_send_zapier_webhooks,
             minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+            timeout=60,
+        ),
+        cron(
+            cron_send_redtrack_conversions,
+            minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
             timeout=60,
         ),
     ]

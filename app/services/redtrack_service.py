@@ -78,3 +78,21 @@ class RedTrackAPI:
             )
             text = response.content.decode("utf-8", errors="replace")
             return json.loads(text)
+
+    async def upload_conversion(
+        self, client: httpx.AsyncClient, conversion: dict
+    ) -> httpx.Response:
+        """Envia UMA conversão pro RedTrack (POST /conversions) e devolve a resposta.
+
+        O body é uma lista; manda um item por chamada de propósito, pra um
+        item inválido não derrubar os outros. A api_key vai na query string
+        (formato validado em 28/09, resposta 201). O processamento no RedTrack
+        é assíncrono: 201 = recebido, a conversão aparece no GET /conversions
+        alguns segundos depois.
+        """
+        return await client.post(
+            f"{self.base_url}/conversions",
+            params={"api_key": self.api_key},
+            headers=self.headers,
+            json=[conversion],
+        )
