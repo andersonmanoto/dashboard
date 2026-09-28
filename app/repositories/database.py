@@ -760,6 +760,137 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao marcar webhook Zapier {queue_id} como falho: {e}")
 
+    def get_aweber_list_ids(self, product_id) -> Optional[dict]:
+        """
+        Listas do AWeber do produto ({neworder_list_id, abandon_list_id}), ou
+        None se o produto não estiver em aweber_product_lists (= não envia).
+        """
+        response = (
+            self.client.table("aweber_product_lists")
+            .select("neworder_list_id, abandon_list_id")
+            .eq("product_id", str(product_id))
+            .limit(1)
+            .execute()
+        )
+        return response.data[0] if response.data else None
+
+    def enqueue_aweber_lead(
+        self, lead_type: str, list_id: str, subscriber: dict, max_retries: int = 3
+    ) -> Optional[dict]:
+        """
+        Insere o subscriber (já pronto pro POST /subscribers do AWeber) na
+        aweber_lead_queue. O envio HTTP é feito depois, pelo cron (worker.py).
+
+        Mesmo padrão de retry de enqueue_zapier_webhook.
+        """
+        row = {
+            "lead_type": lead_type,
+            "list_id": list_id,
+            "email": subscriber["email"],
+            "payload": subscriber,
+        }
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.table("aweber_lead_queue").insert(row).execute()
+                return response.data[0] if response.data else None
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
+                if attempt == max_retries:
+                    logger.error(
+                        f"Erro ao enfileirar lead AWeber: esgotou {max_retries} "
+                        f"tentativas ({type(exc).__name__}): {exc}"
+                    )
+                    return None
+                wait = 2**attempt
+                logger.warning(
+                    f"Erro ao enfileirar lead AWeber: tentativa {attempt}/"
+                    f"{max_retries} falhou ({type(exc).__name__}). "
+                    f"Retentando em {wait}s..."
+                )
+                time.sleep(wait)
+            except Exception as e:
+                logger.error(f"Erro ao enfileirar lead AWeber: {e}")
+                return None
+        return None
+
+    def fetch_pending_aweber_leads(self, limit: int = 50) -> list[dict]:
+        try:
+            response = (
+                self.client.table("aweber_lead_queue")
+                .select("id, lead_type, list_id, email, payload, attempts")
+                .eq("status", "pending")
+                .order("created_at")
+                .limit(limit)
+                .execute()
+            )
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Erro ao buscar fila de leads AWeber: {e}")
+            return []
+
+    def mark_aweber_lead_sent(self, queue_id: str) -> None:
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            (
+                self.client.table("aweber_lead_queue")
+                .update({"status": "sent", "sent_at": now, "updated_at": now})
+                .eq("id", queue_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Erro ao marcar lead AWeber {queue_id} como enviado: {e}")
+
+    def mark_aweber_lead_failed(
+        self, queue_id: str, attempts: int, error: str, max_attempts: int = 5
+    ) -> None:
+        try:
+            new_attempts = attempts + 1
+            status = "failed" if new_attempts >= max_attempts else "pending"
+            (
+                self.client.table("aweber_lead_queue")
+                .update(
+                    {
+                        "status": status,
+                        "attempts": new_attempts,
+                        "last_error": error[:500],
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                .eq("id", queue_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Erro ao marcar lead AWeber {queue_id} como falho: {e}")
+
+    def get_aweber_tokens(self) -> Optional[dict]:
+        """Tokens OAuth do AWeber (linha única de aweber_oauth_tokens), ou None."""
+        response = (
+            self.client.table("aweber_oauth_tokens")
+            .select("access_token, refresh_token, expires_at")
+            .eq("id", 1)
+            .limit(1)
+            .execute()
+        )
+        return response.data[0] if response.data else None
+
+    def save_aweber_tokens(
+        self, access_token: str, refresh_token: str, expires_at: datetime
+    ) -> None:
+        """Grava (ou substitui) os tokens OAuth do AWeber. Propaga erro: token
+        renovado e não salvo = refresh token possivelmente perdido."""
+        (
+            self.client.table("aweber_oauth_tokens")
+            .upsert(
+                {
+                    "id": 1,
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "expires_at": expires_at.isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            .execute()
+        )
+
     def is_internal_aff(
         self, network: Union[NetworkType, str], product_id, aff_id: str
     ) -> bool:

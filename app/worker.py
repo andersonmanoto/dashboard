@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.models.enums import PAGAMERICAN_ABANDON_EVENT, NetworkType
 from app.repositories.database import DatabaseRepository
 from app.services.event_processor import EventProcessor
+from app.services.aweber_service import AWeberAPI, AWeberAPIError
 from app.services.normalizer import PayloadNormalizer
 from app.services.redtrack_service import RedTrackAPI, RedTrackAPIError
 from app.services.slack_service import SlackService
@@ -146,6 +147,7 @@ async def startup(ctx):
         slack_service=slack,
         redtrack_send_from=settings.redtrack_conversions_send_from,
         redtrack_product_ids=settings.redtrack_conversions_product_id_set,
+        aweber_enabled=settings.aweber_enabled,
     )
 
     logger.info("Worker pronto e conectado ao Redis.")
@@ -296,6 +298,65 @@ async def cron_send_redtrack_conversions(ctx):
     logger.info(f"{len(pending)} conversão(ões) processada(s) pro RedTrack.")
 
 
+async def cron_send_aweber_leads(ctx):
+    """
+    Lê a fila aweber_lead_queue (leads de venda/abandono da PagAmerican já
+    montados pelo EventProcessor) e faz o POST /subscribers no AWeber.
+    Mesmo esquema do Zapier, com retry no próximo tick (até 5 -> failed).
+    Problema de OAuth (sem token, refresh recusado) não conta tentativa: os
+    leads ficam pending até o token ser corrigido.
+    """
+    db_repo: DatabaseRepository = ctx["db_repo"]
+    settings = get_settings()
+
+    if not settings.aweber_enabled:
+        return
+
+    pending = await asyncio.to_thread(db_repo.fetch_pending_aweber_leads, limit=50)
+    if not pending:
+        return
+
+    aweber = AWeberAPI(settings, db_repo)
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            access_token = await aweber.get_access_token(client)
+        except (AWeberAPIError, httpx.RequestError) as exc:
+            logger.error(f"AWeber: sem access token, envio adiado: {exc}")
+            return
+
+        for row in pending:
+            queue_id = row["id"]
+            attempts = row.get("attempts", 0)
+            try:
+                response, access_token = await aweber.add_subscriber(
+                    client, row["list_id"], row["payload"], access_token
+                )
+                if response.status_code in (200, 201):
+                    await asyncio.to_thread(db_repo.mark_aweber_lead_sent, queue_id)
+                    logger.info(
+                        f"Lead enviado ao AWeber | lead_type={row.get('lead_type')} "
+                        f"| list_id={row.get('list_id')} "
+                        f"| email={row.get('email')} | queue_id={queue_id}"
+                    )
+                else:
+                    error = f"HTTP {response.status_code}: {response.text[:200]}"
+                    logger.warning(f"AWeber recusou lead {queue_id}: {error}")
+                    await asyncio.to_thread(
+                        db_repo.mark_aweber_lead_failed, queue_id, attempts, error
+                    )
+            except AWeberAPIError as exc:
+                logger.error(f"AWeber: falha no refresh do token, envio adiado: {exc}")
+                return
+            except httpx.RequestError as exc:
+                logger.warning(f"Erro de rede ao enviar lead AWeber {queue_id}: {exc}")
+                await asyncio.to_thread(
+                    db_repo.mark_aweber_lead_failed, queue_id, attempts, str(exc)
+                )
+
+    logger.info(f"{len(pending)} lead(s) processado(s) pro AWeber.")
+
+
 class WorkerSettings:
     settings = get_settings()
 
@@ -319,6 +380,11 @@ class WorkerSettings:
         cron(
             cron_send_redtrack_conversions,
             minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
+            timeout=60,
+        ),
+        cron(
+            cron_send_aweber_leads,
+            minute={4, 9, 14, 19, 24, 29, 34, 39, 44, 49, 54, 59},
             timeout=60,
         ),
     ]

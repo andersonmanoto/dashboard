@@ -108,6 +108,25 @@ class Settings(BaseSettings):
     # Zapier (leads: novos pedidos e carrinhos abandonados)
     zapier_webhook_url: str = ""
 
+    # AWeber (leads da PagAmerican: vendas e carrinhos abandonados). Os
+    # tokens OAuth ficam na tabela aweber_oauth_tokens, não aqui.
+    aweber_client_id: str = ""
+    aweber_client_secret: str = ""
+    aweber_account_id: str = ""
+    # As listas de destino são por produto: tabela aweber_product_lists.
+    # Tags aplicadas a todo lead, separadas por vírgula (ex: "pagamerican")
+    aweber_default_tags: str = ""
+
+    @property
+    def aweber_enabled(self) -> bool:
+        return all(
+            (
+                self.aweber_client_id,
+                self.aweber_client_secret,
+                self.aweber_account_id,
+            )
+        )
+
 
 def get_slicktext_api_key(brand_id: str | None) -> str:
     """

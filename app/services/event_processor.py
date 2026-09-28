@@ -13,6 +13,7 @@ from models.enums import (
 from models.schemas import Affiliate, CheckoutInfo, NormalizedEvent, SalesStatus
 from repositories.database import DatabaseRepository
 from services.slack_service import SlackService
+from services.aweber_service import build_abandon_subscriber, build_order_subscriber
 from services.redtrack_conversion_service import (
     REDTRACK_CONVERSION_TYPE,
     build_conversion_row,
@@ -40,6 +41,7 @@ class EventProcessor:
         zapier_webhook_enabled: bool = True,
         redtrack_send_from: Optional[str] = None,
         redtrack_product_ids: Optional[frozenset[str]] = None,
+        aweber_enabled: bool = False,
     ):
         """
         Inicializa o processador.
@@ -59,12 +61,16 @@ class EventProcessor:
             redtrack_product_ids (Optional[frozenset[str]]): products.id
                 liberados pro envio (fase de testes). None/vazio = todos os
                 produtos de internal_aff_ids.
+            aweber_enabled (bool): Se True, enfileira leads da PagAmerican
+                (vendas e abandonos) pro AWeber. Desligado por padrão pelo
+                mesmo motivo do RedTrack: só o worker liga (via config).
         """
         self.db = db_repo
         self.slack = slack_service
         self.zapier_webhook_enabled = zapier_webhook_enabled
         self.redtrack_send_from = redtrack_send_from or None
         self.redtrack_product_ids = redtrack_product_ids or None
+        self.aweber_enabled = aweber_enabled
 
     def _enqueue_zapier_webhook(self, payload: dict, context: str) -> None:
         """
@@ -82,6 +88,34 @@ class EventProcessor:
                 logger.warning(f"Lead NÃO enfileirado pro Zapier ({context})")
         except Exception:
             logger.exception(f"Falha ao enfileirar webhook Zapier ({context})")
+
+    def _enqueue_aweber_lead(
+        self, lead_type: str, product_id, subscriber: Optional[dict], context: str
+    ) -> None:
+        """
+        Enfileira o lead na lista do AWeber do produto (New Order ou carrinho
+        abandonado, conforme o lead_type). Produto fora de aweber_product_lists
+        não manda lead. Igual ao Zapier, nunca deixa uma falha aqui derrubar o
+        processamento do evento/carrinho.
+        """
+        if not subscriber:
+            logger.info(f"Lead sem email válido, não enfileirado pro AWeber ({context})")
+            return
+        try:
+            lists = self.db.get_aweber_list_ids(product_id) if product_id else None
+            if not lists:
+                return
+            list_id = (
+                lists["abandon_list_id"]
+                if lead_type == "abandon"
+                else lists["neworder_list_id"]
+            )
+            if self.db.enqueue_aweber_lead(lead_type, list_id, subscriber):
+                logger.info(f"Lead enfileirado pro AWeber | lead_type={lead_type} | {context}")
+            else:
+                logger.warning(f"Lead NÃO enfileirado pro AWeber ({context})")
+        except Exception:
+            logger.exception(f"Falha ao enfileirar lead AWeber ({context})")
 
     def enqueue_redtrack_conversion(
         self, event: NormalizedEvent, event_id: Optional[str] = None
@@ -235,7 +269,21 @@ class EventProcessor:
                     context=f"order {order_id}",
                 )
 
-            # 6. Purchase pro RedTrack (só front, só afiliado interno)
+            # 6. Lead pro AWeber: só venda PagAmerican ao vivo, nunca teste
+            if (
+                self.aweber_enabled
+                and not event.is_test
+                and event.action_type == ActionType.NEWORDER
+                and self._network_value(event.network) == NetworkType.PAGAMERICAN.value
+            ):
+                self._enqueue_aweber_lead(
+                    "neworder",
+                    event.product_id,
+                    build_order_subscriber(event),
+                    f"order {order_id}",
+                )
+
+            # 7. Purchase pro RedTrack (só front, só afiliado interno)
             event_id = result.get("id") if isinstance(result, dict) else None
             self.enqueue_redtrack_conversion(event, event_id)
 
@@ -584,6 +632,17 @@ class EventProcessor:
                 self._enqueue_zapier_webhook(
                     build_abandoned_cart_payload(cart_data, product_name=product_name),
                     context=f"abandon {customer_email}",
+                )
+
+            if result and self.aweber_enabled:
+                checkout_info = (
+                    self.db.get_checkout_by_code(offer_code) if offer_code else None
+                )
+                self._enqueue_aweber_lead(
+                    "abandon",
+                    checkout_info.product_id if checkout_info else None,
+                    build_abandon_subscriber(cart_data),
+                    f"abandon {customer_email}",
                 )
 
             return bool(result)
