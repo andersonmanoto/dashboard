@@ -42,15 +42,13 @@ _TRACKING_MACROS = (
 # PagAmerican só aceita clickid — não usa aff_id nem os demais macros da BuyGoods.
 _PAGAMERICAN_TRACKING_PARAMS = "?clickid={clickid}"
 
-# O link de afiliado da JVZoo (https://www.jvzoo.com/b/{vendor_id}/{product_id}/{id_afiliado})
-# já leva o ID de afiliado embutido no path -- não tem "aff_id" nem os macros
-# da BuyGoods pra anexar. `tid` é o mesmo nome do placeholder que a JVZoo
-# devolve no Affiliate Postback (ver PayloadNormalizer._normalize_jvzoo),
+# JVZoo: o aff_id do payload vai como `aid` (nome do parâmetro de afiliado
+# deles), sem os macros da BuyGoods. `tid` é o mesmo nome do placeholder que
+# a JVZoo devolve no Affiliate Postback (ver PayloadNormalizer._normalize_jvzoo),
 # então usamos ele aqui pra fechar o loop: RedTrack substitui {clickid} no
 # clique, a JVZoo repassa esse valor de volta no postback como `tid`.
-# NÃO validado ainda contra um clique real -- confirmar que a JVZoo aceita
-# `?tid=` num link de afiliado assim que testarmos.
-_JVZOO_TRACKING_PARAMS = "?tid={clickid}"
+# Formato: https://www.jvzoo.com/b/118423/453109/99?aid=3636247&tid={clickid}
+_JVZOO_TRACKING_PARAMS = "&tid={clickid}"
 
 
 def _build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
@@ -58,7 +56,7 @@ def _build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
     if plataforma_lower == "pagamerican":
         return f"{checkout_url}{_PAGAMERICAN_TRACKING_PARAMS}"
     if plataforma_lower == "jvzoo":
-        return f"{checkout_url}{_JVZOO_TRACKING_PARAMS}"
+        return f"{checkout_url}?aid={aff_id}{_JVZOO_TRACKING_PARAMS}"
     return f"{checkout_url}&aff_id={aff_id}{_TRACKING_MACROS}"
 
 
