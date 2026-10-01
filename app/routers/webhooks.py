@@ -159,12 +159,25 @@ async def webhook_pagamerican(
 
 def _jvzoo_cverify(payload: dict, secret_key: str) -> str:
     """
-    Calcula o cverify do JVZIPN v2: SHA-1 de
-    "paykey|customer_email|product_name|transaction_type|date|" + secret,
-    primeiros 8 caracteres em maiúsculo. Os campos entram exatamente como
-    vieram no POST (sem reformatar a data).
+    Calcula o cverify do JVZIPN (SHA-1, primeiros 8 caracteres em maiúsculo).
+
+    - v1 (tem `ctransreceipt` -- formato do Affiliate IPN): valores de TODOS
+      os campos exceto `cverify`, em ordem alfabética do nome, cada um
+      seguido de "|", + secret.
+    - v2: "paykey|customer_email|product_name|transaction_type|date|" + secret.
+
+    Os campos entram exatamente como vieram no POST (sem reformatar a data).
     """
-    fields = ("paykey", "customer_email", "product_name", "transaction_type", "date")
+    if "ctransreceipt" in payload:
+        fields = sorted(k for k in payload if k != "cverify")
+    else:
+        fields = (
+            "paykey",
+            "customer_email",
+            "product_name",
+            "transaction_type",
+            "date",
+        )
     raw = "".join(f"{payload.get(f, '')}|" for f in fields) + secret_key
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8].upper()
 
@@ -212,11 +225,12 @@ async def webhook_jvzoo_ipn(
     auth: None = Depends(verify_secret_token),
 ) -> dict:
     """
-    Recebe o JVZIPN v2 da JVZoo (vendor).
+    Recebe o JVZIPN da JVZoo (POST form-urlencoded).
 
-    POST form-urlencoded configurado em cada produto (Advanced Settings →
-    JVZIPN V2 URL). É o que dispara nas vendas dos nossos produtos -- o S2S
-    Postback (GET abaixo) é da área de afiliado e não dispara pra vendor.
+    Dois formatos chegam aqui: o Affiliate IPN (formato v1, configurado na
+    aba Integrations do produto, na área de afiliado -- nosso caso, somos
+    afiliados com aid=3636247) e o JVZIPN v2 de vendor (Advanced Settings do
+    produto). `_jvzoo_cverify` e o normalizer detectam o formato.
     A JVZoo NÃO faz retry: se a gente não responder 200, o evento se perde
     (só recupera via suporte deles ou API REST).
     """

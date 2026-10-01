@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -65,6 +66,7 @@ class PayloadNormalizer:
             or payload.get("order_id")
             or payload.get("orderId")
             or payload.get("transaction_id")
+            or payload.get("ctransreceipt")
         )
         return str(order_id) if order_id else None
 
@@ -434,20 +436,54 @@ class PayloadNormalizer:
 
     # ========== JVZOO ==========
 
-    # Dois formatos chegam aqui (ver rotas em app/routers/webhooks.py):
-    # - JVZIPN v2 (POST form, vendor): o que dispara nas vendas dos nossos
-    #   produtos. Campos `total`, `customer_first_name`/`last_name`, `date`,
-    #   `transactionPayouts` (JSON string com o split vendor/afiliado/JVZoo).
+    # Três formatos chegam aqui (ver rotas em app/routers/webhooks.py):
+    # - JVZIPN v1 (POST form, Affiliate IPN): campos `c*` (ctransreceipt,
+    #   ctransamount em centavos, ctranstime em epoch...). Traduzido pros
+    #   nomes do v2 em `_jvzoo_v1_to_v2` antes de normalizar.
+    # - JVZIPN v2 (POST form, vendor): `total`, `customer_first_name`/
+    #   `last_name`, `date`, `transactionPayouts` (JSON string com o split
+    #   vendor/afiliado/JVZoo). RFND cobre refund E chargeback.
     # - S2S Postback (GET, afiliado): macros tipo `transaction_amount`,
     #   `customer_name`, `affiliate_amount`, `sub_id1..4`.
-    # RFND do IPN v2 cobre refund E chargeback (a JVZoo não diferencia).
     _JVZOO_TRANSACTION_ACTION_MAP = {
         "SALE": ActionType.NEWORDER,
         "BILL": ActionType.REBILL,
         "RFND": ActionType.REFUND,
+        "CGBK": ActionType.CHARGEBACK,  # só no v1
     }
 
-    def _normalize_jvzoo(self, payload: dict, order_id: str) -> NormalizedEvent:
+    # v1 -> v2 (tabela "Migrating from v1" da doc do JVZIPN v2).
+    _JVZOO_V1_FIELD_MAP = {
+        "cproditem": "product_id",
+        "cprodtitle": "product_name",
+        "cprodtype": "product_type",
+        "ctransaction": "transaction_type",
+        "ctransreceipt": "transaction_id",
+        "ctranspaymentmethod": "payment_method",
+        "ctransvendor": "vendor_id",
+        "ctransaffiliate": "affiliate_id",
+        "caffitid": "tid",
+        "cvendthru": "other_params",
+        "ccustemail": "customer_email",
+        "ccustname": "customer_name",
+    }
+
+    def _jvzoo_v1_to_v2(self, payload: dict) -> dict:
+        """
+        Traduz um payload JVZIPN v1 pros nomes de campo do v2. Segundo a doc,
+        `ctransamount` vem em centavos e `ctranstime` em Unix epoch -- ambos
+        convertidos (data em UTC, formato "YYYY-MM-DD HH:MM:SS").
+        """
+        data = {v2: payload.get(v1) for v1, v2 in self._JVZOO_V1_FIELD_MAP.items()}
+        if payload.get("ctransamount"):
+            data["total"] = safe_float(payload["ctransamount"]) / 100
+        if payload.get("ctranstime"):
+            data["date"] = datetime.fromtimestamp(
+                int(payload["ctranstime"]), tz=timezone.utc
+            ).strftime("%Y-%m-%d %H:%M:%S")
+        return data
+
+    def _normalize_jvzoo(self, raw_payload: dict, order_id: str) -> NormalizedEvent:
         """
         Aplica regras de mapeamento específicas da JVZoo (IPN v2 ou postback S2S).
 
@@ -461,6 +497,11 @@ class PayloadNormalizer:
         - Comissão do afiliado e taxa da JVZoo vêm do `transactionPayouts`
           (payout_type AFFILIATES / JVZOO) no IPN v2.
         """
+        payload = (
+            self._jvzoo_v1_to_v2(raw_payload)
+            if "ctransreceipt" in raw_payload
+            else raw_payload
+        )
         transaction_type = str(payload.get("transaction_type", "")).upper()
         action_type = self._JVZOO_TRANSACTION_ACTION_MAP.get(transaction_type)
         if action_type is None:
@@ -542,7 +583,7 @@ class PayloadNormalizer:
                 zip=payload.get("delivery_postal_code"),
                 country=payload.get("delivery_country"),
             ),
-            payload=payload,
+            payload=raw_payload,
         )
 
     def _parse_jvzoo_payouts(self, raw: Any) -> dict[str, float]:
