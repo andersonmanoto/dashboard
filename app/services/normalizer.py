@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from loguru import logger
@@ -372,7 +373,10 @@ class PayloadNormalizer:
             external_affiliate_id = "0"
             external_affiliate_name = "Tiger Offers"
 
-        if action_type == ActionType.REFUND and refund.get("amountRefunded") is not None:
+        if (
+            action_type == ActionType.REFUND
+            and refund.get("amountRefunded") is not None
+        ):
             # `refund.amountRefunded` já vem em dólares (não em centavos como
             # `amounts`/`commission`) e é o valor efetivamente devolvido —
             # mais preciso que `amounts.totalInCents` pra refunds parciais.
@@ -430,35 +434,32 @@ class PayloadNormalizer:
 
     # ========== JVZOO ==========
 
-    # Postback S2S baseado em macros na query string (GET) -- a URL é
-    # montada manualmente no painel com placeholders tipo {transaction_id},
-    # substituídos pela plataforma antes do disparo (ver comentário na rota
-    # em app/routers/webhooks.py). Só SALE e RFND são documentados na tela
-    # de configuração; qualquer outro valor cai em ValueError p/ triagem
-    # até confirmarmos o que mais pode vir (ex: chargeback).
+    # Dois formatos chegam aqui (ver rotas em app/routers/webhooks.py):
+    # - JVZIPN v2 (POST form, vendor): o que dispara nas vendas dos nossos
+    #   produtos. Campos `total`, `customer_first_name`/`last_name`, `date`,
+    #   `transactionPayouts` (JSON string com o split vendor/afiliado/JVZoo).
+    # - S2S Postback (GET, afiliado): macros tipo `transaction_amount`,
+    #   `customer_name`, `affiliate_amount`, `sub_id1..4`.
+    # RFND do IPN v2 cobre refund E chargeback (a JVZoo não diferencia).
     _JVZOO_TRANSACTION_ACTION_MAP = {
         "SALE": ActionType.NEWORDER,
+        "BILL": ActionType.REBILL,
         "RFND": ActionType.REFUND,
     }
 
     def _normalize_jvzoo(self, payload: dict, order_id: str) -> NormalizedEvent:
         """
-        Aplica regras de mapeamento específicas do postback JVZoo.
+        Aplica regras de mapeamento específicas da JVZoo (IPN v2 ou postback S2S).
 
-        Diferenças-chave em relação às demais redes:
         - `transaction_id` é o identificador único (usado como order_id via
-          `_extract_order_id`); não há campo "order_id" nativo.
-        - Sem placeholder de data documentado -- usa o horário de
-          recebimento do webhook (`created_at` default do NormalizedEvent).
-        - Não há sinalização explícita de upsell nos placeholders
-          disponíveis -> assume front (is_upsell=False) até confirmarmos
-          algum campo equivalente num postback real.
+          `_extract_order_id`); rebills vêm com sufixo -B001, -B002...
+        - Funil: cada produto do funil dispara seu próprio IPN, sem funnel_id
+          -- assume front (is_upsell=False); a etapa sai do `product_id`
+          cadastrado em `checkouts` (via `_enrich_checkout`).
         - `affiliate_id` ausente/"0" indica tráfego próprio, mantendo o
           fallback "Tiger Offers" usado nas outras redes.
-        - `sub_id1`..`sub_id4` mapeados pra sub_tiger_2..5 (analogia direta
-          aos subids numerados de BuyGoods/DigiStore); `sub_id5`, os utm_*
-          e os click IDs de plataforma (gclid/fbclid/...) ficam só no
-          `payload` bruto por enquanto, sem slot dedicado no schema.
+        - Comissão do afiliado e taxa da JVZoo vêm do `transactionPayouts`
+          (payout_type AFFILIATES / JVZOO) no IPN v2.
         """
         transaction_type = str(payload.get("transaction_type", "")).upper()
         action_type = self._JVZOO_TRANSACTION_ACTION_MAP.get(transaction_type)
@@ -470,18 +471,47 @@ class PayloadNormalizer:
         affiliate_id = payload.get("affiliate_id") or "0"
         has_affiliate = str(affiliate_id) not in ("0", "")
 
+        payouts = self._parse_jvzoo_payouts(payload.get("transactionPayouts"))
+        sale_total = safe_float(
+            payload.get("total") or payload.get("transaction_amount")
+        )
+        aff_commission = (
+            payouts["AFFILIATES"]
+            if "AFFILIATES" in payouts
+            else safe_float(payload.get("affiliate_amount"))
+        )
+        merchant_commission = payouts.get("JVZOO", 0.0)
+        merchant_rate = (
+            round(merchant_commission / sale_total, 4) if sale_total > 0 else 0.0
+        )
+
+        event_date, event_time = parse_date(payload.get("date", ""), NetworkType.JVZOO)
+
         return NormalizedEvent(
             network=NetworkType.JVZOO,
             order_id=order_id,
             action_type=action_type,
+            event_date=event_date,
+            event_time=event_time,
             # Cliente
-            customer_name=payload.get("customer_name"),
+            customer_name=self._build_full_name(
+                payload.get("customer_name"),
+                payload.get("customer_first_name"),
+                payload.get("customer_last_name"),
+            ),
             customer_email=payload.get("customer_email"),
-            # Financeiro
-            currency=payload.get("currency"),
-            sale_total=safe_float(payload.get("transaction_amount")),
-            aff_commission=safe_float(payload.get("affiliate_amount")),
-            # Tracking
+            customer_phone=payload.get("customer_phone") or None,
+            # Financeiro (IPN v2 manda em dólares, sem campo de moeda)
+            currency=payload.get("currency") or ("USD" if "total" in payload else None),
+            sale_total=sale_total,
+            aff_commission=aff_commission,
+            merchant_commission=merchant_commission,
+            merchant_commission_rate=merchant_rate,
+            tax_amount=safe_float(payload.get("tax_total")),
+            shipping_cost=safe_float(payload.get("shipping_fee")),
+            # Pagamento
+            payment_method=payload.get("payment_method"),
+            # Tracking (tid = {clickid} do RedTrack, ver redtrack_offer_service)
             click_id=payload.get("tid"),
             sub_tiger_2=payload.get("sub_id1"),
             sub_tiger_3=payload.get("sub_id2"),
@@ -494,18 +524,48 @@ class PayloadNormalizer:
             order_details=OrderDetails(
                 external_product_id=payload.get("product_id"),
                 # `product_id` também serve de checkout_code -- é o único
-                # identificador de item de funil que a JVZoo expõe no
-                # postback (sem account_id, diferente da BuyGoods). Precisa
-                # estar cadastrado em `checkouts` pra `_enrich_checkout`
-                # casar por código exato em vez de cair no fallback por
-                # nome de produto.
+                # identificador de item de funil que a JVZoo expõe (sem
+                # account_id, diferente da BuyGoods). Precisa estar
+                # cadastrado em `checkouts` pra `_enrich_checkout` casar por
+                # código exato em vez de cair no fallback por nome de produto.
                 external_checkout_code=payload.get("product_id"),
                 external_affiliate_id=affiliate_id if has_affiliate else "0",
-                external_affiliate_name="Tiger Offers" if not has_affiliate else None,
+                external_affiliate_name=(
+                    payload.get("affiliate_name") if has_affiliate else "Tiger Offers"
+                ),
                 product_name=payload.get("product_name"),
+            ),
+            shipping_details=ShippingDetails(
+                address=payload.get("delivery_address_line_1"),
+                city=payload.get("delivery_city"),
+                state=payload.get("delivery_region"),
+                zip=payload.get("delivery_postal_code"),
+                country=payload.get("delivery_country"),
             ),
             payload=payload,
         )
+
+    def _parse_jvzoo_payouts(self, raw: Any) -> dict[str, float]:
+        """
+        Soma o `transactionPayouts` do IPN v2 por payout_type
+        (VENDOR / AFFILIATES / JVZOO). Vem como string JSON dentro do form
+        e pode estar ausente.
+        """
+        if not raw:
+            return {}
+        try:
+            payouts = json.loads(raw) if isinstance(raw, str) else raw
+        except json.JSONDecodeError:
+            logger.warning(f"JVZoo: transactionPayouts inválido: {raw!r}")
+            return {}
+
+        totals: dict[str, float] = {}
+        for payout in payouts or []:
+            ptype = str(payout.get("payout_type", "")).upper()
+            totals[ptype] = totals.get(ptype, 0.0) + safe_float(
+                payout.get("payee_amount")
+            )
+        return totals
 
     def _sanitize_affiliate_name(self, raw_name: str | None) -> str | None:
         """

@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status, BackgroundTasks
 from starlette.requests import ClientDisconnect
@@ -155,6 +157,112 @@ async def webhook_pagamerican(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _jvzoo_cverify(payload: dict, secret_key: str) -> str:
+    """
+    Calcula o cverify do JVZIPN v2: SHA-1 de
+    "paykey|customer_email|product_name|transaction_type|date|" + secret,
+    primeiros 8 caracteres em maiúsculo. Os campos entram exatamente como
+    vieram no POST (sem reformatar a data).
+    """
+    fields = ("paykey", "customer_email", "product_name", "transaction_type", "date")
+    raw = "".join(f"{payload.get(f, '')}|" for f in fields) + secret_key
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8].upper()
+
+
+async def _queue_jvzoo(payload: dict, request: Request, settings: Settings) -> dict:
+    order_id = payload.get("transaction_id")
+    inbox_id = None
+
+    # 1. Tenta salvar na Inbox
+    try:
+        db_async = await get_inbox_supabase(settings)
+        response = (
+            await db_async.table("webhook_inbox")
+            .insert(
+                {
+                    "network": NetworkType.JVZOO.value,
+                    "payload": payload,
+                    "status": "pending",
+                }
+            )
+            .execute()
+        )
+        inbox_id = response.data[0]["id"] if response.data else None
+    except Exception as db_err:
+        logger.warning(
+            f"Falha ao salvar na inbox (Supabase indisponível). Seguindo para o Redis... Erro: {db_err}"
+        )
+
+    # 2. Enfileira no Redis GARANTIDAMENTE
+    await request.app.state.redis_pool.enqueue_job(
+        "task_process_webhook",
+        network_str=NetworkType.JVZOO.value,
+        payload=payload,
+        inbox_id=inbox_id,
+    )
+
+    return {"status": "queued", "id": order_id, "inbox_id": inbox_id}
+
+
+@router.post("/jvzoo/{secret_token}")
+async def webhook_jvzoo_ipn(
+    secret_token: str,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    auth: None = Depends(verify_secret_token),
+) -> dict:
+    """
+    Recebe o JVZIPN v2 da JVZoo (vendor).
+
+    POST form-urlencoded configurado em cada produto (Advanced Settings →
+    JVZIPN V2 URL). É o que dispara nas vendas dos nossos produtos -- o S2S
+    Postback (GET abaixo) é da área de afiliado e não dispara pra vendor.
+    A JVZoo NÃO faz retry: se a gente não responder 200, o evento se perde
+    (só recupera via suporte deles ou API REST).
+    """
+    if not settings.jvzoo_secret_key:
+        logger.critical("JVZOO_SECRET_KEY não configurado!")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Config Error")
+
+    try:
+        payload = await extract_payload(request)
+    except ClientDisconnect:
+        logger.warning("JVZoo IPN: Cliente desconectou.")
+        return {"status": "incomplete", "message": "Client disconnected"}
+
+    expected = _jvzoo_cverify(payload, settings.jvzoo_secret_key)
+    if not hmac.compare_digest(expected, str(payload.get("cverify", ""))):
+        # A JVZoo não faz retry -- guarda o payload como `rejected` (fora do
+        # fluxo de reprocessamento, que só pega `pending`) pra não perder a
+        # venda se o problema for do nosso lado (ex: secret key errada).
+        logger.warning(
+            f"JVZoo IPN: cverify inválido (transaction_id={payload.get('transaction_id')}) "
+            f"payload={payload}"
+        )
+        try:
+            db_async = await get_inbox_supabase(settings)
+            await (
+                db_async.table("webhook_inbox")
+                .insert(
+                    {
+                        "network": NetworkType.JVZOO.value,
+                        "payload": payload,
+                        "status": "rejected",
+                    }
+                )
+                .execute()
+            )
+        except Exception as db_err:
+            logger.warning(f"JVZoo IPN: falha ao salvar payload rejeitado: {db_err}")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Verification failed")
+
+    try:
+        return await _queue_jvzoo(payload, request, settings)
+    except Exception as e:
+        logger.exception(f"Erro JVZoo IPN: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @router.get("/jvzoo/{secret_token}")
 async def webhook_jvzoo(
     secret_token: str,
@@ -163,49 +271,15 @@ async def webhook_jvzoo(
     auth: None = Depends(verify_secret_token),
 ) -> dict:
     """
-    Recebe Postback S2S da JVZoo.
+    Recebe Postback S2S da JVZoo (área de afiliado).
 
-    Diferente do IPN "cru" (POST form-urlencoded direto da JVZoo), esse
-    postback é baseado em macros na query string (GET) -- a URL é montada
-    manualmente no painel deles com placeholders tipo {transaction_id},
-    que a plataforma substitui antes de disparar. Segue o mesmo padrão da
-    DigiStore24 no nosso código (GET + query_params).
+    Baseado em macros na query string (GET) -- a URL é montada manualmente
+    no painel deles com placeholders tipo {transaction_id}, que a plataforma
+    substitui antes de disparar. Só dispara quando somos AFILIADO da venda;
+    as vendas dos nossos produtos chegam pelo JVZIPN v2 (POST acima).
     """
     try:
-        payload = dict(request.query_params)
-        order_id = payload.get("transaction_id")
-        inbox_id = None
-
-        # 1. Tenta salvar na Inbox
-        try:
-            db_async = await get_inbox_supabase(settings)
-            response = (
-                await db_async.table("webhook_inbox")
-                .insert(
-                    {
-                        "network": NetworkType.JVZOO.value,
-                        "payload": payload,
-                        "status": "pending",
-                    }
-                )
-                .execute()
-            )
-            inbox_id = response.data[0]["id"] if response.data else None
-        except Exception as db_err:
-            logger.warning(
-                f"Falha ao salvar na inbox (Supabase indisponível). Seguindo para o Redis... Erro: {db_err}"
-            )
-
-        # 2. Enfileira no Redis GARANTIDAMENTE
-        await request.app.state.redis_pool.enqueue_job(
-            "task_process_webhook",
-            network_str=NetworkType.JVZOO.value,
-            payload=payload,
-            inbox_id=inbox_id,
-        )
-
-        return {"status": "queued", "id": order_id, "inbox_id": inbox_id}
-
+        return await _queue_jvzoo(dict(request.query_params), request, settings)
     except Exception as e:
         logger.exception(f"Erro JVZoo: {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)

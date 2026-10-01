@@ -27,7 +27,7 @@ def parse_date(date_str: str, network: NetworkType) -> tuple[str | None, str | N
     try:
         dt = None
 
-        if network in (NetworkType.BUYGOODS, NetworkType.PAGAMERICAN):
+        if network in (NetworkType.BUYGOODS, NetworkType.PAGAMERICAN, NetworkType.JVZOO):
             dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
         elif network == NetworkType.DIGISTORE24:
             dt = datetime.fromisoformat(date_str)
