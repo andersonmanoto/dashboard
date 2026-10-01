@@ -292,8 +292,15 @@ async def webhook_jvzoo(
     substitui antes de disparar. Só dispara quando somos AFILIADO da venda;
     as vendas dos nossos produtos chegam pelo JVZIPN v2 (POST acima).
     """
+    payload = dict(request.query_params)
+    # Sem transaction_id não é postback (ex: URL aberta no browser ou ping de
+    # validação da JVZoo) -- responde 200 sem enfileirar pra não sujar a inbox.
+    if not payload.get("transaction_id"):
+        logger.info(f"JVZoo postback sem transaction_id ignorado: {payload}")
+        return {"status": "ignored", "reason": "missing transaction_id"}
+
     try:
-        return await _queue_jvzoo(dict(request.query_params), request, settings)
+        return await _queue_jvzoo(payload, request, settings)
     except Exception as e:
         logger.exception(f"Erro JVZoo: {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
