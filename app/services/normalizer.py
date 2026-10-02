@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import parse_qs
 
 from loguru import logger
 from models.enums import DATE_FIELD_MAPPING, ActionType, NetworkType
@@ -495,7 +496,7 @@ class PayloadNormalizer:
         - `affiliate_id` ausente/"0" indica tráfego próprio, mantendo o
           fallback "Tiger Offers" usado nas outras redes.
         - Comissão do afiliado e taxa da JVZoo vêm do `transactionPayouts`
-          (payout_type AFFILIATES / JVZOO) no IPN v2.
+          (payout_type AFFILIATES / JVZOO DOT COM) no IPN v2.
         """
         payload = (
             self._jvzoo_v1_to_v2(raw_payload)
@@ -521,7 +522,10 @@ class PayloadNormalizer:
             if "AFFILIATES" in payouts
             else safe_float(payload.get("affiliate_amount"))
         )
-        merchant_commission = payouts.get("JVZOO", 0.0)
+        # A taxa da JVZoo vem como payout_type "JVZOO DOT COM".
+        merchant_commission = sum(
+            v for k, v in payouts.items() if k.startswith("JVZOO")
+        )
         merchant_rate = (
             round(merchant_commission / sale_total, 4) if sale_total > 0 else 0.0
         )
@@ -553,7 +557,7 @@ class PayloadNormalizer:
             # Pagamento
             payment_method=payload.get("payment_method"),
             # Tracking (tid = {clickid} do RedTrack, ver redtrack_offer_service)
-            click_id=payload.get("tid"),
+            click_id=self._jvzoo_click_id(payload),
             sub_tiger_2=payload.get("sub_id1"),
             sub_tiger_3=payload.get("sub_id2"),
             sub_tiger_4=payload.get("sub_id3"),
@@ -585,6 +589,17 @@ class PayloadNormalizer:
             ),
             payload=raw_payload,
         )
+
+    def _jvzoo_click_id(self, payload: dict) -> str | None:
+        """
+        No IPN o `tid` de cima costuma vir vazio; o clickid do RedTrack chega
+        dentro de `other_params` (query string do link: "aid=...&tid=...").
+        """
+        tid = payload.get("tid")
+        if tid:
+            return tid
+        params = parse_qs(str(payload.get("other_params") or ""))
+        return (params.get("tid") or [None])[0]
 
     def _parse_jvzoo_payouts(self, raw: Any) -> dict[str, float]:
         """

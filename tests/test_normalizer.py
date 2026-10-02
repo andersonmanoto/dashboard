@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -510,3 +511,28 @@ def test_normalize_jvzoo_unknown_transaction(normalizer):
     payload = {**PAYLOAD_JVZOO_SALE, "transaction_type": "CGBK"}
     with pytest.raises(ValueError):
         normalizer.normalize(NetworkType.JVZOO, payload)
+
+
+def test_normalize_jvzoo_ipn_tid_in_other_params_and_fee(normalizer):
+    # IPN v2 real: `tid` vazio no topo, clickid só dentro de `other_params`;
+    # taxa da JVZoo com payout_type "JVZOO DOT COM".
+    payload = {
+        **PAYLOAD_JVZOO_SALE,
+        "tid": "",
+        "total": "294.00",
+        "other_params": "aid=3636247&tid=6abed25ad62bb58889370a8d&orderform_view_id=13384683",
+        "transactionPayouts": json.dumps(
+            [
+                {"payee_amount": "294.00", "payout_type": "VENDOR"},
+                {"payee_amount": "23.05", "payout_type": "JVZOO DOT COM"},
+                {"payee_amount": "240.00", "payout_type": "AFFILIATES"},
+                {"payee_amount": "294.00", "payout_type": "JV"},
+            ]
+        ),
+    }
+    event = normalizer.normalize(NetworkType.JVZOO, payload)
+
+    assert event.click_id == "6abed25ad62bb58889370a8d"
+    assert event.aff_commission == 240.0
+    assert event.merchant_commission == 23.05
+    assert event.merchant_commission_rate == round(23.05 / 294, 4)
