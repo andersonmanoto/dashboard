@@ -134,21 +134,21 @@ def test_processor_nao_enfileira(send_from, internal, overrides, funnel_stage):
     assert db.enqueued == []
 
 
-GLYCOMELT_ID = "d30ca6b3-fd85-4327-a8ba-8a5798bfc7b4"
+SODAHORSEPEAK_ID = "f0494709-01fb-4d0e-8e8c-3e200f25b13c"
 
 
-def test_processor_so_produtos_liberados():
-    liberado = _event()
-    liberado.product_id = GLYCOMELT_ID
+def test_processor_pula_produtos_excluidos():
+    excluido = _event()
+    excluido.product_id = SODAHORSEPEAK_ID
     outro = _event()
 
     db = FakeDB(internal=True)
     processor = EventProcessor(
         db,
         redtrack_send_from="2026-09-28",
-        redtrack_product_ids=frozenset({GLYCOMELT_ID}),
+        redtrack_excluded_product_ids=frozenset({SODAHORSEPEAK_ID}),
     )
-    processor.enqueue_redtrack_conversion(liberado, None)
+    processor.enqueue_redtrack_conversion(excluido, None)
     processor.enqueue_redtrack_conversion(outro, None)
 
     assert len(db.enqueued) == 1

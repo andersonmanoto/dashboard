@@ -87,16 +87,16 @@ class Settings(BaseSettings):
     # Deve ser o dia em que a ponte do terceiro for desligada -- antes disso
     # os dois enviariam o mesmo Purchase (duplicado no RedTrack).
     redtrack_conversions_send_from: str = ""
-    # Lista de products.id (separados por vírgula) liberados pro envio de
-    # conversões -- fase de testes, ex: só GlycoMelt. Vazio = sem restrição
-    # (todo produto de internal_aff_ids).
-    redtrack_conversions_product_ids: str = ""
+    # Lista de products.id (separados por vírgula) que NÃO enviam conversões
+    # -- exceção, ex: produto que ainda não migrou. Vazio = todo produto de
+    # internal_aff_ids envia.
+    redtrack_conversions_excluded_product_ids: str = ""
 
     @property
-    def redtrack_conversions_product_id_set(self) -> frozenset[str]:
+    def redtrack_conversions_excluded_product_id_set(self) -> frozenset[str]:
         return frozenset(
             p.strip()
-            for p in self.redtrack_conversions_product_ids.split(",")
+            for p in self.redtrack_conversions_excluded_product_ids.split(",")
             if p.strip()
         )
 

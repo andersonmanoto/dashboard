@@ -40,7 +40,7 @@ class EventProcessor:
         slack_service: Optional[SlackService] = None,
         zapier_webhook_enabled: bool = True,
         redtrack_send_from: Optional[str] = None,
-        redtrack_product_ids: Optional[frozenset[str]] = None,
+        redtrack_excluded_product_ids: Optional[frozenset[str]] = None,
         aweber_enabled: bool = False,
     ):
         """
@@ -58,9 +58,9 @@ class EventProcessor:
                 enfileirar conversões pro RedTrack. None/vazio = desligado, que
                 é o padrão de propósito: só o worker liga (via config), então
                 scripts de retro/backfill nunca mandam venda antiga pro RedTrack.
-            redtrack_product_ids (Optional[frozenset[str]]): products.id
-                liberados pro envio (fase de testes). None/vazio = todos os
-                produtos de internal_aff_ids.
+            redtrack_excluded_product_ids (Optional[frozenset[str]]):
+                products.id que não enviam conversões. None/vazio = todos os
+                produtos de internal_aff_ids enviam.
             aweber_enabled (bool): Se True, enfileira leads da PagAmerican
                 (vendas e abandonos) pro AWeber. Desligado por padrão pelo
                 mesmo motivo do RedTrack: só o worker liga (via config).
@@ -69,7 +69,7 @@ class EventProcessor:
         self.slack = slack_service
         self.zapier_webhook_enabled = zapier_webhook_enabled
         self.redtrack_send_from = redtrack_send_from or None
-        self.redtrack_product_ids = redtrack_product_ids or None
+        self.redtrack_excluded_product_ids = redtrack_excluded_product_ids or frozenset()
         self.aweber_enabled = aweber_enabled
 
     def _enqueue_zapier_webhook(self, payload: dict, context: str) -> None:
@@ -146,10 +146,7 @@ class EventProcessor:
             aff_id = event.order_details.external_affiliate_id
             if not event.product_id or not aff_id:
                 return
-            if (
-                self.redtrack_product_ids
-                and str(event.product_id) not in self.redtrack_product_ids
-            ):
+            if str(event.product_id) in self.redtrack_excluded_product_ids:
                 return
             if not self.db.is_internal_aff(event.network, event.product_id, aff_id):
                 return

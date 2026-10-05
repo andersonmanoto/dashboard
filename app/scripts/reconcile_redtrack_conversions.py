@@ -6,8 +6,8 @@ e enfileira o que ficou de fora da fila -- ex: o insert na fila falhou
 (timeout do Supabase) depois de a venda já ter sido gravada na events. Passa
 pelas mesmas regras do caminho ao vivo (EventProcessor.enqueue_redtrack_conversion):
 só Purchase de front, só par (produto, aff_id) de internal_aff_ids, só venda
-com event_date >= REDTRACK_CONVERSIONS_SEND_FROM, só produtos de
-REDTRACK_CONVERSIONS_PRODUCT_IDS (se preenchido).
+com event_date >= REDTRACK_CONVERSIONS_SEND_FROM, fora os produtos de
+REDTRACK_CONVERSIONS_EXCLUDED_PRODUCT_IDS.
 
 Idempotente: pedido que já está na fila (em qualquer status) não é tocado,
 pela chave única (network, bg_order_id, conversion_type). Pode rodar quantas
@@ -63,7 +63,7 @@ async def main() -> None:
         slack_service=None,
         zapier_webhook_enabled=False,
         redtrack_send_from=settings.redtrack_conversions_send_from,
-        redtrack_product_ids=settings.redtrack_conversions_product_id_set,
+        redtrack_excluded_product_ids=settings.redtrack_conversions_excluded_product_id_set,
     )
 
     rows = db_repo._fetch_all_paginated(
