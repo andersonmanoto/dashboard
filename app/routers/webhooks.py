@@ -359,16 +359,21 @@ async def webhook_digistore24(
 async def webhook_digistore24_abandon(
     secret_token: str,
     request: Request,
+    processor: Annotated[EventProcessor, Depends(get_event_processor)],
+    background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
+    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
     auth: None = Depends(verify_secret_token),
 ) -> PlainTextResponse:
     """
     Recebe o IPN (webhook) de carrinho abandonado da DigiStore24 -- "Custom
     forms" / "Input of contact details on order forms".
 
-    Por enquanto SÓ CAPTURA: grava o payload cru na webhook_inbox com status
-    'abandon_captured' (fora do 'pending', então o reprocess_inbox não pega) e
-    não enfileira nada. Não pode cair no /digistore24 de vendas: o normalizer
+    Sempre grava o payload cru na webhook_inbox com status 'abandon_captured'
+    (fora do 'pending', então o reprocess_inbox não pega). Só o que tem
+    order_id "CART-<n>" é carrinho abandonado (o `event` vem vazio) -- esse
+    vai pra abandoned_carts + Zapier + SlickText; o resto (ex: custom form)
+    fica só na inbox. Não pode cair no /digistore24 de vendas: o normalizer
     assume NEWORDER pra tipo desconhecido e criaria venda falsa na events.
 
     A DigiStore só considera entregue se a resposta for o texto "OK" -- sem
@@ -395,9 +400,34 @@ async def webhook_digistore24_abandon(
             .execute()
         )
         logger.info(
-            f"DigiStore abandon capturado | event={payload.get('event')} "
+            f"DigiStore abandon capturado | order_id={payload.get('order_id')} "
             f"| email={payload.get('email')}"
         )
+
+        if str(payload.get("order_id", "")).startswith("CART-"):
+            success = await processor.process_digistore24_abandon_cart(payload)
+            if not success:
+                raise HTTPException(
+                    status_code=500, detail="Error processing abandoned cart"
+                )
+
+            background_tasks.add_task(
+                process_slicktext_sync_task,
+                payload={
+                    "name": " ".join(
+                        filter(
+                            None, [payload.get("first_name"), payload.get("last_name")]
+                        )
+                    ),
+                    "phone": payload.get("phone_no", ""),
+                    "product_codename": payload.get("product_id", ""),
+                    "country": payload.get("country_code") or "US",
+                },
+                settings=settings,
+                db_repo=db_repo,
+                platform=NetworkType.DIGISTORE24.value,
+            )
+
         return PlainTextResponse("OK")
 
     except Exception as e:

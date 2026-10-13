@@ -578,6 +578,67 @@ class EventProcessor:
             )
             return False
 
+    async def process_digistore24_abandon_cart(self, payload: dict) -> bool:
+        """
+        Processa o carrinho abandonado da DigiStore24 (IPN webhook "Input of
+        contact details on order forms"; order_id vem como "CART-<n>").
+
+        Diferenças em relação à BuyGoods:
+        - Nome vem separado em `first_name`/`last_name`, telefone em
+          `phone_no`, país em `country_code` (ISO-2).
+        - `product_id` (id do produto na DigiStore) é o equivalente ao
+          `product_codename` -- mesmo valor usado como checkout_code nas
+          vendas da DigiStore (normalizer).
+        - Não manda url do checkout (`checkout_url` vem vazio). Enquanto o
+          checkout não estiver cadastrado, o Zapier sai com o nome do
+          produto que a DigiStore manda.
+        """
+        customer_email = payload.get("email", "")
+
+        try:
+            product_codename = payload.get("product_id", "")
+            customer_name = " ".join(
+                filter(None, [payload.get("first_name"), payload.get("last_name")])
+            )
+
+            location = {
+                "address": payload.get("street", ""),
+                "city": payload.get("city", ""),
+                "state": payload.get("state", ""),
+                "country": payload.get("country_code", ""),
+            }
+
+            cart_data = {
+                "action_type": "abandon",
+                "customer_name": customer_name,
+                "customer_email": customer_email,
+                "customer_phone": payload.get("phone_no", ""),
+                "ipaddress": "",
+                "product_codename": product_codename,
+                "location": location,
+                "payload": payload,
+                "is_recovered": False,
+            }
+
+            result = await asyncio.to_thread(self.db.insert_abandoned_cart, cart_data)
+
+            if result and self.zapier_webhook_enabled:
+                product_name = self._resolve_product_name_by_codename(
+                    product_codename
+                ) or payload.get("product_name")
+                self._enqueue_zapier_webhook(
+                    build_abandoned_cart_payload(cart_data, product_name=product_name),
+                    context=f"abandon {customer_email}",
+                )
+
+            return bool(result)
+
+        except Exception as e:
+            logger.exception(
+                f"Erro fatal ao processar abandon cart DigiStore (Email: {customer_email}): {e}"
+            )
+            return False
+
     async def process_pagamerican_abandon_cart(self, body: dict) -> bool:
         """
         Processa o evento de checkout abandonado da PagAmerican

@@ -294,8 +294,10 @@ async def process_slicktext_sync_task(
         # (https://pay.pagamerican.app/<offerCode>, sem query string), e o
         # aff_id_sms é um ID de afiliado da BuyGoods -- concatenar
         # "&aff_id=" ali gerava link quebrado. Vai a url bruta.
-        if platform == NetworkType.PAGAMERICAN.value:
-            url_abandonada_final = checkout_url
+        # DigiStore24: aff_id_sms também é da BuyGoods; vai a url bruta, e
+        # vazia se o checkout ainda não tiver url cadastrada.
+        if platform in (NetworkType.PAGAMERICAN.value, NetworkType.DIGISTORE24.value):
+            url_abandonada_final = checkout_url or ""
         else:
             if not aff_id_sms:
                 logger.info(
