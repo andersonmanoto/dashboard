@@ -7,3 +7,6 @@ venv/
 .vscode/
 *.log
 compose.override.yaml
+# Anotações locais
+redtrack_notas.txt
+credentials/
