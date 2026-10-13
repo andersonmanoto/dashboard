@@ -2,6 +2,7 @@ import hashlib
 import hmac
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status, BackgroundTasks
+from fastapi.responses import PlainTextResponse
 from starlette.requests import ClientDisconnect
 from loguru import logger
 
@@ -351,6 +352,57 @@ async def webhook_digistore24(
 
     except Exception as e:
         logger.exception(f"Erro DigiStore: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@router.api_route("/digistore24/abandon/{secret_token}", methods=["GET", "POST"])
+async def webhook_digistore24_abandon(
+    secret_token: str,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    auth: None = Depends(verify_secret_token),
+) -> PlainTextResponse:
+    """
+    Recebe o IPN (webhook) de carrinho abandonado da DigiStore24 -- "Custom
+    forms" / "Input of contact details on order forms".
+
+    Por enquanto SÓ CAPTURA: grava o payload cru na webhook_inbox com status
+    'abandon_captured' (fora do 'pending', então o reprocess_inbox não pega) e
+    não enfileira nada. Não pode cair no /digistore24 de vendas: o normalizer
+    assume NEWORDER pra tipo desconhecido e criaria venda falsa na events.
+
+    A DigiStore só considera entregue se a resposta for o texto "OK" -- sem
+    isso ela retenta por ~10 dias.
+    """
+    try:
+        payload = dict(request.query_params)
+        if request.method == "POST":
+            try:
+                payload.update(await extract_payload(request))
+            except Exception:
+                payload["_raw_body"] = (await request.body()).decode("utf-8", "replace")
+
+        db_async = await get_inbox_supabase(settings)
+        await (
+            db_async.table("webhook_inbox")
+            .insert(
+                {
+                    "network": NetworkType.DIGISTORE24.value,
+                    "payload": payload,
+                    "status": "abandon_captured",
+                }
+            )
+            .execute()
+        )
+        logger.info(
+            f"DigiStore abandon capturado | event={payload.get('event')} "
+            f"| email={payload.get('email')}"
+        )
+        return PlainTextResponse("OK")
+
+    except Exception as e:
+        # Sem "OK" a DigiStore retenta -- melhor que perder o abandono
+        logger.exception(f"Erro DigiStore abandon: {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
