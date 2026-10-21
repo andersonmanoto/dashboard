@@ -9,6 +9,7 @@ from services.redtrack_creative_service import (
     build_event_row,
     build_cost_rows,
     is_backredirect,
+    landings_with_revenue,
     parse_landing_title,
     parse_offer_title,
 )
@@ -114,3 +115,18 @@ def test_build_cost_rows_sums_and_skips_empty():
 
     assert by_ad[""]["clicks"] == 5
     assert by_ad[""]["cost"] == 3.0
+
+
+def test_landings_with_revenue():
+    rows = [
+        # lander que vendeu: entra mesmo com criativos sem venda
+        {"landing_id": "l1", "rt_ad": "AD1", "total_revenue": 240, "cost": 30},
+        {"landing_id": "l1", "rt_ad": "AD2", "total_revenue": 0, "cost": 50},
+        # só gastou: fica de fora
+        {"landing_id": "l2", "rt_ad": "AD3", "total_revenue": 0, "cost": 80},
+        # vendeu sem custo (YouTube): entra
+        {"landing_id": "l3", "rt_ad": "SPY", "total_revenue": 260, "cost": 0},
+        # sem landing: fica de fora
+        {"landing_id": None, "rt_ad": "AD4", "total_revenue": 100, "cost": 10},
+    ]
+    assert landings_with_revenue(rows) == {"l1", "l3"}

@@ -8,6 +8,11 @@ migrations/20261021_snapshot_redtrack_por_oferta_criativo.sql):
   snapshot_daily_redtrack  update_snapshot_daily_redtrack(dia), no banco:
                            conversões da events + custo da redtrack_cost_daily
 
+Só entram landers que tiveram receita no dia (total_revenue > 0 no /report,
+com ou sem custo — YouTube vende sem custo no RedTrack): conversões e custo
+de lander sem venda nem são gravados. Dentro de uma lander que vendeu entram
+todos os criativos, inclusive os que gastaram sem vender.
+
 O RedTrack mostra o valor "atualizado" do dia (custo do Facebook vai subindo
 ao longo do dia), não venda a venda. Por isso nada aqui soma em cima do que
 já está gravado: cada coleta apaga e regrava o dia.
@@ -123,6 +128,15 @@ def build_event_row(conversion: dict, catalog: CatalogLookup) -> dict:
         "status": conversion.get("status") or None,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def landings_with_revenue(report_rows: list[dict]) -> set[str]:
+    """landing_ids com receita no dia (soma do total_revenue da lander > 0)."""
+    revenue: dict[str, float] = {}
+    for r in report_rows:
+        landing_id = r.get("landing_id") or ""
+        revenue[landing_id] = revenue.get(landing_id, 0) + (r.get("total_revenue") or 0)
+    return {landing_id for landing_id, total in revenue.items() if landing_id and total > 0}
 
 
 def build_cost_rows(
@@ -244,10 +258,12 @@ class RedTrackCreativeSync:
         conversions = await self.redtrack.get_conversions(client, d, d)
         report = await self.redtrack.get_report(client, COST_REPORT_GROUP, d, d)
 
+        landings = landings_with_revenue(report)
+        report = [r for r in report if r.get("landing_id") in landings]
         event_rows = [
             build_event_row(c, catalog)
             for c in conversions
-            if not is_backredirect(c.get("campaign"))
+            if c.get("landing_id") in landings and not is_backredirect(c.get("campaign"))
         ]
 
         campaign_ids = {r.get("campaign_id") for r in report if r.get("campaign_id")}
@@ -258,12 +274,18 @@ class RedTrackCreativeSync:
         cost_rows = build_cost_rows(report, campaign_products)
 
         await asyncio.to_thread(self.db_repo.upsert_redtrack_events, event_rows)
+        # tira o que já estava gravado de lander que não vendeu (ex: coleta
+        # antiga, sem o filtro) ou que sumiu do RedTrack
+        await asyncio.to_thread(
+            self.db_repo.delete_redtrack_events_outside_landings, d, sorted(landings)
+        )
         await asyncio.to_thread(self.db_repo.replace_redtrack_cost_daily, d, cost_rows)
         # snapshot depois dos dois: lê events + custo já gravados
         await asyncio.to_thread(self.db_repo.update_snapshot_daily_redtrack, d)
 
         summary = {
             "date": d,
+            "landings": len(landings),
             "events": len(event_rows),
             "cost_rows": len(cost_rows),
             "cost": round(sum(r["cost"] for r in cost_rows), 2),

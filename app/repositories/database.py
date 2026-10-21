@@ -1024,6 +1024,19 @@ class DatabaseRepository:
                 .execute()
             )
 
+    def delete_redtrack_events_outside_landings(
+        self, conversion_date: str, landing_ids: list[str]
+    ) -> None:
+        """Apaga as conversões do dia que não são das landers informadas."""
+        query = (
+            self.client.table("redtrack_events")
+            .delete()
+            .eq("conversion_date", conversion_date)
+        )
+        if landing_ids:
+            query = query.not_.in_("landing_id", landing_ids)
+        query.execute()
+
     def replace_redtrack_cost_daily(self, target_date: str, rows: list[dict]) -> None:
         """Substitui o dia inteiro da redtrack_cost_daily (RPC, transação única)."""
         self.client.rpc(

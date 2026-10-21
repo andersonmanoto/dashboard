@@ -92,7 +92,7 @@ create table if not exists public.snapshot_daily_redtrack (
   lead text,
   rt_ad text not null default '',
   purchases integer not null default 0,
-  total_revenue numeric not null default 0,  -- payout de todas as conversões (front + upsells)
+  total_revenue numeric not null default 0,  -- payout das vendas de front (Purchase)
   cost numeric not null default 0,
   total_ic integer not null default 0,       -- conversões InitiateCheckout
   -- Custo por IC: cost / total_ic. Pra período/agrupamento maior, recalcule
@@ -136,7 +136,7 @@ begin
     select
       e.network_id, e.product_id, e.original_offer, e.current_offer, e.lead, e.rt_ad,
       count(*) filter (where e.conversion_type = 'Purchase') as purchases,
-      sum(e.payout) as total_revenue,
+      coalesce(sum(e.payout) filter (where e.conversion_type = 'Purchase'), 0) as total_revenue,
       0::numeric as cost,
       count(*) filter (where e.conversion_type = 'InitiateCheckout') as total_ic
     from public.redtrack_events e
