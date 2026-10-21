@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 from arq.connections import RedisSettings
@@ -12,6 +14,7 @@ from app.repositories.database import DatabaseRepository
 from app.services.event_processor import EventProcessor
 from app.services.aweber_service import AWeberAPI, AWeberAPIError
 from app.services.normalizer import PayloadNormalizer
+from app.services.redtrack_creative_service import RedTrackCreativeSync
 from app.services.redtrack_service import RedTrackAPI, RedTrackAPIError
 from app.services.slack_service import SlackService
 from app.services.slicktext_service import process_slicktext_sync_task
@@ -298,6 +301,29 @@ async def cron_send_redtrack_conversions(ctx):
     logger.info(f"{len(pending)} conversão(ões) processada(s) pro RedTrack.")
 
 
+async def cron_sync_redtrack_creatives(ctx):
+    """
+    Espelha o RedTrack em redtrack_events + snapshot_daily_redtrack (ranking de
+    criativos). Hoje e ontem, no fuso da conta do RedTrack: o custo do
+    Facebook de ontem ainda pode ser ajustado de madrugada. Dias mais antigos:
+    app/scripts/sync_redtrack_creatives.py.
+    """
+    settings = get_settings()
+    try:
+        redtrack = RedTrackAPI(settings)
+    except RedTrackAPIError as exc:
+        logger.error(f"Coleta de criativos RedTrack desligada: {exc}")
+        return
+
+    today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    try:
+        await RedTrackCreativeSync(redtrack, ctx["db_repo"]).sync(
+            [today - timedelta(days=1), today]
+        )
+    except Exception:
+        logger.exception("Falha na coleta de criativos do RedTrack")
+
+
 async def cron_send_aweber_leads(ctx):
     """
     Lê a fila aweber_lead_queue (leads de venda/abandono da PagAmerican já
@@ -381,6 +407,11 @@ class WorkerSettings:
             cron_send_redtrack_conversions,
             minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
             timeout=60,
+        ),
+        cron(
+            cron_sync_redtrack_creatives,
+            minute={1, 16, 31, 46},
+            timeout=240,
         ),
         cron(
             cron_send_aweber_leads,

@@ -96,3 +96,71 @@ class RedTrackAPI:
             headers=self.headers,
             json=[conversion],
         )
+
+    async def _get(self, client: httpx.AsyncClient, path: str, **params):
+        """GET com a api_key na query (mesmo formato do POST /conversions)."""
+        try:
+            response = await client.get(
+                f"{self.base_url}{path}",
+                params={"api_key": self.api_key, **params},
+                headers=self.headers,
+            )
+        except httpx.TransportError as e:
+            raise RedTrackAPIError(f"Falha de conexão em GET {path}: {e}") from e
+
+        if response.status_code != 200:
+            raise RedTrackAPIError(
+                f"RedTrack retornou {response.status_code} em GET {path}: "
+                f"{response.text[:300]}"
+            )
+        return json.loads(response.content.decode("utf-8", errors="replace"))
+
+    async def get_conversions(
+        self, client: httpx.AsyncClient, date_from: str, date_to: str, per: int = 1000
+    ) -> list[dict]:
+        """Todas as conversões do período (GET /conversions, paginado).
+
+        Resposta: {"items": [...], "total": N}. Datas no fuso da conta.
+        """
+        items: list[dict] = []
+        page = 1
+        while True:
+            data = await self._get(
+                client, "/conversions",
+                date_from=date_from, date_to=date_to, per=per, page=page,
+            )
+            batch = data.get("items") or []
+            items.extend(batch)
+            if not batch or len(items) >= data.get("total", 0):
+                return items
+            page += 1
+
+    async def get_report(
+        self,
+        client: httpx.AsyncClient,
+        group: str,
+        date_from: str,
+        date_to: str,
+        per: int = 1000,
+    ) -> list[dict]:
+        """Linhas do GET /report agrupado por `group` (ex: "rt_ad,landing,campaign").
+
+        Resposta é uma lista crua, sem total: pagina até vir uma página incompleta.
+        """
+        rows: list[dict] = []
+        page = 1
+        while True:
+            batch = await self._get(
+                client, "/report",
+                group=group, date_from=date_from, date_to=date_to, per=per, page=page,
+            )
+            rows.extend(batch)
+            if len(batch) < per:
+                return rows
+            page += 1
+
+    async def get_campaign(self, client: httpx.AsyncClient, campaign_id: str) -> dict:
+        return await self._get(client, f"/campaigns/{campaign_id}")
+
+    async def get_offer(self, client: httpx.AsyncClient, offer_id: str) -> dict:
+        return await self._get(client, f"/offers/{offer_id}")

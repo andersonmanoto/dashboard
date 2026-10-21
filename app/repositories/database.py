@@ -1010,6 +1010,27 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao marcar conversão RedTrack {queue_id} como falha: {e}")
 
+    def upsert_redtrack_events(self, rows: list[dict], chunk_size: int = 500) -> None:
+        """
+        Grava as conversões do RedTrack (redtrack_events), upsert pelo id da
+        conversão lá: coletar o mesmo dia de novo atualiza, não duplica.
+        Sem try/except de propósito: erro sobe pro cron, que tenta de novo no
+        próximo tick (a coleta é idempotente).
+        """
+        for i in range(0, len(rows), chunk_size):
+            (
+                self.client.table("redtrack_events")
+                .upsert(rows[i : i + chunk_size], on_conflict="rt_conversion_id")
+                .execute()
+            )
+
+    def replace_snapshot_daily_redtrack(self, target_date: str, rows: list[dict]) -> None:
+        """Substitui o dia inteiro da snapshot_daily_redtrack (RPC, transação única)."""
+        self.client.rpc(
+            "replace_snapshot_daily_redtrack",
+            {"target_date": target_date, "rows": rows},
+        ).execute()
+
     def _fetch_all_paginated(
         self,
         table_name: str,
