@@ -113,7 +113,7 @@ create index if not exists idx_snapshot_daily_redtrack_ad
 -- redtrack_cost_daily (custo). Junta os dois lados por UNION + GROUP BY em vez
 -- de JOIN: a chave tem colunas que podem ser nulas (lead/offers de landing
 -- fora do padrão) e o GROUP BY trata nulo como igual.
--- Linha sem custo, sem IC e sem venda fica de fora. BackRedirect fica de fora
+-- Só entra criativo com venda no dia (purchases > 0). BackRedirect fica de fora
 -- dos dois lados (a events já nem recebe; no custo é sempre 0).
 create or replace function public.update_snapshot_daily_redtrack(target_date date)
 returns void
@@ -155,6 +155,6 @@ begin
     group by 1, 2, 3, 4, 5, 6
   ) t
   group by network_id, product_id, original_offer, current_offer, lead, rt_ad
-  having sum(cost) > 0 or sum(total_ic) > 0 or sum(purchases) > 0;
+  having sum(purchases) > 0;
 end;
 $$;
