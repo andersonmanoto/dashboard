@@ -72,10 +72,11 @@ create table if not exists public.snapshot_daily_redtrack (
   purchases integer not null default 0,           -- convtype1 no /report
   total_revenue numeric not null default 0,
   cost numeric not null default 0,
-  -- Custo por IC da linha. Pra um período/agrupamento maior, recalcule com
-  -- sum(cost) / sum(initiate_checkouts) — nunca faça média desta coluna.
+  -- "Ic Cost (Prod)" do RedTrack: custo por clique da lander pro checkout.
+  -- Pra um período/agrupamento maior, recalcule com sum(cost) / sum(lp_clicks)
+  -- — nunca faça média desta coluna.
   cost_ic numeric generated always as (
-    case when initiate_checkouts > 0 then round(cost / initiate_checkouts, 2) end
+    case when lp_clicks > 0 then round(cost / lp_clicks, 2) end
   ) stored,
   updated_at timestamptz not null default now(),
   constraint snapshot_daily_redtrack_key

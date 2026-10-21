@@ -8,6 +8,7 @@ from services.redtrack_creative_service import (
     CatalogLookup,
     build_event_row,
     build_snapshot_rows,
+    is_backredirect,
     parse_landing_title,
     parse_offer_title,
 )
@@ -46,6 +47,13 @@ def test_parse_landing_title(title, expected):
 def test_parse_offer_title():
     assert parse_offer_title("Buygoods | AlphaErec | 6 Potes | Funil 3") == ("Buygoods", "AlphaErec")
     assert parse_offer_title("") == (None, None)
+
+
+def test_is_backredirect():
+    assert is_backredirect("BackRedirect | br1 | ED - SodaHorsePeak| thedreamaway.site - 14/09")
+    assert is_backredirect("backredirect | br2 | x")
+    assert not is_backredirect("G1 | OT248 | FB | Buygoods | che - 2b | ed | SdHrsPk | x | 10-10")
+    assert not is_backredirect(None)
 
 
 def test_catalog_case_insensitive():

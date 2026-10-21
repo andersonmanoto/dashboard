@@ -82,6 +82,15 @@ class CatalogLookup:
         )
 
 
+def is_backredirect(campaign_title: Optional[str]) -> bool:
+    """Campaign de BackRedirect ("BackRedirect | br1 | ED - SodaHorsePeak| ...").
+
+    Não é tráfego de criativo: não tem custo e o rt_ad vem herdado da visita
+    original, então fica fora da redtrack_events.
+    """
+    return (campaign_title or "").strip().lower().startswith("backredirect")
+
+
 def build_event_row(conversion: dict, catalog: CatalogLookup) -> dict:
     """Linha da redtrack_events a partir de um item do GET /conversions."""
     original_offer, current_offer, lead = parse_landing_title(conversion.get("landing"))
@@ -233,7 +242,11 @@ class RedTrackCreativeSync:
         conversions = await self.redtrack.get_conversions(client, d, d)
         report = await self.redtrack.get_report(client, SNAPSHOT_GROUP, d, d)
 
-        event_rows = [build_event_row(c, catalog) for c in conversions]
+        event_rows = [
+            build_event_row(c, catalog)
+            for c in conversions
+            if not is_backredirect(c.get("campaign"))
+        ]
 
         campaign_ids = {r.get("campaign_id") for r in report if r.get("campaign_id")}
         campaign_products = {
