@@ -1,10 +1,11 @@
 """
 Coleta manual (backfill) do ranking de criativos do RedTrack: grava
-redtrack_events + snapshot_daily_redtrack pros dias do intervalo. O cron do
-worker (cron_sync_redtrack_creatives) só cobre hoje e ontem.
+redtrack_events + redtrack_cost_daily e recalcula snapshot_daily_redtrack pros
+dias do intervalo. O cron do worker (cron_sync_redtrack_creatives) só cobre
+hoje e ontem.
 
-Idempotente: cada dia é substituído inteiro na snapshot e as conversões são
-upsert pelo id do RedTrack. Pode rodar quantas vezes quiser.
+Idempotente: cada dia é substituído inteiro no custo e na snapshot, e as
+conversões são upsert pelo id do RedTrack. Pode rodar quantas vezes quiser.
 
 Uso:
     PYTHONPATH=.:app python3 app/scripts/sync_redtrack_creatives.py <from> <to>

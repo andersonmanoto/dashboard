@@ -1,14 +1,16 @@
 """
-Ranking de criativos (rt_ad) do RedTrack: alimenta `redtrack_events` e
-`snapshot_daily_redtrack` (ver migrations/20261021_create_redtrack_events_and_snapshot.sql).
+Ranking de criativos (rt_ad) do RedTrack (ver
+migrations/20261021_snapshot_redtrack_por_oferta_criativo.sql):
 
   redtrack_events          GET /conversions -> 1 linha por conversão (upsert pelo id)
-  snapshot_daily_redtrack  GET /report?group=rt_ad,landing,campaign -> valores
-                           absolutos do dia, substituindo o dia inteiro
+  redtrack_cost_daily      GET /report?group=rt_ad,landing,campaign -> custo
+                           absoluto do dia, substituindo o dia inteiro
+  snapshot_daily_redtrack  update_snapshot_daily_redtrack(dia), no banco:
+                           conversões da events + custo da redtrack_cost_daily
 
 O RedTrack mostra o valor "atualizado" do dia (custo do Facebook vai subindo
-ao longo do dia), não venda a venda. Por isso a snapshot nunca soma em cima
-do que já está lá: cada coleta apaga e regrava o dia.
+ao longo do dia), não venda a venda. Por isso nada aqui soma em cima do que
+já está gravado: cada coleta apaga e regrava o dia.
 
 Mapeamentos confirmados na API em 21/10 (dia 20/10: 4 Purchase, 8 IC no
 /conversions = convtype1 4, convtype3 8 no /report; custo 2036,03 e receita
@@ -17,7 +19,7 @@ Mapeamentos confirmados na API em 21/10 (dia 20/10: 4 Purchase, 8 IC no
   (o campo `revenue` vem zerado).
 
 Produto/network: título da offer ("Buygoods | AlphaErec | 6 Potes | Funil 3")
-casado por nome com `networks` / `products`. Na snapshot a offer vem das
+casado por nome com `networks` / `products`. No custo a offer vem das
 offers da campaign (o custo é por clique, antes da offer — agrupar o /report
 por offer separa custo e receita em linhas diferentes).
 """
@@ -32,7 +34,7 @@ from loguru import logger
 
 PURCHASE_CONVTYPE = "convtype1"
 INITIATE_CHECKOUT_CONVTYPE = "convtype3"
-SNAPSHOT_GROUP = "rt_ad,landing,campaign"
+COST_REPORT_GROUP = "rt_ad,landing,campaign"
 
 LANDING_PREFIX_RE = re.compile(r"^G\d+$")
 LEAD_RE = re.compile(r"^L\d+$")
@@ -123,12 +125,12 @@ def build_event_row(conversion: dict, catalog: CatalogLookup) -> dict:
     }
 
 
-def build_snapshot_rows(
+def build_cost_rows(
     report_rows: list[dict],
     campaign_products: dict[str, tuple[Optional[str], Optional[str]]],
 ) -> list[dict]:
     """
-    Linhas da snapshot a partir do /report agrupado por rt_ad,landing,campaign.
+    Linhas da redtrack_cost_daily a partir do /report agrupado por rt_ad,landing,campaign.
 
     `campaign_products`: campaign_id -> (product_id, network_id).
     Linhas sem nada (0 clique, 0 custo, 0 conversão) ficam de fora. rt_ad
@@ -183,7 +185,7 @@ def build_snapshot_rows(
 
 
 class RedTrackCreativeSync:
-    """Coleta um ou mais dias do RedTrack e grava events + snapshot."""
+    """Coleta um ou mais dias do RedTrack e grava events + custo + snapshot."""
 
     def __init__(self, redtrack, db_repo):
         self.redtrack = redtrack
@@ -240,7 +242,7 @@ class RedTrackCreativeSync:
     ) -> dict:
         d = day.isoformat()
         conversions = await self.redtrack.get_conversions(client, d, d)
-        report = await self.redtrack.get_report(client, SNAPSHOT_GROUP, d, d)
+        report = await self.redtrack.get_report(client, COST_REPORT_GROUP, d, d)
 
         event_rows = [
             build_event_row(c, catalog)
@@ -253,19 +255,18 @@ class RedTrackCreativeSync:
             cid: await self._resolve_campaign(client, cid, catalog)
             for cid in sorted(campaign_ids)
         }
-        snapshot_rows = build_snapshot_rows(report, campaign_products)
+        cost_rows = build_cost_rows(report, campaign_products)
 
         await asyncio.to_thread(self.db_repo.upsert_redtrack_events, event_rows)
-        await asyncio.to_thread(
-            self.db_repo.replace_snapshot_daily_redtrack, d, snapshot_rows
-        )
+        await asyncio.to_thread(self.db_repo.replace_redtrack_cost_daily, d, cost_rows)
+        # snapshot depois dos dois: lê events + custo já gravados
+        await asyncio.to_thread(self.db_repo.update_snapshot_daily_redtrack, d)
 
         summary = {
             "date": d,
             "events": len(event_rows),
-            "snapshot_rows": len(snapshot_rows),
-            "cost": round(sum(r["cost"] for r in snapshot_rows), 2),
-            "revenue": round(sum(r["total_revenue"] for r in snapshot_rows), 2),
+            "cost_rows": len(cost_rows),
+            "cost": round(sum(r["cost"] for r in cost_rows), 2),
         }
         logger.info(f"[redtrack-criativos] {summary}")
         return summary

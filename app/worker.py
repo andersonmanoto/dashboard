@@ -303,10 +303,10 @@ async def cron_send_redtrack_conversions(ctx):
 
 async def cron_sync_redtrack_creatives(ctx):
     """
-    Espelha o RedTrack em redtrack_events + snapshot_daily_redtrack (ranking de
-    criativos). Hoje e ontem, no fuso da conta do RedTrack: o custo do
-    Facebook de ontem ainda pode ser ajustado de madrugada. Dias mais antigos:
-    app/scripts/sync_redtrack_creatives.py.
+    Espelha o RedTrack em redtrack_events + redtrack_cost_daily e recalcula a
+    snapshot_daily_redtrack (ranking de criativos). Hoje e ontem, no fuso da
+    conta do RedTrack: o custo do Facebook de ontem ainda pode ser ajustado de
+    madrugada. Dias mais antigos: app/scripts/sync_redtrack_creatives.py.
     """
     settings = get_settings()
     try:

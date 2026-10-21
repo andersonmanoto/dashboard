@@ -1024,11 +1024,17 @@ class DatabaseRepository:
                 .execute()
             )
 
-    def replace_snapshot_daily_redtrack(self, target_date: str, rows: list[dict]) -> None:
-        """Substitui o dia inteiro da snapshot_daily_redtrack (RPC, transação única)."""
+    def replace_redtrack_cost_daily(self, target_date: str, rows: list[dict]) -> None:
+        """Substitui o dia inteiro da redtrack_cost_daily (RPC, transação única)."""
         self.client.rpc(
-            "replace_snapshot_daily_redtrack",
+            "replace_redtrack_cost_daily",
             {"target_date": target_date, "rows": rows},
+        ).execute()
+
+    def update_snapshot_daily_redtrack(self, target_date: str) -> None:
+        """Recalcula o dia da snapshot_daily_redtrack a partir da events + custo."""
+        self.client.rpc(
+            "update_snapshot_daily_redtrack", {"target_date": target_date}
         ).execute()
 
     def _fetch_all_paginated(

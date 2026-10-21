@@ -7,7 +7,7 @@ import pytest
 from services.redtrack_creative_service import (
     CatalogLookup,
     build_event_row,
-    build_snapshot_rows,
+    build_cost_rows,
     is_backredirect,
     parse_landing_title,
     parse_offer_title,
@@ -90,10 +90,10 @@ def test_build_event_row():
     assert row["payout"] == 240
 
 
-def test_build_snapshot_rows_sums_and_skips_empty():
+def test_build_cost_rows_sums_and_skips_empty():
     landing = "G1 | FB | S233 - S233 - C14 | L2 - C14 | americandaydream.site/fb/alpherc/pv1-L2-19xkF | 19-10 | x"
     base = {"campaign_id": "c1", "landing_id": "l1", "landing": landing, "campaign": "camp"}
-    rows = build_snapshot_rows(
+    rows = build_cost_rows(
         [
             {**base, "rt_ad": "AD14", "clicks": 294, "lp_clicks": 1, "convtype1": 1, "convtype3": 1, "total_revenue": 240, "cost": 76.61},
             # rt_ad nulo e vazio caem na mesma chave: soma
