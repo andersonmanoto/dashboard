@@ -12,6 +12,7 @@ from services.redtrack_creative_service import (
     landings_with_revenue,
     parse_landing_title,
     parse_offer_title,
+    parse_vturb_video_id,
 )
 
 ALPHAEREC_ID = "ecfb897e-2cb8-4d52-ae21-02ede303193b"
@@ -43,6 +44,29 @@ CATALOG = CatalogLookup(
 )
 def test_parse_landing_title(title, expected):
     assert parse_landing_title(title) == expected
+
+
+@pytest.mark.parametrize(
+    "title, expected",
+    [
+        (
+            "G1 | FB | OT248 - OT257 - SPY | L1 - C01 | ML8 - C01 | getbackupagain.site/fb/SdHrsPk/pv1-v4-ML8-yrg6Y | 01-10 | 6abe311a5cd352c8993bf6e8",
+            "6abe311a5cd352c8993bf6e8",
+        ),
+        # id grudado em lixo no último bloco (lander real de 12/09)
+        (
+            "G1 | FB | OT248 - OT249 - SPY | L1 - C01 | hopefulhorizons.site/fb/SdHrsPk/pv1-v3-L1-XOXrJ | 12-09 2F6aa4c4acfbc4117542eb1a8e",
+            "6aa4c4acfbc4117542eb1a8e",
+        ),
+        # sem id no fim: não chuta
+        ("G3 | YT | OT216 - OT216 - SPY | L1 - SPY | rolltowin.site/yt3/alpherc/ | 08-08", None),
+        ("Pre-lander | Facebook | Buygoods | PS-L6 | theoldnewman.online/fb-cps/ps", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_parse_vturb_video_id(title, expected):
+    assert parse_vturb_video_id(title) == expected
 
 
 def test_parse_offer_title():
@@ -87,6 +111,7 @@ def test_build_event_row():
     assert row["conversion_date"] == "2026-10-20"
     assert row["rt_ad"] == "S233ED-C14-FB-C16-R02-AD14-V1"
     assert (row["original_offer"], row["current_offer"], row["lead"]) == ("S233", "S233", "L1")
+    assert row["vturb_video_id"] == "6ad34c05a884ed0eb81161a7"
     assert (row["product_id"], row["network_id"]) == (ALPHAEREC_ID, BUYGOODS_ID)
     assert row["payout"] == 240
 
@@ -111,6 +136,7 @@ def test_build_cost_rows_sums_and_skips_empty():
     ad14 = by_ad["AD14"]
     assert (ad14["purchases"], ad14["initiate_checkouts"], ad14["total_revenue"], ad14["cost"]) == (1, 1, 240, 76.61)
     assert (ad14["original_offer"], ad14["current_offer"], ad14["lead"]) == ("S233", "S233", "L2")
+    assert ad14["vturb_video_id"] is None  # título do teste termina em "x"
     assert (ad14["product_id"], ad14["network_id"]) == (ALPHAEREC_ID, BUYGOODS_ID)
 
     assert by_ad[""]["clicks"] == 5

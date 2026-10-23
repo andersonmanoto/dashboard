@@ -43,6 +43,7 @@ COST_REPORT_GROUP = "rt_ad,landing,campaign"
 
 LANDING_PREFIX_RE = re.compile(r"^G\d+$")
 LEAD_RE = re.compile(r"^L\d+$")
+VTURB_VIDEO_ID_RE = re.compile(r"([0-9a-f]{24})$")
 
 
 def parse_landing_title(title: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -62,6 +63,18 @@ def parse_landing_title(title: Optional[str]) -> tuple[Optional[str], Optional[s
 
     lead = blocks[3].split(" - ")[0].strip()
     return original_offer, current_offer, lead if LEAD_RE.match(lead) else None
+
+
+def parse_vturb_video_id(title: Optional[str]) -> Optional[str]:
+    """
+    Id do vídeo do vturb: último bloco do título da landing
+    ("... | 01-10 | 6abe311a5cd352c8993bf6e8"). Às vezes vem grudado em lixo
+    ("12-09 2F6aa4c4acfbc4117542eb1a8e"), por isso pega os 24 hex do fim.
+    É o mesmo id do sub20 da conversão ("v3_<uuid>_<video_id>_..."), mas o
+    sub20 não existe no /report — o título está nos dois lados.
+    """
+    match = VTURB_VIDEO_ID_RE.search((title or "").split("|")[-1].strip())
+    return match.group(1) if match else None
 
 
 def parse_offer_title(title: Optional[str]) -> tuple[Optional[str], Optional[str]]:
@@ -122,6 +135,7 @@ def build_event_row(conversion: dict, catalog: CatalogLookup) -> dict:
         "original_offer": original_offer,
         "current_offer": current_offer,
         "lead": lead,
+        "vturb_video_id": parse_vturb_video_id(conversion.get("landing")),
         "product_id": product_id,
         "network_id": network_id,
         "payout": conversion.get("payout") or 0,
@@ -176,6 +190,7 @@ def build_cost_rows(
                 "original_offer": original_offer,
                 "current_offer": current_offer,
                 "lead": lead,
+                "vturb_video_id": parse_vturb_video_id(r.get("landing")),
                 "product_id": product_id,
                 "network_id": network_id,
                 "clicks": 0,
