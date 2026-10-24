@@ -18,7 +18,11 @@ async def lifespan(app: FastAPI):
     try:
         # Redis
         app.state.redis_pool = await create_pool(
-            RedisSettings(host=settings.redis_host, port=settings.redis_port)
+            RedisSettings(
+                host=settings.redis_host,
+                port=settings.redis_port,
+                password=settings.redis_password,
+            )
         )
         logger.info(f"Redis conectado em {settings.redis_host}")
 

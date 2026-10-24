@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str = "redis"
     redis_port: int = 6379
+    redis_password: str | None = None
 
     # Resend (Email)
     resend_api_key: str = ""

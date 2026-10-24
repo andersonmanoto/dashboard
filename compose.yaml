@@ -71,14 +71,19 @@ services:
     container_name: dashhook-redis
     restart: unless-stopped
 
+    # Só na loopback: api/workers rodam com network_mode: host e acessam via
+    # 127.0.0.1. Publicar em 0.0.0.0 sem senha deixa o Redis aberto pra
+    # internet (scanners rodam REPLICAOF/CONFIG SET e derrubam a fila).
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
     command:
       [
         "redis-server",
+        "--requirepass", "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}",
+        "--protected-mode", "yes",
         "--save", "60", "1",
-        "--loglevel", "warning",
+        "--loglevel", "notice",
         "--shutdown-timeout", "30"
       ]
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Checa o dashhook-redis a cada minuto
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target

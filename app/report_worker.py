@@ -215,6 +215,7 @@ class ReportWorkerSettings:
     redis_settings = RedisSettings(
         host=settings.redis_host,
         port=settings.redis_port,
+        password=settings.redis_password,
     )
 
     queue_name = "reports_queue"

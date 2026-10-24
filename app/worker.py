@@ -389,6 +389,7 @@ class WorkerSettings:
     redis_settings = RedisSettings(
         host=settings.redis_host,
         port=settings.redis_port,
+        password=settings.redis_password,
     )
 
     on_startup = startup

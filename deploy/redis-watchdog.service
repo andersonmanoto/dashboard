@@ -1,0 +1,6 @@
+[Unit]
+Description=Reinicia o dashhook-redis se ele parar de responder
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dashboard/deploy/redis-watchdog.sh
