@@ -11,6 +11,7 @@ from services.redtrack_creative_service import (
     is_backredirect,
     landings_with_revenue,
     parse_landing_title,
+    parse_microlead,
     parse_offer_title,
     parse_vturb_video_id,
 )
@@ -69,6 +70,27 @@ def test_parse_vturb_video_id(title, expected):
     assert parse_vturb_video_id(title) == expected
 
 
+@pytest.mark.parametrize(
+    "title, expected",
+    [
+        # títulos reais de campaigns (out/2026)
+        ("G1 | OT248 | FB | Buygoods | che - 2b | ed | SdHrsPk | ML8 | https://twr.getbackupagain.site/49gsd8dgrw/ | 01-10", "ML8"),
+        ("G3 | OT248/OT257/ML8 | YT | 737-894-3143 1144 | Buygoods | che - 2b | ed | SdHrsPk | brighterdaysnow.site | 05-10", "ML8"),
+        ("G3 | S218-ML2 | YT | 639-099-2560 07 | Buygoods | che - 2b | pm | mlen | brxcdx | lastingvalues.site | 06-06", "ML2"),
+        ("G1 | OT248 | ML5-6-7 | FB | Buygoods | che - 2b | ed | SdHrsPk | https://twr.daybreakliving.site/c1kdo0r7cj/ |", "ML5-6-7"),
+        ("G3 | OT239/ML00 | YT | 636-820-8644 1196 | Buygoods | che - 2b | mm | maro | everydaygoodness.site | 21-10", "ML00"),
+        # sem ML + número: não chuta
+        ("G3 | C2 | YT | BG | CHE | 173-MCC_TOM-STAR11-4 | VSL-WL-PINKSALT-ML Sarah | blessedwave.site", None),
+        ("G3 | OT248 | YT | 795-078-9198M1 | Buygoods", None),
+        ("G1 | OT133 | FB | Buygoods | che - 2b | FG | nails | https://twr.heartfulliving.site/nnz57p3nyw/ | 04-10", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_parse_microlead(title, expected):
+    assert parse_microlead(title) == expected
+
+
 def test_parse_offer_title():
     assert parse_offer_title("Buygoods | AlphaErec | 6 Potes | Funil 3") == ("Buygoods", "AlphaErec")
     assert parse_offer_title("") == (None, None)
@@ -100,6 +122,7 @@ def test_build_event_row():
             "conv_time": "2026-10-20T15:15:03-03:00",
             "rt_ad": "S233ED-C14-FB-C16-R02-AD14-V1",
             "campaign_id": "6ad58905802a8399dfb8ce1d",
+            "campaign": "G1 | S233 | FB | Buygoods | che - 2b | ed | alpherc | https://twr.americandaydream.site/xajow9bjk2/ | 19-10",
             "landing_id": "6ad589038d17ff6615e58357",
             "landing": "G1 | FB | S233 - S233 - C14 | L1 - C14 | americandaydream.site/fb/alpherc/pv1-L1-19xkF | 19-10 | 6ad34c05a884ed0eb81161a7",
             "offer_id": "6a73353a3afc9693860d234f",
@@ -112,13 +135,14 @@ def test_build_event_row():
     assert row["rt_ad"] == "S233ED-C14-FB-C16-R02-AD14-V1"
     assert (row["original_offer"], row["current_offer"], row["lead"]) == ("S233", "S233", "L1")
     assert row["vturb_video_id"] == "6ad34c05a884ed0eb81161a7"
+    assert row["microlead"] is None
     assert (row["product_id"], row["network_id"]) == (ALPHAEREC_ID, BUYGOODS_ID)
     assert row["payout"] == 240
 
 
 def test_build_cost_rows_sums_and_skips_empty():
     landing = "G1 | FB | S233 - S233 - C14 | L2 - C14 | americandaydream.site/fb/alpherc/pv1-L2-19xkF | 19-10 | x"
-    base = {"campaign_id": "c1", "landing_id": "l1", "landing": landing, "campaign": "camp"}
+    base = {"campaign_id": "c1", "landing_id": "l1", "landing": landing, "campaign": "G1 | OT248 | FB | Buygoods | ML8 | x"}
     rows = build_cost_rows(
         [
             {**base, "rt_ad": "AD14", "clicks": 294, "lp_clicks": 1, "convtype1": 1, "convtype3": 1, "total_revenue": 240, "cost": 76.61},
@@ -137,6 +161,7 @@ def test_build_cost_rows_sums_and_skips_empty():
     assert (ad14["purchases"], ad14["initiate_checkouts"], ad14["total_revenue"], ad14["cost"]) == (1, 1, 240, 76.61)
     assert (ad14["original_offer"], ad14["current_offer"], ad14["lead"]) == ("S233", "S233", "L2")
     assert ad14["vturb_video_id"] is None  # título do teste termina em "x"
+    assert ad14["microlead"] == "ML8"
     assert (ad14["product_id"], ad14["network_id"]) == (ALPHAEREC_ID, BUYGOODS_ID)
 
     assert by_ad[""]["clicks"] == 5

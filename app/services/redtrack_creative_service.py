@@ -44,6 +44,7 @@ COST_REPORT_GROUP = "rt_ad,landing,campaign"
 LANDING_PREFIX_RE = re.compile(r"^G\d+$")
 LEAD_RE = re.compile(r"^L\d+$")
 VTURB_VIDEO_ID_RE = re.compile(r"([0-9a-f]{24})$")
+MICROLEAD_RE = re.compile(r"(?<![a-z])ML\d+(?:-\d+)*", re.IGNORECASE)
 
 
 def parse_landing_title(title: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -75,6 +76,19 @@ def parse_vturb_video_id(title: Optional[str]) -> Optional[str]:
     """
     match = VTURB_VIDEO_ID_RE.search((title or "").split("|")[-1].strip())
     return match.group(1) if match else None
+
+
+def parse_microlead(campaign_title: Optional[str]) -> Optional[str]:
+    """
+    Microlead (ML) do título da campaign: "ML8", "ML2", "ML5-6-7".
+
+    Não tem bloco fixo: aparece sozinho ("... | SdHrsPk | ML8 | ..."), junto
+    das offers ("G3 | OT248/OT257/ML8 | YT") ou grudado ("S218-ML2"). Só conta
+    ML seguido de número — "ML Sarah" / "ML 2018" de campaigns antigas e
+    "mlen" ficam de fora.
+    """
+    match = MICROLEAD_RE.search(campaign_title or "")
+    return match.group(0).upper() if match else None
 
 
 def parse_offer_title(title: Optional[str]) -> tuple[Optional[str], Optional[str]]:
@@ -136,6 +150,7 @@ def build_event_row(conversion: dict, catalog: CatalogLookup) -> dict:
         "current_offer": current_offer,
         "lead": lead,
         "vturb_video_id": parse_vturb_video_id(conversion.get("landing")),
+        "microlead": parse_microlead(conversion.get("campaign")),
         "product_id": product_id,
         "network_id": network_id,
         "payout": conversion.get("payout") or 0,
@@ -191,6 +206,7 @@ def build_cost_rows(
                 "current_offer": current_offer,
                 "lead": lead,
                 "vturb_video_id": parse_vturb_video_id(r.get("landing")),
+                "microlead": parse_microlead(r.get("campaign")),
                 "product_id": product_id,
                 "network_id": network_id,
                 "clicks": 0,
