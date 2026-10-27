@@ -1,12 +1,21 @@
+import asyncio
 import logging
+from enum import Enum, auto
+from functools import partial
 from typing import Optional
 import requests
 import phonenumbers
 from phonenumbers import NumberParseException, PhoneNumberFormat
 
-from app.config import Settings, get_slicktext_api_key
+from app.config import Settings
 from app.models.enums import NetworkType
 from app.repositories.database import DatabaseRepository
+from app.services.slicktext_accounts import (
+    ACCOUNT_ERROR_STATUSES,
+    active_list_targets,
+    credentials_by_account,
+    send_with_account_check,
+)
 from app.utils.formatters import country_to_alpha2
 
 logger = logging.getLogger(__name__)
@@ -77,6 +86,24 @@ def validate_phone_abstract(formatted_phone: str, api_key: str) -> Optional[bool
         return None
 
 
+class SendResult(Enum):
+    SUCCESS = auto()
+    FAILED = auto()
+    ACCOUNT_ERROR = auto()  # 401/404: a conta pode ter caído (ver slicktext_accounts.py)
+
+
+def _failure(response: Optional[requests.Response]) -> SendResult:
+    if response is not None and response.status_code in ACCOUNT_ERROR_STATUSES:
+        return SendResult.ACCOUNT_ERROR
+    return SendResult.FAILED
+
+
+def _deactivate_account(db_repo: DatabaseRepository, account_id: str) -> None:
+    db_repo.client.table("slicktext_accounts").update({"status": "inactive"}).eq(
+        "id", account_id
+    ).execute()
+
+
 def _sync_to_slicktext(
     payload: dict,
     customer: str,
@@ -85,10 +112,10 @@ def _sync_to_slicktext(
     api_key: str,
     brand_id: str,
     api_url: str,
-) -> bool:
+) -> SendResult:
     if not api_key or not brand_id:
         logger.error("[SlickText] Credenciais não configuradas. Abortando.")
-        return False
+        return SendResult.FAILED
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -181,7 +208,7 @@ def _sync_to_slicktext(
                         f"[SlickText] ERRO FATAL: O telefone {mobile_number} não foi encontrado na busca de duplicados. "
                         f"Resposta bruta: {search_data}"
                     )
-                    return False
+                    return SendResult.FAILED
 
             except requests.RequestException as update_exc:
                 logger.error(
@@ -191,26 +218,26 @@ def _sync_to_slicktext(
                     logger.error(
                         f"[SlickText] Detalhes do erro: {update_exc.response.text}"
                     )
-                return False
+                return _failure(update_exc.response)
             except Exception as unexpected_exc:
                 # Pega qualquer coisa que não seja erro de rede (JSON malformado, chave
                 # faltando, etc.) pra nunca mais morrer em silêncio sem logar nada.
                 logger.exception(
                     f"[SlickText] ERRO INESPERADO ao buscar/atualizar contato {mobile_number}: {unexpected_exc}"
                 )
-                return False
+                return SendResult.FAILED
         else:
             logger.error("[SlickText] Erro na criação (não é duplicidade). Abortando.")
-            return False
+            return _failure(exc.response)
 
     except requests.RequestException as exc:
         logger.error(f"[SlickText] ERRO DE REDE ao criar contato: {exc}")
-        return False
+        return SendResult.FAILED
 
     # Validação de segurança antes de adicionar na lista
     if not contact_id:
         logger.error("[SlickText] Falha na obtenção do contact_id. Abortando Passo 2.")
-        return False
+        return SendResult.FAILED
 
     # Passo 2: Adicionar à Lista
     try:
@@ -227,13 +254,13 @@ def _sync_to_slicktext(
         logger.info(
             f"--- [SlickText END] '{customer}' adicionado com sucesso na lista {target_list_id}. ---"
         )
-        return True
+        return SendResult.SUCCESS
 
     except requests.RequestException as exc:
         logger.error(f"[SlickText] ERRO ao adicionar na lista: {exc}")
         if exc.response is not None:
             logger.error(f"[SlickText] Resposta de erro da lista: {exc.response.text}")
-        return False
+        return _failure(exc.response)
 
 
 async def process_slicktext_sync_task(
@@ -263,7 +290,7 @@ async def process_slicktext_sync_task(
             .select(
                 "url, quantity, products(name, aff_id_sms, "
                 "slicktext_product_lists(abandoned_list_id, "
-                "slicktext_accounts(name, brand_id)))"
+                "slicktext_accounts(id)))"
             )
             .eq("checkout_code", product_codename)
             .limit(1)
@@ -314,8 +341,8 @@ async def process_slicktext_sync_task(
         return
 
     # 2. Pega as contas SlickText mapeadas pro produto (pode ser mais de uma
-    # -- ex: conta principal + conta de contingência -- e envia a MESMA
-    # informação pra cada uma, cada qual com seu próprio list_id)
+    # -- envia a MESMA informação pra cada conta active, cada qual com seu
+    # próprio list_id; a api_key vem do Vault)
     raw_mappings = product_info.get("slicktext_product_lists") or []
     if isinstance(raw_mappings, dict):
         raw_mappings = [raw_mappings]
@@ -323,6 +350,22 @@ async def process_slicktext_sync_task(
     mappings = [m for m in raw_mappings if m.get("abandoned_list_id")]
     if not mappings:
         logger.warning(f"SlickText: Lista não mapeada para o produto '{product_name}'.")
+        return
+
+    try:
+        credentials = credentials_by_account(
+            db_repo.client.rpc("get_slicktext_credentials").execute().data
+        )
+    except Exception as e:
+        logger.error(f"[SlickText] Erro ao buscar credenciais das contas: {e}")
+        return
+
+    targets = active_list_targets(mappings, "abandoned_list_id", credentials)
+    if not targets:
+        logger.warning(
+            f"SlickText: nenhuma conta active entre as {len(mappings)} com lista "
+            f"mapeada para o produto '{product_name}'."
+        )
         return
 
     # 3. Valida telefone
@@ -358,25 +401,22 @@ async def process_slicktext_sync_task(
         "plataforma": platform,
     }
 
-    for mapping in mappings:
-        list_id = mapping.get("abandoned_list_id")
-        account_info = mapping.get("slicktext_accounts") or {}
-        account_name = account_info.get("name")
-        brand_id = account_info.get("brand_id")
-        api_key = get_slicktext_api_key(brand_id)
-
-        if not api_key or not brand_id:
-            logger.error(
-                f"[SlickText] Credenciais não configuradas para a conta '{account_name}' "
-                f"(brand_id '{brand_id}', produto '{product_name}')."
-            )
-            continue
-
-        _sync_to_slicktext(
-            slicktext_payload,
-            customer_name,
-            list_id,
-            api_key=api_key,
-            brand_id=brand_id,
+    for list_id, account in targets:
+        # requests é síncrono: roda em thread pra não travar o event loop
+        # durante as tentativas
+        await send_with_account_check(
+            partial(
+                asyncio.to_thread,
+                _sync_to_slicktext,
+                slicktext_payload,
+                customer_name,
+                list_id,
+                api_key=account["api_key"],
+                brand_id=account["brand_id"],
+                api_url=settings.slicktext_api_url,
+            ),
+            lambda result: result is SendResult.ACCOUNT_ERROR,
+            account,
             api_url=settings.slicktext_api_url,
+            deactivate=partial(asyncio.to_thread, _deactivate_account, db_repo),
         )

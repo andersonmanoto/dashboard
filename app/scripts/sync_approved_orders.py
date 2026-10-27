@@ -11,6 +11,7 @@ import httpx
 import phonenumbers
 from enum import Enum, auto
 from datetime import datetime, timezone
+from functools import partial
 from typing import Optional
 from loguru import logger
 from phonenumbers import NumberParseException, PhoneNumberFormat
@@ -18,7 +19,13 @@ from phonenumbers import NumberParseException, PhoneNumberFormat
 # Importação do client ASSÍNCRONO do Supabase
 from supabase import AsyncClient, create_async_client
 
-from app.config import get_settings, get_slicktext_api_key
+from app.config import get_settings
+from app.services.slicktext_accounts import (
+    ACCOUNT_ERROR_STATUSES,
+    active_list_targets,
+    credentials_by_account,
+    send_with_account_check,
+)
 
 SETTINGS = get_settings()
 
@@ -45,6 +52,23 @@ class SyncResult(Enum):
     MISSING_CREDENTIALS = auto()
     API_ERROR = auto()
     UNSUPPORTED_REGION = auto()
+    ACCOUNT_ERROR = auto()  # 401/404: a conta pode ter caído (ver slicktext_accounts.py)
+
+
+def _status_error_result(exc: httpx.HTTPStatusError) -> SyncResult:
+    if exc.response.status_code in ACCOUNT_ERROR_STATUSES:
+        return SyncResult.ACCOUNT_ERROR
+    return SyncResult.API_ERROR
+
+
+async def _deactivate_account(account_id: str) -> None:
+    db = await get_supabase()
+    await (
+        db.table("slicktext_accounts")
+        .update({"status": "inactive"})
+        .eq("id", account_id)
+        .execute()
+    )
 
 
 def format_phone_local(
@@ -175,6 +199,12 @@ async def sync_contact_to_slicktext(
                             f"Erro ao buscar/atualizar contato existente: {update_exc}"
                         )
                         return SyncResult.API_ERROR
+                    except httpx.HTTPStatusError as update_exc:
+                        logger.error(
+                            f"Erro HTTP ao buscar/atualizar contato existente: "
+                            f"{update_exc.response.status_code} {update_exc.response.text}"
+                        )
+                        return _status_error_result(update_exc)
                 else:
                     if "us and ca" in error_msg:
                         logger.error(
@@ -182,7 +212,7 @@ async def sync_contact_to_slicktext(
                         )
                         return SyncResult.UNSUPPORTED_REGION
                     logger.error(f"Erro HTTP {status} na criação: {error_msg}")
-                    return SyncResult.API_ERROR
+                    return _status_error_result(exc)
 
             if not contact_id:
                 return SyncResult.API_ERROR
@@ -201,7 +231,7 @@ async def sync_contact_to_slicktext(
                 return SyncResult.API_ERROR
             except httpx.HTTPStatusError as exc:
                 logger.error(f"Erro HTTP ao adicionar na lista: {exc.response.text}")
-                return SyncResult.API_ERROR
+                return _status_error_result(exc)
 
     except httpx.RequestError as exc:
         logger.error(f"Erro de rede SlickText: {exc}")
@@ -258,8 +288,8 @@ async def process_queue_item(item: dict) -> None:
     quantity = checkouts_data.get("quantity")
 
     # Pega as contas SlickText mapeadas pro produto (pode ser mais de uma --
-    # ex: conta principal + conta de contingência -- envia a MESMA informação
-    # pra cada uma, cada qual com seu próprio list_id)
+    # envia a MESMA informação pra cada conta active, cada qual com seu
+    # próprio list_id; a api_key vem do Vault)
     raw_mappings = products_data.get("slicktext_product_lists") or []
     if isinstance(raw_mappings, dict):
         raw_mappings = [raw_mappings]
@@ -270,6 +300,23 @@ async def process_queue_item(item: dict) -> None:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": "lista_nao_encontrada"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
+        return
+
+    credentials = credentials_by_account(
+        (await db.rpc("get_slicktext_credentials").execute()).data
+    )
+    targets = active_list_targets(mappings, "approved_list_id", credentials)
+    if not targets:
+        logger.warning(
+            f"Nenhuma conta active entre as {len(mappings)} com lista mapeada "
+            f"para o produto: {product_name}"
+        )
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": "sem_conta_active"})
             .eq("event_id", queue_id)
             .execute()
         )
@@ -315,23 +362,20 @@ async def process_queue_item(item: dict) -> None:
 
     # Sincronização: envia a mesma informação pra cada conta mapeada
     results = []
-    for mapping in mappings:
-        list_id = mapping.get("approved_list_id")
-        account_info = mapping.get("slicktext_accounts") or {}
-        account_name = account_info.get("name")
-        brand_id = account_info.get("brand_id")
-        api_key = get_slicktext_api_key(brand_id)
-
-        if not api_key or not brand_id:
-            logger.error(
-                f"Credenciais SlickText não configuradas para a conta '{account_name}' "
-                f"(brand_id '{brand_id}', produto '{product_name}')."
-            )
-            results.append(SyncResult.MISSING_CREDENTIALS)
-            continue
-
-        result = await sync_contact_to_slicktext(
-            payload, customer, list_id, api_key=api_key, brand_id=brand_id
+    for list_id, account in targets:
+        result = await send_with_account_check(
+            partial(
+                sync_contact_to_slicktext,
+                payload,
+                customer,
+                list_id,
+                api_key=account["api_key"],
+                brand_id=account["brand_id"],
+            ),
+            lambda r: r is SyncResult.ACCOUNT_ERROR,
+            account,
+            api_url=SETTINGS.slicktext_api_url,
+            deactivate=_deactivate_account,
         )
         results.append(result)
 
@@ -339,11 +383,20 @@ async def process_queue_item(item: dict) -> None:
     # deu erro de rede/API, tenta tudo de novo (SlickText já lida com
     # duplicidade via upsert, então reenviar pra quem já deu certo é
     # inofensivo); região não suportada é uma característica do telefone,
-    # não da conta, então nenhuma tentativa nova resolve.
+    # não da conta, então nenhuma tentativa nova resolve. Erro de conta
+    # também vai pra retry: se a conta foi inativada, a próxima rodada já
+    # não manda pra ela.
     if SyncResult.API_ERROR in results:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "retry", "last_error": "slicktext_api_error"})
+            .eq("event_id", queue_id)
+            .execute()
+        )
+    elif SyncResult.ACCOUNT_ERROR in results:
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "retry", "last_error": "slicktext_account_error"})
             .eq("event_id", queue_id)
             .execute()
         )
@@ -412,7 +465,7 @@ async def process_single_item(queue_id: str) -> None:
         .select(
             "event_id, attempts, events(customer_name, customer_phone, "
             "products(name, slicktext_product_lists(approved_list_id, "
-            "slicktext_accounts(name, brand_id))), checkouts(quantity))"
+            "slicktext_accounts(id))), checkouts(quantity))"
         )
         .eq("event_id", queue_id)
         .single()

@@ -1,5 +1,3 @@
-import os
-import re
 import tempfile
 from functools import lru_cache
 
@@ -129,25 +127,6 @@ class Settings(BaseSettings):
                 self.aweber_account_id,
             )
         )
-
-
-def get_slicktext_api_key(brand_id: str | None) -> str:
-    """
-    Resolve a api_key do SlickText para uma conta específica, a partir do
-    brand_id (identificador estável da conta no SlickText). De propósito NÃO
-    usa slicktext_accounts.name pra isso -- name é só um rótulo humano,
-    editável livremente (ex: "SMS TIGER CONTIGENCIA"), e usá-lo pra derivar a
-    env var quebraria a integração toda vez que alguém renomear a conta.
-
-    Toda conta usa a mesma convenção: env var SLICKTEXT_API_KEY_<BRAND_ID em
-    maiúsculo>, ex: brand_id '35016' -> SLICKTEXT_API_KEY_35016. O brand_id
-    não é segredo e fica no banco (slicktext_accounts.brand_id), só a
-    api_key vive no .env.
-    """
-    if not brand_id:
-        return ""
-    env_suffix = re.sub(r"[^A-Za-z0-9]+", "_", brand_id).strip("_").upper()
-    return os.environ.get(f"SLICKTEXT_API_KEY_{env_suffix}", "")
 
 
 @lru_cache
