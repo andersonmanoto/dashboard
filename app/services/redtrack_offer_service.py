@@ -21,6 +21,8 @@ _OFFER_SOURCE_ID_BY_PLATAFORMA = {
     "buygoods": "6685d5cfb9b57400016a1a95",
     "pagamerican": "6a9affa8cbd0b6a371635f4b",
     "jvzoo": "6ab2aca4824bddae486b1c51",
+    "digistore": "66e77b3387c90d1870088ebe",
+    "digistore24": "66e77b3387c90d1870088ebe",
 }
 
 
@@ -57,6 +59,9 @@ def _build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
         return f"{checkout_url}{_PAGAMERICAN_TRACKING_PARAMS}"
     if plataforma_lower == "jvzoo":
         return f"{checkout_url}?aid={aff_id}{_JVZOO_TRACKING_PARAMS}"
+    if plataforma_lower in ("digistore", "digistore24"):
+        # Sem tracking por enquanto — buylink vai puro (só cadastro).
+        return checkout_url
     return f"{checkout_url}&aff_id={aff_id}{_TRACKING_MACROS}"
 
 
