@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     reports_api_key: str
     funnel_sync_api_key: str = ""
     redtrack_offers_api_key: str = ""
+    slicktext_setup_endpoint_key: str = ""
     # Secret Key da JVZoo (My Account → Seller Settings) -- valida o cverify do JVZIPN v2
     jvzoo_secret_key: str = ""
 
