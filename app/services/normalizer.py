@@ -271,7 +271,9 @@ class PayloadNormalizer:
             tax_amount=safe_float(payload.get("taxes")),
             # Tracking
             click_id=payload.get("cid"),
-            sub_tiger_2=payload.get("sid2"),
+            # sid1 = {rt_campaign} (ver _DIGISTORE_TRACKING_PARAMS), mesmo
+            # conteúdo do subid2 da BuyGoods. sid2 = {utm_campaign}, sem coluna.
+            sub_tiger_2=payload.get("sid1"),
             sub_tiger_3=payload.get("sid3"),
             sub_tiger_4=payload.get("sid4"),
             sub_tiger_5=payload.get("sid5"),
