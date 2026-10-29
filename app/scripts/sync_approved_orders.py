@@ -24,6 +24,7 @@ from app.services.slicktext_accounts import (
     ACCOUNT_ERROR_STATUSES,
     active_list_targets,
     credentials_by_account,
+    deactivation_fields,
     send_with_account_check,
 )
 
@@ -65,7 +66,7 @@ async def _deactivate_account(account_id: str) -> None:
     db = await get_supabase()
     await (
         db.table("slicktext_accounts")
-        .update({"status": "inactive"})
+        .update(deactivation_fields())
         .eq("id", account_id)
         .execute()
     )

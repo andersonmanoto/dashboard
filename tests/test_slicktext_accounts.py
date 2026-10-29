@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import os
 import sys
 
@@ -10,6 +11,7 @@ from services.slicktext_accounts import (
     SEND_ATTEMPTS,
     active_list_targets,
     credentials_by_account,
+    deactivation_fields,
     send_with_account_check,
 )
 
@@ -21,6 +23,13 @@ def test_credentials_by_account_skips_missing_key():
     rows = [ACTIVE, {"id": "acc-2", "name": "sem key", "brand_id": "1", "api_key": None}]
     assert set(credentials_by_account(rows)) == {"acc-1"}
     assert credentials_by_account(None) == {}
+
+
+
+def test_deactivation_fields_sets_status_and_timestamp():
+    fields = deactivation_fields()
+    assert fields["status"] == "inactive"
+    assert datetime.fromisoformat(fields["deactivated_at"]).tzinfo is not None
 
 
 def test_active_list_targets():

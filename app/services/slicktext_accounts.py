@@ -4,17 +4,20 @@ migrations/20261027_slicktext_accounts_vault_status.sql), usadas pelos dois
 fluxos: carrinho abandonado (slicktext_service.py) e compra aprovada
 (scripts/sync_approved_orders.py).
 
-  - Só conta status='active' recebe envio; a api_key vem do Vault pela RPC
-    get_slicktext_credentials() (que já devolve só as active).
+  - Só conta status='active' e allow_input=true recebe envio; a api_key vem
+    do Vault pela RPC get_slicktext_credentials() (que já devolve só essas).
+    allow_input é o liga/desliga manual do envio, independente do status.
   - Conta que cai: a API passa a responder 401/404. Mas 404 também é o que
     volta pra list_id que não existe ({"error":"Not found"} nos dois casos,
     conferido em 27/10), então 404 sozinho não prova que a conta caiu. Depois
     de SEND_ATTEMPTS tentativas com 401/404, confirma com GET /brands/{brand_id}
     usando a key da conta: só inativa se esse GET também der 401/404. Se a
     conta responder 200, ela está viva e o problema foi outro (ex: list_id).
+    Ao inativar grava deactivated_at = hora da queda (deactivation_fields()).
 """
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional, TypeVar
 
 import httpx
@@ -26,6 +29,14 @@ RETRY_BASE_DELAY_SECONDS = 2
 BRAND_CHECK_TIMEOUT = 10.0
 
 T = TypeVar("T")
+
+
+def deactivation_fields() -> dict:
+    """Update de slicktext_accounts pra conta que caiu: status + hora da queda."""
+    return {
+        "status": "inactive",
+        "deactivated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def credentials_by_account(rows: Optional[list[dict]]) -> dict[str, dict]:
