@@ -29,6 +29,7 @@ def test_credentials_by_account_skips_missing_key():
 def test_deactivation_fields_sets_status_and_timestamp():
     fields = deactivation_fields()
     assert fields["status"] == "inactive"
+    assert fields["allow_input"] is False
     assert datetime.fromisoformat(fields["deactivated_at"]).tzinfo is not None
 
 

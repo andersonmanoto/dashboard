@@ -13,7 +13,8 @@ fluxos: carrinho abandonado (slicktext_service.py) e compra aprovada
     de SEND_ATTEMPTS tentativas com 401/404, confirma com GET /brands/{brand_id}
     usando a key da conta: só inativa se esse GET também der 401/404. Se a
     conta responder 200, ela está viva e o problema foi outro (ex: list_id).
-    Ao inativar grava deactivated_at = hora da queda (deactivation_fields()).
+    Ao inativar grava allow_input=false e deactivated_at = hora da queda
+    (deactivation_fields()).
 """
 
 import asyncio
@@ -32,9 +33,10 @@ T = TypeVar("T")
 
 
 def deactivation_fields() -> dict:
-    """Update de slicktext_accounts pra conta que caiu: status + hora da queda."""
+    """Update de slicktext_accounts pra conta que caiu: status, envio desligado e hora da queda."""
     return {
         "status": "inactive",
+        "allow_input": False,
         "deactivated_at": datetime.now(timezone.utc).isoformat(),
     }
 
