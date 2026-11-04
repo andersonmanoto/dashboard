@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel
 
 from app.config import Settings, get_settings
 from app.dependencies import verify_redtrack_offers_key
 from app.services.autopages_service import AutoPagesError
+from app.services.offer_announcement import notify_offer_created
 from app.services.redtrack_offer_service import RedTrackOfferService
 from app.services.redtrack_service import RedTrackAPIError
 
@@ -31,6 +32,7 @@ class CreateOffersRequest(BaseModel):
 )
 async def create_redtrack_offers(
     payload: CreateOffersRequest,
+    background_tasks: BackgroundTasks,
     settings: Settings = Depends(get_settings),
 ):
     """
@@ -40,6 +42,8 @@ async def create_redtrack_offers(
     Potes | Funil {funil}". Pra cada offer criada, sincroniza
     `products`/`checkout_links` no Supabase do AutoPages (find-or-create
     de produto por `código_produto`, checkout resolvido por `plataforma`).
+    Depois de tudo criado, manda o aviso de produto liberado no Slack
+    (#backend-geral) em background -- ver offer_announcement.py.
     """
     try:
         service = RedTrackOfferService(settings)
@@ -49,6 +53,8 @@ async def create_redtrack_offers(
     except (RedTrackAPIError, AutoPagesError) as e:
         logger.error(f"[redtrack] erro ao criar offers: {e}")
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
+
+    background_tasks.add_task(notify_offer_created, settings, payload.model_dump())
 
     return {
         "plataforma": payload.plataforma,

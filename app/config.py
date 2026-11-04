@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     slack_monitor_channel: str = "#monitor-sites"
     slack_maxweb_targets: str = "#monitor-sites"
     slack_slicktext_channel: str = "#tech-sms"  # alerta de conta SlickText desativada
+    slack_offers_channel: str = "#backend-geral"  # aviso de oferta criada (/offers-rt-ap)
 
     # Blacklist de codenames
     codename_blacklist_prefixes: tuple[str, ...] = ("calls", "wc")
