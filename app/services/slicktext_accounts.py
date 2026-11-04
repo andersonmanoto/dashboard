@@ -14,7 +14,9 @@ fluxos: carrinho abandonado (slicktext_service.py) e compra aprovada
     usando a key da conta: só inativa se esse GET também der 401/404. Se a
     conta responder 200, ela está viva e o problema foi outro (ex: list_id).
     Ao inativar grava allow_input=false e deactivated_at = hora da queda
-    (deactivation_fields()).
+    (deactivation_fields()) e manda um alerta no Slack (#tech-sms, slack_slicktext_channel).
+  - Chamadas ao Supabase passam por retry_transport(): o VPS já teve vários
+    "timed out" em chamada pro Supabase, e sem retry o lead/compra se perdia.
 """
 
 import asyncio
@@ -28,6 +30,8 @@ ACCOUNT_ERROR_STATUSES = frozenset({401, 404})
 SEND_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 2
 BRAND_CHECK_TIMEOUT = 10.0
+DB_ATTEMPTS = 3
+DB_RETRY_BASE_DELAY_SECONDS = 1
 
 T = TypeVar("T")
 
@@ -39,6 +43,61 @@ def deactivation_fields() -> dict:
         "allow_input": False,
         "deactivated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+async def retry_transport(
+    call: Callable[[], Awaitable[T]], label: str, attempts: int = DB_ATTEMPTS
+) -> T:
+    """
+    Executa `call` com retry e backoff (1s, 2s, ...) em httpx.TransportError
+    (timeout, conexão caída, DNS). Outros erros sobem direto. Esgotadas as
+    tentativas, relança o último erro.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return await call()
+        except httpx.TransportError as exc:
+            if attempt == attempts:
+                logger.error(
+                    f"[SlickText] {label}: esgotou {attempts} tentativas "
+                    f"({type(exc).__name__}): {exc}"
+                )
+                raise
+            wait = DB_RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1)
+            logger.warning(
+                f"[SlickText] {label}: tentativa {attempt}/{attempts} falhou "
+                f"({type(exc).__name__}). Retentando em {wait}s..."
+            )
+            await asyncio.sleep(wait)
+    raise AssertionError("unreachable")
+
+
+async def notify_account_deactivated(account: dict) -> None:
+    """Alerta no Slack (slack_slicktext_channel). Falha no Slack só loga."""
+    try:
+        from slack_sdk import WebClient
+
+        from app.config import get_settings
+
+        settings = get_settings()
+        client = WebClient(token=settings.slack_bot_token)
+        await asyncio.to_thread(
+            client.chat_postMessage,
+            channel=settings.slack_slicktext_channel,
+            username="SlickText Monitor",
+            icon_url="https://tigeroffers.com/assets/img/top-tiger.png",
+            text=(
+                f":rotating_light: Conta SlickText *{account['name']}* "
+                f"(brand_id {account['brand_id']}) foi desativada automaticamente: "
+                f"o envio deu 401/404 {SEND_ATTEMPTS}x e o GET /brands confirmou. "
+                f"Ficou status=inactive e allow_input=false."
+            ),
+        )
+    except Exception as exc:
+        logger.error(
+            f"[SlickText] Não consegui mandar o alerta de conta desativada "
+            f"'{account['name']}' pro Slack: {exc}"
+        )
 
 
 def credentials_by_account(rows: Optional[list[dict]]) -> dict[str, dict]:
@@ -91,12 +150,15 @@ async def send_with_account_check(
     account: dict,
     *,
     api_url: str,
-    deactivate: Callable[[str], Awaitable[None]],
+    deactivate: Callable[[str], Awaitable[bool]],
 ) -> T:
     """
     Chama `send` até SEND_ATTEMPTS vezes enquanto o resultado for erro de
     conta (401/404). Se todas derem erro de conta e o GET /brands confirmar a
-    queda, chama `deactivate(account_id)`. Devolve o último resultado.
+    queda, chama `deactivate(account_id)` e, se ela de fato mudou a linha
+    (True), manda o alerta no Slack. `deactivate` só deve mexer em conta
+    ainda active, pra dois jobs simultâneos não mandarem alerta duplicado.
+    Devolve o último resultado.
     """
     result = await send()
     for attempt in range(1, SEND_ATTEMPTS + 1):
@@ -116,7 +178,16 @@ async def send_with_account_check(
             f"[SlickText] Conta '{account['name']}' (brand_id {account['brand_id']}) "
             f"caiu: GET /brands também respondeu 401/404. Inativando."
         )
-        await deactivate(account["id"])
+        changed = await retry_transport(
+            lambda: deactivate(account["id"]), f"inativar conta '{account['name']}'"
+        )
+        if changed:
+            await notify_account_deactivated(account)
+        else:
+            logger.info(
+                f"[SlickText] Conta '{account['name']}' já estava inativa; "
+                f"sem alerta no Slack."
+            )
     else:
         logger.error(
             f"[SlickText] Conta '{account['name']}' (brand_id {account['brand_id']}) "

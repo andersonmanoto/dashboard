@@ -5,6 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../app")))
 
+import httpx
 import pytest
 from services import slicktext_accounts
 from services.slicktext_accounts import (
@@ -12,6 +13,7 @@ from services.slicktext_accounts import (
     active_list_targets,
     credentials_by_account,
     deactivation_fields,
+    retry_transport,
     send_with_account_check,
 )
 
@@ -56,8 +58,8 @@ def run(monkeypatch):
 
     monkeypatch.setattr(slicktext_accounts.asyncio, "sleep", no_sleep)
 
-    def go(results, brand_down):
-        calls, deactivated = [], []
+    def go(results, brand_down, row_changed=True):
+        calls, deactivated, alerts = [], [], []
 
         async def send():
             calls.append(1)
@@ -68,13 +70,19 @@ def run(monkeypatch):
 
         async def deactivate(account_id):
             deactivated.append(account_id)
+            return row_changed
+
+        async def fake_notify(account):
+            alerts.append(account["id"])
 
         monkeypatch.setattr(slicktext_accounts, "brand_is_down", fake_brand_is_down)
+        monkeypatch.setattr(slicktext_accounts, "notify_account_deactivated", fake_notify)
         result = asyncio.run(
             send_with_account_check(
                 send, lambda r: r == "account_error", ACTIVE, api_url="x", deactivate=deactivate
             )
         )
+        go.alerts = alerts
         return result, len(calls), deactivated
 
     return go
@@ -96,9 +104,66 @@ def test_recovers_before_last_attempt(run):
 def test_deactivates_when_brand_confirms(run):
     results = ["account_error"] * SEND_ATTEMPTS
     assert run(results, brand_down=True) == ("account_error", SEND_ATTEMPTS, ["acc-1"])
+    assert run.alerts == ["acc-1"]
+
+
+def test_no_alert_when_account_was_already_inactive(run):
+    # outro job inativou antes: update não mudou linha, não manda alerta duplicado
+    results = ["account_error"] * SEND_ATTEMPTS
+    assert run(results, brand_down=True, row_changed=False) == (
+        "account_error",
+        SEND_ATTEMPTS,
+        ["acc-1"],
+    )
+    assert run.alerts == []
 
 
 def test_keeps_active_when_brand_is_alive(run):
     # 404 no envio mas GET /brands 200: conta viva, problema é outro (list_id)
     results = ["account_error"] * SEND_ATTEMPTS
     assert run(results, brand_down=False) == ("account_error", SEND_ATTEMPTS, [])
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    async def _no_sleep(_):
+        pass
+
+    monkeypatch.setattr(slicktext_accounts.asyncio, "sleep", _no_sleep)
+
+
+def test_retry_transport_recovers(no_sleep):
+    calls = []
+
+    async def call():
+        calls.append(1)
+        if len(calls) < 3:
+            raise httpx.ReadTimeout("timed out")
+        return "ok"
+
+    assert asyncio.run(retry_transport(call, "teste")) == "ok"
+    assert len(calls) == 3
+
+
+def test_retry_transport_gives_up(no_sleep):
+    calls = []
+
+    async def call():
+        calls.append(1)
+        raise httpx.ConnectError("down")
+
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(retry_transport(call, "teste"))
+    assert len(calls) == slicktext_accounts.DB_ATTEMPTS
+
+
+def test_retry_transport_does_not_retry_other_errors(no_sleep):
+    calls = []
+
+    async def call():
+        calls.append(1)
+        raise ValueError("bug")
+
+    with pytest.raises(ValueError):
+        asyncio.run(retry_transport(call, "teste"))
+    assert len(calls) == 1

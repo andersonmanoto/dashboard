@@ -25,6 +25,7 @@ from app.services.slicktext_accounts import (
     active_list_targets,
     credentials_by_account,
     deactivation_fields,
+    retry_transport,
     send_with_account_check,
 )
 
@@ -62,14 +63,31 @@ def _status_error_result(exc: httpx.HTTPStatusError) -> SyncResult:
     return SyncResult.API_ERROR
 
 
-async def _deactivate_account(account_id: str) -> None:
+async def _deactivate_account(account_id: str) -> bool:
+    """Inativa só se ainda estiver active; True se mudou a linha."""
     db = await get_supabase()
-    await (
+    res = await (
         db.table("slicktext_accounts")
         .update(deactivation_fields())
         .eq("id", account_id)
+        .eq("status", "active")
         .execute()
     )
+    return bool(res.data)
+
+
+async def _mark_retry_safely(db: AsyncClient, queue_id: str, error: str) -> None:
+    """Marca o item como retry; se nem isso der (Supabase fora), só loga --
+    o item continua pending/retry e a próxima rodada pega de novo."""
+    try:
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "retry", "last_error": error})
+            .eq("event_id", queue_id)
+            .execute()
+        )
+    except Exception as exc:
+        logger.error(f"Não consegui marcar {queue_id} como retry: {exc}")
 
 
 def format_phone_local(
@@ -306,9 +324,20 @@ async def process_queue_item(item: dict) -> None:
         )
         return
 
-    credentials = credentials_by_account(
-        (await db.rpc("get_slicktext_credentials").execute()).data
-    )
+    try:
+        credentials = credentials_by_account(
+            (
+                await retry_transport(
+                    lambda: db.rpc("get_slicktext_credentials").execute(),
+                    "get_slicktext_credentials",
+                )
+            ).data
+        )
+    except Exception as exc:
+        # attempts já foi incrementado: volta pra retry e a próxima rodada tenta
+        logger.error(f"Erro ao buscar credenciais SlickText ({queue_id}): {exc}")
+        await _mark_retry_safely(db, queue_id, "credenciais_indisponiveis")
+        return
     targets = active_list_targets(mappings, "approved_list_id", credentials)
     if not targets:
         logger.warning(
@@ -461,8 +490,8 @@ async def fetch_pending_ids(limit: int = 15, max_retries: int = 2) -> list[str]:
 
 async def process_single_item(queue_id: str) -> None:
     db = await get_supabase()
-    res = await (
-        db.table("slicktext_sync_queue")
+    res = await retry_transport(
+        lambda: db.table("slicktext_sync_queue")
         .select(
             "event_id, attempts, events(customer_name, customer_phone, "
             "products(name, slicktext_product_lists(approved_list_id, "
@@ -470,7 +499,8 @@ async def process_single_item(queue_id: str) -> None:
         )
         .eq("event_id", queue_id)
         .single()
-        .execute()
+        .execute(),
+        f"buscar item {queue_id} da fila",
     )
 
     item = res.data
@@ -492,7 +522,12 @@ async def run_pipeline() -> None:
     logger.info(f"Processando {len(pending_ids)} compra(s) aprovada(s)...")
 
     for queue_id in pending_ids:
-        await process_single_item(queue_id)
+        # um item com erro não derruba o resto da rodada (no worker cada item
+        # já é um job separado; isso aqui é pra rodar o script na mão)
+        try:
+            await process_single_item(queue_id)
+        except Exception:
+            logger.exception(f"Falha ao processar item {queue_id}")
 
     logger.info("Rodada concluída.")
 

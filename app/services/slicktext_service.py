@@ -15,6 +15,7 @@ from app.services.slicktext_accounts import (
     active_list_targets,
     credentials_by_account,
     deactivation_fields,
+    retry_transport,
     send_with_account_check,
 )
 from app.utils.formatters import country_to_alpha2
@@ -99,10 +100,16 @@ def _failure(response: Optional[requests.Response]) -> SendResult:
     return SendResult.FAILED
 
 
-def _deactivate_account(db_repo: DatabaseRepository, account_id: str) -> None:
-    db_repo.client.table("slicktext_accounts").update(deactivation_fields()).eq(
-        "id", account_id
-    ).execute()
+def _deactivate_account(db_repo: DatabaseRepository, account_id: str) -> bool:
+    """Inativa só se ainda estiver active; True se mudou a linha."""
+    res = (
+        db_repo.client.table("slicktext_accounts")
+        .update(deactivation_fields())
+        .eq("id", account_id)
+        .eq("status", "active")
+        .execute()
+    )
+    return bool(res.data)
 
 
 def _sync_to_slicktext(
@@ -285,8 +292,10 @@ async def process_slicktext_sync_task(
     # 1. Busca nome real do produto, URL, quantity, aff_id_sms e o mapeamento
     # de lista/conta SlickText (slicktext_product_lists -> slicktext_accounts)
     # no Supabase
-    try:
-        res = (
+    # client do Supabase aqui é síncrono: roda em thread pra não travar o
+    # event loop, com retry em falha de transporte
+    def fetch_checkout():
+        return (
             db_repo.client.table("checkouts")
             .select(
                 "url, quantity, products(name, aff_id_sms, "
@@ -296,6 +305,12 @@ async def process_slicktext_sync_task(
             .eq("checkout_code", product_codename)
             .limit(1)
             .execute()
+        )
+
+    try:
+        res = await retry_transport(
+            partial(asyncio.to_thread, fetch_checkout),
+            f"buscar checkout '{product_codename}'",
         )
 
         if not res.data:
@@ -355,7 +370,15 @@ async def process_slicktext_sync_task(
 
     try:
         credentials = credentials_by_account(
-            db_repo.client.rpc("get_slicktext_credentials").execute().data
+            (
+                await retry_transport(
+                    partial(
+                        asyncio.to_thread,
+                        lambda: db_repo.client.rpc("get_slicktext_credentials").execute(),
+                    ),
+                    "get_slicktext_credentials",
+                )
+            ).data
         )
     except Exception as e:
         logger.error(f"[SlickText] Erro ao buscar credenciais das contas: {e}")
