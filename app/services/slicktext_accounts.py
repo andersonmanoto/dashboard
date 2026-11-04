@@ -87,7 +87,7 @@ async def notify_account_deactivated(account: dict) -> None:
             username="SlickText Monitor",
             icon_url="https://tigeroffers.com/assets/img/top-tiger.png",
             text=(
-                f":rotating_light: Conta SlickText *{account['name']}* "
+                f"Conta SlickText *{account['name']}* "
                 f"(brand_id {account['brand_id']}) foi desativada automaticamente: "
                 f"o envio deu 401/404 {SEND_ATTEMPTS}x e o GET /brands confirmou. "
                 f"Ficou status=inactive e allow_input=false."
