@@ -161,6 +161,7 @@ async def notify_offer_created(settings: Settings, payload: dict) -> None:
         await asyncio.to_thread(
             client.chat_postMessage,
             channel=settings.slack_offers_channel,
+            username="Backend Bot",
             text=text,
             unfurl_links=False,
         )
