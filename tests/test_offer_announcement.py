@@ -12,6 +12,7 @@ def test_build_message_format():
         {"type": "dtc", "url": "https://dg.marobrain.com/dtc/"},
     ]
     assert build_message("MaroBrain", "ME", "capsula", "2", urls) == (
+        "Novo funil cadastrado, disponível para afiliados:\n"
         "Produto: MaroBrain\n"
         "Nicho: ME\n"
         "Formato: Comprimido\n"

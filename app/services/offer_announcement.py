@@ -4,6 +4,7 @@ afiliados, disparado depois que o POST /offers-rt-ap cria as offers.
 
 Formato (o mesmo do post fixado que a galera mandava na mão):
 
+    Novo funil cadastrado, disponível para afiliados:
     Produto: BakingSlim
     Nicho: WL
     Formato: Comprimido
@@ -75,6 +76,7 @@ def build_message(
 
     return "\n".join(
         [
+            "Novo funil cadastrado, disponível para afiliados:",
             f"Produto: {produto}",
             f"Nicho: {niche_code or MISSING}",
             f"Formato: {format_formato(product_type)}",
