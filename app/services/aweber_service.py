@@ -1,10 +1,12 @@
 """
-Leads da PagAmerican pra lista do AWeber (POST /subscribers), com OAuth.
+Leads da PagAmerican e da BuyGoods pras listas do AWeber (POST /subscribers),
+com OAuth.
 
 As funções build_* montam o corpo do subscriber que vai pra
-aweber_lead_queue (chamadas pelo EventProcessor). AWeberAPI é usada só pelo
-cron do worker: envia os pendentes e renova o access token (~2h), que fica
-na tabela aweber_oauth_tokens.
+aweber_lead_queue (chamadas pelo EventProcessor). Cada lead leva a tag da
+rede de origem ("pagamerican" / "buygoods") e a da oferta ("offer-<código>").
+AWeberAPI é usada só pelo cron do worker: envia os pendentes e renova o
+access token (~2h), que fica na tabela aweber_oauth_tokens.
 """
 
 import ipaddress
@@ -29,7 +31,11 @@ def _public_ip(raw: Optional[str]) -> Optional[str]:
     return str(ip) if ip.is_global else None
 
 
+NETWORK_TAGS = {"PagAmerican": "pagamerican", "BuyGoods": "buygoods"}
+
+
 def _subscriber(
+    network: str,
     email: Optional[str],
     name: Optional[str],
     offer_code: Optional[str] = None,
@@ -43,8 +49,10 @@ def _subscriber(
     subscriber: dict = {"email": email, "update_existing": "true"}
     if name and name.strip():
         subscriber["name"] = name.strip()[:60]
-    if offer_code:
-        subscriber["tags"] = [f"offer-{offer_code.strip()}"[:60]]
+    tags = [NETWORK_TAGS[network]]
+    if offer_code and offer_code.strip():
+        tags.append(f"offer-{offer_code.strip()}"[:60])
+    subscriber["tags"] = tags
     if ip := _public_ip(ip):
         subscriber["ip_address"] = ip
     # Só utm_source: o `src` da PagAmerican é o clickid do RedTrack (24
@@ -55,30 +63,53 @@ def _subscriber(
 
 
 def build_order_subscriber(event) -> Optional[dict]:
-    """Subscriber de uma venda PagAmerican (order.purchase.created.v1). None se sem email."""
+    """
+    Subscriber de uma venda (evento normalizado), PagAmerican ou BuyGoods.
+    None se sem email ou rede sem envio pro AWeber.
+    """
+    network = getattr(event.network, "value", event.network)
     payload = event.payload or {}
-    customer = payload.get("customer") or {}
-    products = payload.get("products") or [{}]
-    tracking = payload.get("trackingParameters") or {}
-    return _subscriber(
-        email=event.customer_email,
-        name=event.customer_name,
-        offer_code=(products[0] or {}).get("offerCode"),
-        ip=customer.get("ip"),
-        utm_source=tracking.get("utm_source"),
-    )
+
+    if network == "PagAmerican":
+        # order.purchase.created.v1: dados aninhados em customer/products
+        customer = payload.get("customer") or {}
+        products = payload.get("products") or [{}]
+        tracking = payload.get("trackingParameters") or {}
+        return _subscriber(
+            network,
+            email=event.customer_email,
+            name=event.customer_name,
+            offer_code=(products[0] or {}).get("offerCode"),
+            ip=customer.get("ip"),
+            utm_source=tracking.get("utm_source"),
+        )
+
+    if network == "BuyGoods":
+        # Payload flat; o código da oferta é o product_codename do checkout.
+        # Sem ad_tracking: o subid da BuyGoods é o clickid (não cabe nos 20
+        # chars do AWeber).
+        return _subscriber(
+            network,
+            email=event.customer_email,
+            name=event.customer_name,
+            offer_code=event.order_details.external_checkout_code,
+            ip=payload.get("ipaddress"),
+        )
+
+    return None
 
 
-def build_abandon_subscriber(cart_data: dict) -> Optional[dict]:
+def build_abandon_subscriber(cart_data: dict, network: str) -> Optional[dict]:
     """
-    Subscriber de um checkout abandonado da PagAmerican, a partir do
-    cart_data já normalizado (os dados vêm em checkoutForm.*, não em
-    customer.*). None se sem email.
+    Subscriber de um checkout abandonado, a partir do cart_data já
+    normalizado (o mesmo que vai pra abandoned_carts). None se sem email.
     """
     return _subscriber(
+        network,
         email=cart_data.get("customer_email"),
         name=cart_data.get("customer_name"),
         offer_code=cart_data.get("product_codename"),
+        ip=cart_data.get("ipaddress"),
     )
 
 

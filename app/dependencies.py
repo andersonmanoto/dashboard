@@ -32,8 +32,13 @@ def get_payload_normalizer() -> PayloadNormalizer:
 def get_event_processor(
     db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
     slack_service: Annotated[SlackService, Depends(get_slack_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> EventProcessor:
-    return EventProcessor(db_repo, slack_service)
+    # aweber_enabled: o abandono da BuyGoods é processado aqui na API (rota
+    # /buygoods/abandon), não no worker. Só enfileira; quem envia é o cron.
+    return EventProcessor(
+        db_repo, slack_service, aweber_enabled=settings.aweber_enabled
+    )
 
 
 # --- HELPER: EXTRAÇÃO DE PAYLOAD ---

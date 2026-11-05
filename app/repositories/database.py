@@ -764,6 +764,7 @@ class DatabaseRepository:
         """
         Listas do AWeber do produto ({neworder_list_id, abandon_list_id}), ou
         None se o produto não estiver em aweber_product_lists (= não envia).
+        Vale pra qualquer rede (PagAmerican e BuyGoods).
         """
         response = (
             self.client.table("aweber_product_lists")

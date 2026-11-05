@@ -14,10 +14,10 @@ from services.aweber_service import (
 from services.event_processor import EventProcessor
 from services.normalizer import PayloadNormalizer
 
-from tests.test_normalizer import PAYLOAD_PAGAMERICAN_PURCHASE
+from tests.test_normalizer import PAYLOAD_BUYGOODS_REAL, PAYLOAD_PAGAMERICAN_PURCHASE
 
 SODAHORSE_ID = "f0494709-01fb-4d0e-8e8c-3e200f25b13c"
-SODAHORSE_LISTS = {"neworder_list_id": "6977002", "abandon_list_id": "6966538"}
+SODAHORSE_LISTS = {"neworder_list_id": "6977002", "abandon_list_id": "6977004"}
 
 ABANDON_BODY = {
     "_pa_event": "checkout.session.abandoned.v-1.0.0",
@@ -31,6 +31,18 @@ ABANDON_BODY = {
     },
 }
 
+# Abandono da BuyGoods como chega na rota /buygoods/abandon (form flat)
+BUYGOODS_ABANDON = {
+    "action_type": "abandon",
+    "name": "John Smith",
+    "emailaddress": "John.Smith@Example.com",
+    "phone": "5559876543",
+    "ipaddress": "8.8.4.4",
+    "product_codename": "sohp_front_6b_fnn1",
+    "account_id": "13582",
+    "country": "United States",
+}
+
 
 def _order_event(**customer_overrides):
     payload = {
@@ -40,14 +52,32 @@ def _order_event(**customer_overrides):
     return PayloadNormalizer().normalize(NetworkType.PAGAMERICAN, payload)
 
 
+def _buygoods_event(funnel_stage="Purchase", **overrides):
+    event = PayloadNormalizer().normalize(
+        NetworkType.BUYGOODS, {**PAYLOAD_BUYGOODS_REAL, **overrides}
+    )
+    event.funnel_stage = funnel_stage  # vem do _enrich_checkout no fluxo real
+    return event
+
+
 def test_subscriber_da_venda():
     assert build_order_subscriber(_order_event()) == {
         "email": "jane.doe@example.com",
         "update_existing": "true",
         "name": "Jane Doe",
-        "tags": ["offer-cEy6BQCE"],
+        "tags": ["pagamerican", "offer-cEy6BQCE"],
         # utm_source, não o src (clickid)
         "ad_tracking": "YouTube-GH",
+    }
+
+
+def test_subscriber_da_venda_buygoods():
+    assert build_order_subscriber(_buygoods_event()) == {
+        "email": "louigi272@gmail.com",
+        "update_existing": "true",
+        "name": "Tamara Giblin",
+        "tags": ["buygoods", "offer-abc9d"],
+        "ip_address": "66.249.84.142",
     }
 
 
@@ -58,6 +88,20 @@ def test_ip_so_se_for_publico():
 
 def test_venda_sem_email_nao_gera_subscriber():
     assert build_order_subscriber(_order_event(email="")) is None
+    assert build_order_subscriber(_buygoods_event(customer_emailaddress="")) is None
+
+
+def test_buygoods_so_front_neworder_ao_vivo_vira_lead():
+    ok = EventProcessor._is_aweber_order
+    assert ok(_buygoods_event())
+    # upsell/downsell: mesma pessoa do front
+    assert not ok(_buygoods_event(funnel_stage="Up1"))
+    # refund/chargeback chegam como linha "Purchase" com outro action_type
+    assert not ok(_buygoods_event(action_type="refund"))
+    assert not ok(_buygoods_event(action_type="chargeback"))
+    assert not ok(_buygoods_event(is_test="1"))
+    # PagAmerican segue mandando toda venda nova
+    assert ok(_order_event())
 
 
 class FakeCheckout:
@@ -71,12 +115,16 @@ class FakeDB:
         self.lists = lists or {}  # product_id -> listas
         self.saved = None
         self.leads = []
+        self.checkout_lookups = []
 
     def insert_abandoned_cart(self, cart_data):
         return {"id": "cart-1"}
 
     def get_checkout_by_code(self, code, account_id=None):
-        return FakeCheckout(SODAHORSE_ID) if code == "cEy6BQCE" else None
+        self.checkout_lookups.append((code, account_id))
+        if code in ("cEy6BQCE", "sohp_front_6b_fnn1"):
+            return FakeCheckout(SODAHORSE_ID)
+        return None
 
     def get_aweber_list_ids(self, product_id):
         return self.lists.get(str(product_id))
@@ -104,12 +152,33 @@ def test_abandono_vai_pra_lista_de_carrinho_do_produto():
     assert db.leads == [
         (
             "abandon",
-            "6966538",
+            "6977004",
             {
                 "email": "jane.doe@example.com",
                 "update_existing": "true",
                 "name": "Jane Doe",
-                "tags": ["offer-cEy6BQCE"],
+                "tags": ["pagamerican", "offer-cEy6BQCE"],
+            },
+        )
+    ]
+
+
+def test_abandono_buygoods_vai_pra_lista_de_carrinho_do_produto():
+    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
+    processor = EventProcessor(db, zapier_webhook_enabled=False, aweber_enabled=True)
+    assert asyncio.run(processor.process_buygoods_abandon_cart(BUYGOODS_ABANDON))
+    # checkout buscado com o account_id da BuyGoods
+    assert db.checkout_lookups == [("sohp_front_6b_fnn1", "13582")]
+    assert db.leads == [
+        (
+            "abandon",
+            "6977004",
+            {
+                "email": "john.smith@example.com",
+                "update_existing": "true",
+                "name": "John Smith",
+                "tags": ["buygoods", "offer-sohp_front_6b_fnn1"],
+                "ip_address": "8.8.4.4",
             },
         )
     ]
@@ -121,13 +190,20 @@ def test_venda_vai_pra_lista_new_order_do_produto():
     processor._enqueue_aweber_lead(
         "neworder", SODAHORSE_ID, build_order_subscriber(_order_event()), "t"
     )
-    assert [(t, lst) for t, lst, _ in db.leads] == [("neworder", "6977002")]
+    processor._enqueue_aweber_lead(
+        "neworder", SODAHORSE_ID, build_order_subscriber(_buygoods_event()), "t"
+    )
+    assert [(t, lst) for t, lst, _ in db.leads] == [
+        ("neworder", "6977002"),
+        ("neworder", "6977002"),
+    ]
 
 
 def test_produto_sem_listas_nao_enfileira():
     db = FakeDB(lists={})
     processor = EventProcessor(db, zapier_webhook_enabled=False, aweber_enabled=True)
     asyncio.run(processor.process_pagamerican_abandon_cart(ABANDON_BODY))
+    asyncio.run(processor.process_buygoods_abandon_cart(BUYGOODS_ABANDON))
     processor._enqueue_aweber_lead(
         "neworder", "outro-produto", build_order_subscriber(_order_event()), "t"
     )
@@ -138,6 +214,7 @@ def test_abandono_nao_enfileira_com_aweber_desligado():
     db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
     processor = EventProcessor(db, zapier_webhook_enabled=False)
     asyncio.run(processor.process_pagamerican_abandon_cart(ABANDON_BODY))
+    asyncio.run(processor.process_buygoods_abandon_cart(BUYGOODS_ABANDON))
     assert db.leads == []
 
 
