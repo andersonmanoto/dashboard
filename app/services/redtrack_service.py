@@ -1,5 +1,6 @@
 """Cliente para criar recursos no RedTrack via API (offers, por enquanto)."""
 
+import asyncio
 import json
 
 import httpx
@@ -10,6 +11,21 @@ from app.config import Settings
 
 class RedTrackAPIError(Exception):
     """Erro ao chamar a API do RedTrack (config faltando ou resposta de erro)."""
+
+
+# 429 ("Too many requests") no GET: a coleta de criativos faz várias chamadas
+# seguidas (conversions, report, campaigns, offers) e já tomou 429 no meio.
+# Espera e tenta de novo; respeita o Retry-After quando o RedTrack manda.
+RATE_LIMIT_ATTEMPTS = 4
+RATE_LIMIT_BASE_DELAY_SECONDS = 2
+RATE_LIMIT_MAX_DELAY_SECONDS = 30
+
+
+def _rate_limit_delay(response: httpx.Response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After", "")
+    if retry_after.isdigit():
+        return min(float(retry_after), RATE_LIMIT_MAX_DELAY_SECONDS)
+    return RATE_LIMIT_BASE_DELAY_SECONDS * 2 ** (attempt - 1)
 
 
 class RedTrackAPI:
@@ -98,15 +114,28 @@ class RedTrackAPI:
         )
 
     async def _get(self, client: httpx.AsyncClient, path: str, **params):
-        """GET com a api_key na query (mesmo formato do POST /conversions)."""
-        try:
-            response = await client.get(
-                f"{self.base_url}{path}",
-                params={"api_key": self.api_key, **params},
-                headers=self.headers,
+        """GET com a api_key na query (mesmo formato do POST /conversions).
+
+        429 é retentado com backoff (RATE_LIMIT_ATTEMPTS tentativas no total).
+        """
+        for attempt in range(1, RATE_LIMIT_ATTEMPTS + 1):
+            try:
+                response = await client.get(
+                    f"{self.base_url}{path}",
+                    params={"api_key": self.api_key, **params},
+                    headers=self.headers,
+                )
+            except httpx.TransportError as e:
+                raise RedTrackAPIError(f"Falha de conexão em GET {path}: {e}") from e
+
+            if response.status_code != 429 or attempt == RATE_LIMIT_ATTEMPTS:
+                break
+            wait = _rate_limit_delay(response, attempt)
+            logger.warning(
+                f"[redtrack] 429 em GET {path} (tentativa {attempt}/"
+                f"{RATE_LIMIT_ATTEMPTS}). Retentando em {wait:.0f}s..."
             )
-        except httpx.TransportError as e:
-            raise RedTrackAPIError(f"Falha de conexão em GET {path}: {e}") from e
+            await asyncio.sleep(wait)
 
         if response.status_code != 200:
             raise RedTrackAPIError(
