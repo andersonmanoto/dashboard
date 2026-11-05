@@ -118,8 +118,8 @@ class Settings(BaseSettings):
     aweber_client_id: str = ""
     aweber_client_secret: str = ""
     aweber_account_id: str = ""
-    # As listas de destino são por produto e por rede: tabela
-    # aweber_product_lists (enabled_networks).
+    # As listas de destino são por produto (qualquer rede): tabela
+    # aweber_product_lists.
     # Tags extras aplicadas a TODO lead, de qualquer rede, separadas por
     # vírgula. A tag da rede ("pagamerican"/"buygoods") já vai em cada lead,
     # então isto normalmente fica vazio -- "pagamerican" aqui marcaria os

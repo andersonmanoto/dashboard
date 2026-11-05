@@ -18,8 +18,6 @@ from tests.test_normalizer import PAYLOAD_BUYGOODS_REAL, PAYLOAD_PAGAMERICAN_PUR
 
 SODAHORSE_ID = "f0494709-01fb-4d0e-8e8c-3e200f25b13c"
 SODAHORSE_LISTS = {"neworder_list_id": "6977002", "abandon_list_id": "6977004"}
-PA = NetworkType.PAGAMERICAN.value
-BG = NetworkType.BUYGOODS.value
 
 ABANDON_BODY = {
     "_pa_event": "checkout.session.abandoned.v-1.0.0",
@@ -112,10 +110,9 @@ class FakeCheckout:
 
 
 class FakeDB:
-    def __init__(self, tokens=None, lists=None, networks=(PA,)):
+    def __init__(self, tokens=None, lists=None):
         self.tokens = tokens
         self.lists = lists or {}  # product_id -> listas
-        self.networks = set(networks)  # enabled_networks de todos os produtos
         self.saved = None
         self.leads = []
         self.checkout_lookups = []
@@ -129,9 +126,7 @@ class FakeDB:
             return FakeCheckout(SODAHORSE_ID)
         return None
 
-    def get_aweber_list_ids(self, product_id, network):
-        if network not in self.networks:
-            return None
+    def get_aweber_list_ids(self, product_id):
         return self.lists.get(str(product_id))
 
     def enqueue_aweber_lead(self, lead_type, list_id, subscriber):
@@ -169,7 +164,7 @@ def test_abandono_vai_pra_lista_de_carrinho_do_produto():
 
 
 def test_abandono_buygoods_vai_pra_lista_de_carrinho_do_produto():
-    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS}, networks=(PA, BG))
+    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
     processor = EventProcessor(db, zapier_webhook_enabled=False, aweber_enabled=True)
     assert asyncio.run(processor.process_buygoods_abandon_cart(BUYGOODS_ABANDON))
     # checkout buscado com o account_id da BuyGoods
@@ -189,26 +184,14 @@ def test_abandono_buygoods_vai_pra_lista_de_carrinho_do_produto():
     ]
 
 
-def test_produto_ligado_so_pra_pagamerican_nao_manda_buygoods():
-    # SodaHorsePeak tem um product_id só pras duas redes: ligar a BuyGoods
-    # é explícito (enabled_networks), não vem junto com a PagAmerican.
-    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS}, networks=(PA,))
-    processor = EventProcessor(db, zapier_webhook_enabled=False, aweber_enabled=True)
-    assert asyncio.run(processor.process_buygoods_abandon_cart(BUYGOODS_ABANDON))
-    processor._enqueue_aweber_lead(
-        "neworder", BG, SODAHORSE_ID, build_order_subscriber(_buygoods_event()), "t"
-    )
-    assert db.leads == []
-
-
 def test_venda_vai_pra_lista_new_order_do_produto():
-    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS}, networks=(PA, BG))
+    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
     processor = EventProcessor(db, aweber_enabled=True)
     processor._enqueue_aweber_lead(
-        "neworder", PA, SODAHORSE_ID, build_order_subscriber(_order_event()), "t"
+        "neworder", SODAHORSE_ID, build_order_subscriber(_order_event()), "t"
     )
     processor._enqueue_aweber_lead(
-        "neworder", BG, SODAHORSE_ID, build_order_subscriber(_buygoods_event()), "t"
+        "neworder", SODAHORSE_ID, build_order_subscriber(_buygoods_event()), "t"
     )
     assert [(t, lst) for t, lst, _ in db.leads] == [
         ("neworder", "6977002"),
@@ -217,18 +200,18 @@ def test_venda_vai_pra_lista_new_order_do_produto():
 
 
 def test_produto_sem_listas_nao_enfileira():
-    db = FakeDB(lists={}, networks=(PA, BG))
+    db = FakeDB(lists={})
     processor = EventProcessor(db, zapier_webhook_enabled=False, aweber_enabled=True)
     asyncio.run(processor.process_pagamerican_abandon_cart(ABANDON_BODY))
     asyncio.run(processor.process_buygoods_abandon_cart(BUYGOODS_ABANDON))
     processor._enqueue_aweber_lead(
-        "neworder", PA, "outro-produto", build_order_subscriber(_order_event()), "t"
+        "neworder", "outro-produto", build_order_subscriber(_order_event()), "t"
     )
     assert db.leads == []
 
 
 def test_abandono_nao_enfileira_com_aweber_desligado():
-    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS}, networks=(PA, BG))
+    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
     processor = EventProcessor(db, zapier_webhook_enabled=False)
     asyncio.run(processor.process_pagamerican_abandon_cart(ABANDON_BODY))
     asyncio.run(processor.process_buygoods_abandon_cart(BUYGOODS_ABANDON))

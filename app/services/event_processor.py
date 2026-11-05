@@ -90,26 +90,19 @@ class EventProcessor:
             logger.exception(f"Falha ao enfileirar webhook Zapier ({context})")
 
     def _enqueue_aweber_lead(
-        self,
-        lead_type: str,
-        network: str,
-        product_id,
-        subscriber: Optional[dict],
-        context: str,
+        self, lead_type: str, product_id, subscriber: Optional[dict], context: str
     ) -> None:
         """
         Enfileira o lead na lista do AWeber do produto (New Order ou carrinho
-        abandonado, conforme o lead_type). Produto fora de aweber_product_lists,
-        ou sem a rede em enabled_networks, não manda lead. Igual ao Zapier,
-        nunca deixa uma falha aqui derrubar o processamento do evento/carrinho.
+        abandonado, conforme o lead_type). Produto fora de aweber_product_lists
+        não manda lead, de nenhuma rede. Igual ao Zapier, nunca deixa uma falha
+        aqui derrubar o processamento do evento/carrinho.
         """
         if not subscriber:
             logger.info(f"Lead sem email válido, não enfileirado pro AWeber ({context})")
             return
         try:
-            lists = (
-                self.db.get_aweber_list_ids(product_id, network) if product_id else None
-            )
+            lists = self.db.get_aweber_list_ids(product_id) if product_id else None
             if not lists:
                 return
             list_id = (
@@ -295,10 +288,8 @@ class EventProcessor:
             # chargeback chegam como linhas "Purchase" com outro action_type,
             # então o filtro de NEWORDER já os deixa de fora.
             if self.aweber_enabled and self._is_aweber_order(event):
-                network = self._network_value(event.network)
                 self._enqueue_aweber_lead(
                     "neworder",
-                    network,
                     event.product_id,
                     build_order_subscriber(event),
                     f"order {order_id}",
@@ -566,7 +557,6 @@ class EventProcessor:
             return
         self._enqueue_aweber_lead(
             "abandon",
-            NetworkType.BUYGOODS.value,
             checkout_info.product_id if checkout_info else None,
             build_abandon_subscriber(cart_data, NetworkType.BUYGOODS.value),
             f"abandon {cart_data.get('customer_email')}",
@@ -752,7 +742,6 @@ class EventProcessor:
                 )
                 self._enqueue_aweber_lead(
                     "abandon",
-                    NetworkType.PAGAMERICAN.value,
                     checkout_info.product_id if checkout_info else None,
                     build_abandon_subscriber(cart_data, NetworkType.PAGAMERICAN.value),
                     f"abandon {customer_email}",
