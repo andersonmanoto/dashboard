@@ -760,15 +760,17 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao marcar webhook Zapier {queue_id} como falho: {e}")
 
-    def get_aweber_list_ids(self, product_id) -> Optional[dict]:
+    def get_aweber_list_ids(self, product_id, network: str) -> Optional[dict]:
         """
         Listas do AWeber do produto ({neworder_list_id, abandon_list_id}), ou
-        None se o produto não estiver em aweber_product_lists (= não envia).
+        None se o produto não estiver em aweber_product_lists ou não tiver a
+        rede em enabled_networks (= não envia).
         """
         response = (
             self.client.table("aweber_product_lists")
             .select("neworder_list_id, abandon_list_id")
             .eq("product_id", str(product_id))
+            .contains("enabled_networks", [network])
             .limit(1)
             .execute()
         )

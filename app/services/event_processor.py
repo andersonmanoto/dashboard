@@ -90,19 +90,26 @@ class EventProcessor:
             logger.exception(f"Falha ao enfileirar webhook Zapier ({context})")
 
     def _enqueue_aweber_lead(
-        self, lead_type: str, product_id, subscriber: Optional[dict], context: str
+        self,
+        lead_type: str,
+        network: str,
+        product_id,
+        subscriber: Optional[dict],
+        context: str,
     ) -> None:
         """
         Enfileira o lead na lista do AWeber do produto (New Order ou carrinho
-        abandonado, conforme o lead_type). Produto fora de aweber_product_lists
-        não manda lead. Igual ao Zapier, nunca deixa uma falha aqui derrubar o
-        processamento do evento/carrinho.
+        abandonado, conforme o lead_type). Produto fora de aweber_product_lists,
+        ou sem a rede em enabled_networks, não manda lead. Igual ao Zapier,
+        nunca deixa uma falha aqui derrubar o processamento do evento/carrinho.
         """
         if not subscriber:
             logger.info(f"Lead sem email válido, não enfileirado pro AWeber ({context})")
             return
         try:
-            lists = self.db.get_aweber_list_ids(product_id) if product_id else None
+            lists = (
+                self.db.get_aweber_list_ids(product_id, network) if product_id else None
+            )
             if not lists:
                 return
             list_id = (
@@ -182,6 +189,24 @@ class EventProcessor:
             return None
 
         return self.db.get_product_name(checkout_info.product_id)
+
+    @classmethod
+    def _is_aweber_order(cls, event: NormalizedEvent) -> bool:
+        """
+        Venda que vira lead na lista New Order do AWeber. PagAmerican: toda
+        venda nova (comportamento original). BuyGoods: só o front
+        (funnel_stage "Purchase", inclui os checkouts calls_*) -- upsell e
+        downsell são a mesma pessoa e só gerariam chamadas a mais, igual ao
+        autoresponder nativo da BuyGoods que este fluxo substitui.
+        """
+        if event.is_test or event.action_type != ActionType.NEWORDER:
+            return False
+        network = cls._network_value(event.network)
+        if network == NetworkType.PAGAMERICAN.value:
+            return True
+        if network == NetworkType.BUYGOODS.value:
+            return event.funnel_stage == "Purchase"
+        return False
 
     @staticmethod
     def _network_value(network):
@@ -266,15 +291,14 @@ class EventProcessor:
                     context=f"order {order_id}",
                 )
 
-            # 6. Lead pro AWeber: só venda PagAmerican ao vivo, nunca teste
-            if (
-                self.aweber_enabled
-                and not event.is_test
-                and event.action_type == ActionType.NEWORDER
-                and self._network_value(event.network) == NetworkType.PAGAMERICAN.value
-            ):
+            # 6. Lead pro AWeber: só venda nova ao vivo, nunca teste. Refund e
+            # chargeback chegam como linhas "Purchase" com outro action_type,
+            # então o filtro de NEWORDER já os deixa de fora.
+            if self.aweber_enabled and self._is_aweber_order(event):
+                network = self._network_value(event.network)
                 self._enqueue_aweber_lead(
                     "neworder",
+                    network,
                     event.product_id,
                     build_order_subscriber(event),
                     f"order {order_id}",
@@ -528,6 +552,26 @@ class EventProcessor:
 
         return event.sale_total
 
+    def _enqueue_buygoods_abandon_aweber(
+        self, cart_data: dict, account_id: Optional[str]
+    ) -> None:
+        """Lead de carrinho abandonado da BuyGoods pra lista de abandono do produto."""
+        codename = cart_data.get("product_codename")
+        try:
+            checkout_info = (
+                self.db.get_checkout_by_code(codename, account_id) if codename else None
+            )
+        except Exception:
+            logger.exception(f"Falha ao buscar checkout {codename} pro AWeber")
+            return
+        self._enqueue_aweber_lead(
+            "abandon",
+            NetworkType.BUYGOODS.value,
+            checkout_info.product_id if checkout_info else None,
+            build_abandon_subscriber(cart_data, NetworkType.BUYGOODS.value),
+            f"abandon {cart_data.get('customer_email')}",
+        )
+
     async def process_buygoods_abandon_cart(self, payload: dict) -> bool:
         """
         Processa o payload de carrinho abandonado da BuyGoods.
@@ -568,6 +612,16 @@ class EventProcessor:
                 self._enqueue_zapier_webhook(
                     build_abandoned_cart_payload(cart_data, product_name=product_name),
                     context=f"abandon {customer_email}",
+                )
+
+            if result and self.aweber_enabled:
+                # Roda na API (rota /buygoods/abandon), não no worker: as
+                # chamadas síncronas ao Supabase vão pra thread pra não travar
+                # o event loop.
+                await asyncio.to_thread(
+                    self._enqueue_buygoods_abandon_aweber,
+                    cart_data,
+                    payload.get("account_id"),
                 )
 
             return bool(result)
@@ -698,8 +752,9 @@ class EventProcessor:
                 )
                 self._enqueue_aweber_lead(
                     "abandon",
+                    NetworkType.PAGAMERICAN.value,
                     checkout_info.product_id if checkout_info else None,
-                    build_abandon_subscriber(cart_data),
+                    build_abandon_subscriber(cart_data, NetworkType.PAGAMERICAN.value),
                     f"abandon {customer_email}",
                 )
 
