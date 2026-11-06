@@ -116,9 +116,15 @@ class FakeDB:
         self.saved = None
         self.leads = []
         self.checkout_lookups = []
+        self.carts = []
+        self.lead_origins = []
 
     def insert_abandoned_cart(self, cart_data):
+        self.carts.append(cart_data)
         return {"id": "cart-1"}
+
+    def get_network_id(self, network):
+        return f"net-{network.value}"
 
     def get_checkout_by_code(self, code, account_id=None):
         self.checkout_lookups.append((code, account_id))
@@ -129,8 +135,11 @@ class FakeDB:
     def get_aweber_list_ids(self, product_id):
         return self.lists.get(str(product_id))
 
-    def enqueue_aweber_lead(self, lead_type, list_id, subscriber):
+    def enqueue_aweber_lead(
+        self, lead_type, list_id, subscriber, abandoned_cart_id=None, event_id=None
+    ):
         self.leads.append((lead_type, list_id, subscriber))
+        self.lead_origins.append((abandoned_cart_id, event_id))
         return {"id": "q-1"}
 
     def get_aweber_tokens(self):
@@ -161,6 +170,10 @@ def test_abandono_vai_pra_lista_de_carrinho_do_produto():
             },
         )
     ]
+    # carrinho salvo com produto e rede; lead da fila aponta pro carrinho
+    assert db.carts[0]["product_id"] == SODAHORSE_ID
+    assert db.carts[0]["network_id"] == "net-PagAmerican"
+    assert db.lead_origins == [("cart-1", None)]
 
 
 def test_abandono_buygoods_vai_pra_lista_de_carrinho_do_produto():
@@ -182,13 +195,30 @@ def test_abandono_buygoods_vai_pra_lista_de_carrinho_do_produto():
             },
         )
     ]
+    assert db.carts[0]["product_id"] == SODAHORSE_ID
+    assert db.carts[0]["network_id"] == "net-BuyGoods"
+    assert db.lead_origins == [("cart-1", None)]
+
+
+def test_carrinho_de_codename_desconhecido_salva_sem_produto():
+    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
+    processor = EventProcessor(db, zapier_webhook_enabled=False, aweber_enabled=True)
+    body = {**BUYGOODS_ABANDON, "product_codename": "nao_cadastrado"}
+    assert asyncio.run(processor.process_buygoods_abandon_cart(body))
+    assert "product_id" not in db.carts[0]
+    assert db.carts[0]["network_id"] == "net-BuyGoods"
+    assert db.leads == []
 
 
 def test_venda_vai_pra_lista_new_order_do_produto():
     db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
     processor = EventProcessor(db, aweber_enabled=True)
     processor._enqueue_aweber_lead(
-        "neworder", SODAHORSE_ID, build_order_subscriber(_order_event()), "t"
+        "neworder",
+        SODAHORSE_ID,
+        build_order_subscriber(_order_event()),
+        "t",
+        event_id="ev-1",
     )
     processor._enqueue_aweber_lead(
         "neworder", SODAHORSE_ID, build_order_subscriber(_buygoods_event()), "t"
@@ -197,6 +227,7 @@ def test_venda_vai_pra_lista_new_order_do_produto():
         ("neworder", "6977002"),
         ("neworder", "6977002"),
     ]
+    assert db.lead_origins == [(None, "ev-1"), (None, None)]
 
 
 def test_produto_sem_listas_nao_enfileira():

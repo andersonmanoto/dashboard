@@ -90,13 +90,22 @@ class EventProcessor:
             logger.exception(f"Falha ao enfileirar webhook Zapier ({context})")
 
     def _enqueue_aweber_lead(
-        self, lead_type: str, product_id, subscriber: Optional[dict], context: str
+        self,
+        lead_type: str,
+        product_id,
+        subscriber: Optional[dict],
+        context: str,
+        abandoned_cart_id: Optional[str] = None,
+        event_id: Optional[str] = None,
     ) -> None:
         """
         Enfileira o lead na lista do AWeber do produto (New Order ou carrinho
         abandonado, conforme o lead_type). Produto fora de aweber_product_lists
         não manda lead, de nenhuma rede. Igual ao Zapier, nunca deixa uma falha
         aqui derrubar o processamento do evento/carrinho.
+
+        abandoned_cart_id / event_id: linha de origem (abandoned_carts no
+        abandono, events na venda), gravada na fila como FK.
         """
         if not subscriber:
             logger.info(f"Lead sem email válido, não enfileirado pro AWeber ({context})")
@@ -110,7 +119,13 @@ class EventProcessor:
                 if lead_type == "abandon"
                 else lists["neworder_list_id"]
             )
-            if self.db.enqueue_aweber_lead(lead_type, list_id, subscriber):
+            if self.db.enqueue_aweber_lead(
+                lead_type,
+                list_id,
+                subscriber,
+                abandoned_cart_id=abandoned_cart_id,
+                event_id=event_id,
+            ):
                 logger.info(f"Lead enfileirado pro AWeber | lead_type={lead_type} | {context}")
             else:
                 logger.warning(f"Lead NÃO enfileirado pro AWeber ({context})")
@@ -287,16 +302,18 @@ class EventProcessor:
             # 6. Lead pro AWeber: só venda nova ao vivo, nunca teste. Refund e
             # chargeback chegam como linhas "Purchase" com outro action_type,
             # então o filtro de NEWORDER já os deixa de fora.
+            event_id = result.get("id") if isinstance(result, dict) else None
+
             if self.aweber_enabled and self._is_aweber_order(event):
                 self._enqueue_aweber_lead(
                     "neworder",
                     event.product_id,
                     build_order_subscriber(event),
                     f"order {order_id}",
+                    event_id=event_id,
                 )
 
             # 7. Purchase pro RedTrack (só front, só afiliado interno)
-            event_id = result.get("id") if isinstance(result, dict) else None
             self.enqueue_redtrack_conversion(event, event_id)
 
             return True
@@ -543,23 +560,42 @@ class EventProcessor:
 
         return event.sale_total
 
-    def _enqueue_buygoods_abandon_aweber(
-        self, cart_data: dict, account_id: Optional[str]
-    ) -> None:
-        """Lead de carrinho abandonado da BuyGoods pra lista de abandono do produto."""
-        codename = cart_data.get("product_codename")
+    def _cart_refs(
+        self,
+        network: NetworkType,
+        codename: Optional[str],
+        account_id: Optional[str] = None,
+    ) -> dict:
+        """
+        network_id e product_id do carrinho abandonado (colunas de
+        abandoned_carts). O produto vem do checkout do codename; codename não
+        cadastrado fica sem product_id. Falha aqui nunca impede de salvar o
+        carrinho.
+        """
+        refs = {}
         try:
+            network_id = self.db.get_network_id(network)
+            if network_id:
+                refs["network_id"] = str(network_id)
             checkout_info = (
                 self.db.get_checkout_by_code(codename, account_id) if codename else None
             )
+            if checkout_info:
+                refs["product_id"] = str(checkout_info.product_id)
         except Exception:
-            logger.exception(f"Falha ao buscar checkout {codename} pro AWeber")
-            return
+            logger.exception(f"Falha ao buscar produto/rede do carrinho {codename}")
+        return refs
+
+    def _enqueue_abandon_aweber(
+        self, cart_data: dict, cart: dict, network: NetworkType
+    ) -> None:
+        """Lead de carrinho abandonado pra lista de abandono do produto."""
         self._enqueue_aweber_lead(
             "abandon",
-            checkout_info.product_id if checkout_info else None,
-            build_abandon_subscriber(cart_data, NetworkType.BUYGOODS.value),
+            cart_data.get("product_id"),
+            build_abandon_subscriber(cart_data, network.value),
             f"abandon {cart_data.get('customer_email')}",
+            abandoned_cart_id=cart.get("id"),
         )
 
     async def process_buygoods_abandon_cart(self, payload: dict) -> bool:
@@ -593,6 +629,14 @@ class EventProcessor:
             # Usa o repositório instanciado — chamada síncrona/bloqueante do
             # client Supabase, offload pra thread pra não travar o event
             # loop (e outros requests concorrentes) se o Supabase demorar.
+            cart_data.update(
+                await asyncio.to_thread(
+                    self._cart_refs,
+                    NetworkType.BUYGOODS,
+                    cart_data["product_codename"],
+                    payload.get("account_id"),
+                )
+            )
             result = await asyncio.to_thread(self.db.insert_abandoned_cart, cart_data)
 
             if result and self.zapier_webhook_enabled:
@@ -609,9 +653,10 @@ class EventProcessor:
                 # chamadas síncronas ao Supabase vão pra thread pra não travar
                 # o event loop.
                 await asyncio.to_thread(
-                    self._enqueue_buygoods_abandon_aweber,
+                    self._enqueue_abandon_aweber,
                     cart_data,
-                    payload.get("account_id"),
+                    result,
+                    NetworkType.BUYGOODS,
                 )
 
             return bool(result)
@@ -664,6 +709,11 @@ class EventProcessor:
                 "is_recovered": False,
             }
 
+            cart_data.update(
+                await asyncio.to_thread(
+                    self._cart_refs, NetworkType.DIGISTORE24, product_codename
+                )
+            )
             result = await asyncio.to_thread(self.db.insert_abandoned_cart, cart_data)
 
             if result and self.zapier_webhook_enabled:
@@ -727,6 +777,11 @@ class EventProcessor:
                 "is_recovered": False,
             }
 
+            cart_data.update(
+                await asyncio.to_thread(
+                    self._cart_refs, NetworkType.PAGAMERICAN, offer_code
+                )
+            )
             result = await asyncio.to_thread(self.db.insert_abandoned_cart, cart_data)
 
             if result and self.zapier_webhook_enabled:
@@ -737,15 +792,7 @@ class EventProcessor:
                 )
 
             if result and self.aweber_enabled:
-                checkout_info = (
-                    self.db.get_checkout_by_code(offer_code) if offer_code else None
-                )
-                self._enqueue_aweber_lead(
-                    "abandon",
-                    checkout_info.product_id if checkout_info else None,
-                    build_abandon_subscriber(cart_data, NetworkType.PAGAMERICAN.value),
-                    f"abandon {customer_email}",
-                )
+                self._enqueue_abandon_aweber(cart_data, result, NetworkType.PAGAMERICAN)
 
             return bool(result)
 
