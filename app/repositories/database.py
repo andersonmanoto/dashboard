@@ -875,6 +875,100 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao marcar lead AWeber {queue_id} como falho: {e}")
 
+    def enqueue_slicktext_abandon(
+        self,
+        abandoned_cart_id: Optional[str],
+        network: str,
+        payload: dict,
+        max_retries: int = 3,
+    ) -> Optional[dict]:
+        """
+        Insere o carrinho abandonado na slicktext_abandon_queue (SMS). O envio
+        é feito depois, pelo cron (worker.py). Mesmo padrão de retry de
+        enqueue_aweber_lead.
+        """
+        row = {
+            "network": network,
+            "phone": payload.get("phone") or None,
+            "payload": payload,
+        }
+        if abandoned_cart_id:
+            row["abandoned_cart_id"] = str(abandoned_cart_id)
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = (
+                    self.client.table("slicktext_abandon_queue").insert(row).execute()
+                )
+                return response.data[0] if response.data else None
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
+                if attempt == max_retries:
+                    logger.error(
+                        f"Erro ao enfileirar abandono SlickText: esgotou {max_retries} "
+                        f"tentativas ({type(exc).__name__}): {exc}"
+                    )
+                    return None
+                wait = 2**attempt
+                logger.warning(
+                    f"Erro ao enfileirar abandono SlickText: tentativa {attempt}/"
+                    f"{max_retries} falhou ({type(exc).__name__}). "
+                    f"Retentando em {wait}s..."
+                )
+                time.sleep(wait)
+            except Exception as e:
+                logger.error(f"Erro ao enfileirar abandono SlickText: {e}")
+                return None
+        return None
+
+    def fetch_pending_slicktext_abandons(self, limit: int = 15) -> list[dict]:
+        try:
+            response = (
+                self.client.table("slicktext_abandon_queue")
+                .select("id, network, payload, attempts")
+                .eq("status", "pending")
+                .order("created_at")
+                .limit(limit)
+                .execute()
+            )
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Erro ao buscar fila de abandonos SlickText: {e}")
+            return []
+
+    def mark_slicktext_abandon(
+        self,
+        queue_id: str,
+        status: str,
+        attempts: int,
+        error: Optional[str] = None,
+        max_attempts: int = 3,
+    ) -> None:
+        """
+        Grava o resultado do envio. status: 'sent', 'skipped' ou 'retry'
+        (erro temporário: volta pra 'pending', ou 'failed' ao esgotar as
+        tentativas). `attempts` é o valor lido da fila, antes desta tentativa.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        new_attempts = attempts + 1
+        if status == "retry":
+            status = "failed" if new_attempts >= max_attempts else "pending"
+        fields = {
+            "status": status,
+            "attempts": new_attempts,
+            "last_error": error[:500] if error else None,
+            "updated_at": now,
+        }
+        if status == "sent":
+            fields["sent_at"] = now
+        try:
+            (
+                self.client.table("slicktext_abandon_queue")
+                .update(fields)
+                .eq("id", queue_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Erro ao marcar abandono SlickText {queue_id} ({status}): {e}")
+
     def get_aweber_tokens(self) -> Optional[dict]:
         """Tokens OAuth do AWeber (linha única de aweber_oauth_tokens), ou None."""
         response = (

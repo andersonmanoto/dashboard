@@ -42,6 +42,7 @@ class EventProcessor:
         redtrack_send_from: Optional[str] = None,
         redtrack_excluded_product_ids: Optional[frozenset[str]] = None,
         aweber_enabled: bool = False,
+        slicktext_abandon_enabled: bool = False,
     ):
         """
         Inicializa o processador.
@@ -64,6 +65,9 @@ class EventProcessor:
             aweber_enabled (bool): Se True, enfileira leads da PagAmerican
                 (vendas e abandonos) pro AWeber. Desligado por padrão pelo
                 mesmo motivo do RedTrack: só o worker liga (via config).
+            slicktext_abandon_enabled (bool): Se True, enfileira o carrinho
+                abandonado na slicktext_abandon_queue (SMS). Desligado por
+                padrão: só a API e o worker ligam, nunca backfill/retro.
         """
         self.db = db_repo
         self.slack = slack_service
@@ -71,6 +75,7 @@ class EventProcessor:
         self.redtrack_send_from = redtrack_send_from or None
         self.redtrack_excluded_product_ids = redtrack_excluded_product_ids or frozenset()
         self.aweber_enabled = aweber_enabled
+        self.slicktext_abandon_enabled = slicktext_abandon_enabled
 
     def _enqueue_zapier_webhook(self, payload: dict, context: str) -> None:
         """
@@ -598,6 +603,30 @@ class EventProcessor:
             abandoned_cart_id=cart.get("id"),
         )
 
+    def _enqueue_slicktext_abandon(
+        self, cart_data: dict, cart: dict, network: NetworkType, country_fallback: str = "US"
+    ) -> None:
+        """
+        Carrinho abandonado pra slicktext_abandon_queue (SMS). O cron valida
+        o telefone e envia; aqui só registra, com o id do carrinho. Nunca
+        deixa uma falha aqui derrubar o processamento do carrinho.
+        """
+        location = cart_data.get("location") or {}
+        payload = {
+            "name": cart_data.get("customer_name", ""),
+            "phone": cart_data.get("customer_phone", ""),
+            "product_codename": cart_data.get("product_codename", ""),
+            "country": location.get("country") or country_fallback,
+        }
+        context = f"abandon {cart_data.get('customer_email')}"
+        try:
+            if self.db.enqueue_slicktext_abandon(cart.get("id"), network.value, payload):
+                logger.info(f"Abandono enfileirado pro SlickText | {context}")
+            else:
+                logger.warning(f"Abandono NÃO enfileirado pro SlickText ({context})")
+        except Exception:
+            logger.exception(f"Falha ao enfileirar abandono SlickText ({context})")
+
     async def process_buygoods_abandon_cart(self, payload: dict) -> bool:
         """
         Processa o payload de carrinho abandonado da BuyGoods.
@@ -654,6 +683,14 @@ class EventProcessor:
                 # o event loop.
                 await asyncio.to_thread(
                     self._enqueue_abandon_aweber,
+                    cart_data,
+                    result,
+                    NetworkType.BUYGOODS,
+                )
+
+            if result and self.slicktext_abandon_enabled:
+                await asyncio.to_thread(
+                    self._enqueue_slicktext_abandon,
                     cart_data,
                     result,
                     NetworkType.BUYGOODS,
@@ -725,6 +762,14 @@ class EventProcessor:
                     context=f"abandon {customer_email}",
                 )
 
+            if result and self.slicktext_abandon_enabled:
+                await asyncio.to_thread(
+                    self._enqueue_slicktext_abandon,
+                    cart_data,
+                    result,
+                    NetworkType.DIGISTORE24,
+                )
+
             return bool(result)
 
         except Exception as e:
@@ -793,6 +838,14 @@ class EventProcessor:
 
             if result and self.aweber_enabled:
                 self._enqueue_abandon_aweber(cart_data, result, NetworkType.PAGAMERICAN)
+
+            if result and self.slicktext_abandon_enabled:
+                await asyncio.to_thread(
+                    self._enqueue_slicktext_abandon,
+                    cart_data,
+                    result,
+                    NetworkType.PAGAMERICAN,
+                )
 
             return bool(result)
 

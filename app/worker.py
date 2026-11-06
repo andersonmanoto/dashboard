@@ -17,41 +17,12 @@ from app.services.normalizer import PayloadNormalizer
 from app.services.redtrack_creative_service import RedTrackCreativeSync
 from app.services.redtrack_service import RedTrackAPI, RedTrackAPIError
 from app.services.slack_service import SlackService
-from app.services.slicktext_service import process_slicktext_sync_task
+from app.services.slicktext_service import (
+    AbandonOutcome,
+    process_slicktext_sync_task,
+)
 
 from app.scripts.sync_approved_orders import fetch_pending_ids, process_single_item
-
-
-async def _sync_pagamerican_abandon_slicktext(
-    payload: dict, db_repo: DatabaseRepository
-) -> None:
-    """
-    Dispara o SlickText pro abandono da PagAmerican, adaptando os campos
-    aninhados dela (checkoutForm.*, offerCode) pro formato flat que
-    process_slicktext_sync_task espera (mesmo formato da BuyGoods).
-    Best-effort: erro aqui não pode derrubar o job principal.
-    """
-    try:
-        checkout_form = payload.get("checkoutForm") or {}
-        slicktext_payload = {
-            "name": " ".join(
-                filter(
-                    None,
-                    [checkout_form.get("firstName"), checkout_form.get("lastName")],
-                )
-            ),
-            "phone": checkout_form.get("phone", ""),
-            "product_codename": payload.get("offerCode", ""),
-            "country": checkout_form.get("country", "US"),
-        }
-        await process_slicktext_sync_task(
-            slicktext_payload,
-            get_settings(),
-            db_repo,
-            platform=NetworkType.PAGAMERICAN.value,
-        )
-    except Exception:
-        logger.exception("Falha ao sincronizar SlickText (abandono PagAmerican)")
 
 
 async def task_process_webhook(
@@ -81,8 +52,9 @@ async def task_process_webhook(
             network == NetworkType.PAGAMERICAN
             and payload.get("_pa_event") == PAGAMERICAN_ABANDON_EVENT
         ):
+            # SMS (SlickText): o processor enfileira o carrinho na
+            # slicktext_abandon_queue; cron_send_slicktext_abandons envia.
             success = await processor.process_pagamerican_abandon_cart(payload)
-            await _sync_pagamerican_abandon_slicktext(payload, db_repo)
             log_id = payload.get("abandonedSaleUcode", "")
         else:
             normalized_event = normalizer.normalize(network, payload)
@@ -151,6 +123,7 @@ async def startup(ctx):
         redtrack_send_from=settings.redtrack_conversions_send_from,
         redtrack_excluded_product_ids=settings.redtrack_conversions_excluded_product_id_set,
         aweber_enabled=settings.aweber_enabled,
+        slicktext_abandon_enabled=True,
     )
 
     logger.info("Worker pronto e conectado ao Redis.")
@@ -383,6 +356,49 @@ async def cron_send_aweber_leads(ctx):
     logger.info(f"{len(pending)} lead(s) processado(s) pro AWeber.")
 
 
+async def cron_send_slicktext_abandons(ctx):
+    """
+    Lê a slicktext_abandon_queue (carrinhos abandonados das 3 redes, já
+    salvos em abandoned_carts) e envia o SMS pro SlickText. Grava o
+    resultado de cada um: sent, skipped (descarte de propósito, com motivo)
+    ou retry (erro temporário -> pending de novo, até 3 -> failed).
+    Sequencial: cada item faz até ~3 chamadas externas (AbstractAPI +
+    SlickText por conta), e o lote é pequeno pra caber no timeout do cron.
+    """
+    db_repo: DatabaseRepository = ctx["db_repo"]
+    settings = get_settings()
+
+    pending = await asyncio.to_thread(
+        db_repo.fetch_pending_slicktext_abandons, limit=15
+    )
+    if not pending:
+        return
+
+    for row in pending:
+        queue_id = row["id"]
+        attempts = row.get("attempts", 0)
+        try:
+            outcome = await process_slicktext_sync_task(
+                row["payload"], settings, db_repo, platform=row["network"]
+            )
+        except Exception as exc:
+            logger.exception(f"Erro ao enviar abandono SlickText {queue_id}")
+            outcome = AbandonOutcome.retry(f"{type(exc).__name__}: {exc}")
+        await asyncio.to_thread(
+            db_repo.mark_slicktext_abandon,
+            queue_id,
+            outcome.status,
+            attempts,
+            outcome.reason,
+        )
+        logger.info(
+            f"Abandono SlickText {outcome.status} | network={row['network']} "
+            f"| queue_id={queue_id} | {outcome.reason or ''}"
+        )
+
+    logger.info(f"{len(pending)} abandono(s) processado(s) pro SlickText.")
+
+
 class WorkerSettings:
     settings = get_settings()
 
@@ -412,6 +428,11 @@ class WorkerSettings:
         cron(
             cron_sync_redtrack_creatives,
             minute={1, 16, 31, 46},
+            timeout=240,
+        ),
+        cron(
+            cron_send_slicktext_abandons,
+            minute={3, 8, 13, 18, 23, 28, 33, 38, 43, 48, 53, 58},
             timeout=240,
         ),
         cron(

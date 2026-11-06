@@ -34,10 +34,14 @@ def get_event_processor(
     slack_service: Annotated[SlackService, Depends(get_slack_service)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> EventProcessor:
-    # aweber_enabled: o abandono da BuyGoods é processado aqui na API (rota
-    # /buygoods/abandon), não no worker. Só enfileira; quem envia é o cron.
+    # Os abandonos da BuyGoods e da DigiStore24 são processados aqui na API
+    # (rotas /buygoods/abandon e /digistore24/abandon), não no worker. Só
+    # enfileira (AWeber e SlickText); quem envia são os crons do worker.
     return EventProcessor(
-        db_repo, slack_service, aweber_enabled=settings.aweber_enabled
+        db_repo,
+        slack_service,
+        aweber_enabled=settings.aweber_enabled,
+        slicktext_abandon_enabled=True,
     )
 
 
