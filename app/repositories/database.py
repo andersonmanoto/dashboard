@@ -889,7 +889,7 @@ class DatabaseRepository:
         """
         row = {
             "lead_type": "abandon",
-            "network": network,
+            "network_id": self.get_network_id(network),
             "phone": payload.get("phone") or None,
             "payload": payload,
         }
@@ -924,9 +924,10 @@ class DatabaseRepository:
         try:
             response = (
                 self.client.table("slicktext_sync_queue")
-                .select("id, network, payload, attempts")
+                .select("id, payload, attempts, networks(name)")
                 .eq("lead_type", "abandon")
                 .eq("status", "pending")
+                .not_.is_("network_id", "null")
                 .order("created_at")
                 .limit(limit)
                 .execute()

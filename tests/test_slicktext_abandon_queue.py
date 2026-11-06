@@ -284,11 +284,12 @@ class _InsertCapture:
 def test_enqueue_slicktext_abandon_grava_na_fila_unificada():
     repo = DatabaseRepository.__new__(DatabaseRepository)
     repo.client = _InsertCapture()
+    repo._networks_cache = {"BuyGoods": "net-1"}
     repo.enqueue_slicktext_abandon("cart-1", "BuyGoods", {"phone": "5551234567"})
     assert repo.client.name == "slicktext_sync_queue"
     assert repo.client.row == {
         "lead_type": "abandon",
-        "network": "BuyGoods",
+        "network_id": "net-1",
         "phone": "5551234567",
         "payload": {"phone": "5551234567"},
         "abandoned_cart_id": "cart-1",

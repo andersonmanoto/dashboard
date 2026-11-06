@@ -377,9 +377,10 @@ async def cron_send_slicktext_abandons(ctx):
     for row in pending:
         queue_id = row["id"]
         attempts = row.get("attempts", 0)
+        network = row["networks"]["name"]
         try:
             outcome = await process_slicktext_sync_task(
-                row["payload"], settings, db_repo, platform=row["network"]
+                row["payload"], settings, db_repo, platform=network
             )
         except Exception as exc:
             logger.exception(f"Erro ao enviar abandono SlickText {queue_id}")
@@ -392,7 +393,7 @@ async def cron_send_slicktext_abandons(ctx):
             outcome.reason,
         )
         logger.info(
-            f"Abandono SlickText {outcome.status} | network={row['network']} "
+            f"Abandono SlickText {outcome.status} | network={network} "
             f"| queue_id={queue_id} | {outcome.reason or ''}"
         )
 
