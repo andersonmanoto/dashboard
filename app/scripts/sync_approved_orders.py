@@ -447,7 +447,13 @@ async def process_queue_item(item: dict) -> None:
     else:
         await (
             db.table("slicktext_sync_queue")
-            .update({"status": "synced", "last_error": None})
+            .update(
+                {
+                    "status": "synced",
+                    "last_error": None,
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
             .eq("event_id", queue_id)
             .execute()
         )
@@ -464,6 +470,7 @@ async def fetch_pending_ids(limit: int = 15, max_retries: int = 2) -> list[str]:
             res = await (
                 db.table("slicktext_sync_queue")
                 .select("event_id")
+                .eq("lead_type", "neworder")
                 .in_("status", ["pending", "retry"])
                 .lt("attempts", MAX_ATTEMPTS)
                 .order("created_at", desc=True)

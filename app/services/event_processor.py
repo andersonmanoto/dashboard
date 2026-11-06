@@ -66,7 +66,7 @@ class EventProcessor:
                 (vendas e abandonos) pro AWeber. Desligado por padrão pelo
                 mesmo motivo do RedTrack: só o worker liga (via config).
             slicktext_abandon_enabled (bool): Se True, enfileira o carrinho
-                abandonado na slicktext_abandon_queue (SMS). Desligado por
+                abandonado na slicktext_sync_queue (SMS). Desligado por
                 padrão: só a API e o worker ligam, nunca backfill/retro.
         """
         self.db = db_repo
@@ -607,7 +607,7 @@ class EventProcessor:
         self, cart_data: dict, cart: dict, network: NetworkType, country_fallback: str = "US"
     ) -> None:
         """
-        Carrinho abandonado pra slicktext_abandon_queue (SMS). O cron valida
+        Carrinho abandonado pra slicktext_sync_queue (SMS). O cron valida
         o telefone e envia; aqui só registra, com o id do carrinho. Nunca
         deixa uma falha aqui derrubar o processamento do carrinho.
         """

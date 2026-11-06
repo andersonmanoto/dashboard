@@ -199,7 +199,7 @@ def slicktext(monkeypatch):
 
 
 def test_enviado(phone, slicktext):
-    assert _send() == AbandonOutcome.sent()
+    assert _send() == AbandonOutcome.synced()
     assert slicktext["calls"] == [("173009", "+12025550123")]
 
 
@@ -252,7 +252,7 @@ class _UpdateCapture:
 @pytest.mark.parametrize(
     "status, attempts, expected",
     [
-        ("sent", 0, "sent"),
+        ("synced", 0, "synced"),
         ("skipped", 0, "skipped"),
         ("retry", 0, "pending"),
         ("retry", 2, "failed"),  # 3ª tentativa
@@ -265,4 +265,31 @@ def test_mark_slicktext_abandon(status, attempts, expected):
     fields = repo.client.fields
     assert fields["status"] == expected
     assert fields["attempts"] == attempts + 1
-    assert ("sent_at" in fields) == (expected == "sent")
+    assert ("sent_at" in fields) == (expected == "synced")
+
+
+class _InsertCapture:
+    def table(self, name):
+        self.name = name
+        return self
+
+    def insert(self, row):
+        self.row = row
+        return self
+
+    def execute(self):
+        return _Result([{"id": "q-1"}])
+
+
+def test_enqueue_slicktext_abandon_grava_na_fila_unificada():
+    repo = DatabaseRepository.__new__(DatabaseRepository)
+    repo.client = _InsertCapture()
+    repo.enqueue_slicktext_abandon("cart-1", "BuyGoods", {"phone": "5551234567"})
+    assert repo.client.name == "slicktext_sync_queue"
+    assert repo.client.row == {
+        "lead_type": "abandon",
+        "network": "BuyGoods",
+        "phone": "5551234567",
+        "payload": {"phone": "5551234567"},
+        "abandoned_cart_id": "cart-1",
+    }
