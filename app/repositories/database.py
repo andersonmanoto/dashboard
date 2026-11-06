@@ -776,11 +776,20 @@ class DatabaseRepository:
         return response.data[0] if response.data else None
 
     def enqueue_aweber_lead(
-        self, lead_type: str, list_id: str, subscriber: dict, max_retries: int = 3
+        self,
+        lead_type: str,
+        list_id: str,
+        subscriber: dict,
+        abandoned_cart_id: Optional[str] = None,
+        event_id: Optional[str] = None,
+        max_retries: int = 3,
     ) -> Optional[dict]:
         """
         Insere o subscriber (já pronto pro POST /subscribers do AWeber) na
         aweber_lead_queue. O envio HTTP é feito depois, pelo cron (worker.py).
+
+        abandoned_cart_id / event_id: origem do lead (FK pra abandoned_carts
+        no abandono, pra events na venda).
 
         Mesmo padrão de retry de enqueue_zapier_webhook.
         """
@@ -790,6 +799,10 @@ class DatabaseRepository:
             "email": subscriber["email"],
             "payload": subscriber,
         }
+        if abandoned_cart_id:
+            row["abandoned_cart_id"] = str(abandoned_cart_id)
+        if event_id:
+            row["event_id"] = str(event_id)
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.client.table("aweber_lead_queue").insert(row).execute()
