@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from dataclasses import dataclass
 from enum import Enum, auto
 from functools import partial
 from typing import Optional
@@ -271,18 +272,42 @@ def _sync_to_slicktext(
         return _failure(exc.response)
 
 
+@dataclass(frozen=True)
+class AbandonOutcome:
+    """Resultado do envio de um abandono, gravado na slicktext_abandon_queue."""
+
+    status: str  # "sent" | "skipped" | "retry"
+    reason: Optional[str] = None
+
+    @classmethod
+    def sent(cls) -> "AbandonOutcome":
+        return cls("sent")
+
+    @classmethod
+    def skipped(cls, reason: str) -> "AbandonOutcome":
+        return cls("skipped", reason)
+
+    @classmethod
+    def retry(cls, reason: str) -> "AbandonOutcome":
+        return cls("retry", reason)
+
+
 async def process_slicktext_sync_task(
     payload: dict,
     settings: Settings,
     db_repo: DatabaseRepository,
     platform: str = NetworkType.BUYGOODS.value,
-):
+) -> AbandonOutcome:
     """
-    Background task para processar o fluxo do SlickText.
+    Envia um carrinho abandonado pro SlickText (SMS). Chamado pelo cron da
+    slicktext_abandon_queue (worker.py), que grava o resultado devolvido.
 
     `platform` é a rede de origem do carrinho abandonado (valor de
     NetworkType) -- vai pro custom field `plataforma` do contato e decide
     como montar a url_abandonada.
+
+    Devolve AbandonOutcome: sent, skipped (descarte de propósito, com o
+    motivo) ou retry (erro temporário -- o cron tenta de novo).
     """
     customer_name = payload.get("name", "")
     raw_phone = payload.get("phone", "")
@@ -317,7 +342,7 @@ async def process_slicktext_sync_task(
             logger.warning(
                 f"Checkout não encontrado para o codename: {product_codename}"
             )
-            return
+            return AbandonOutcome.skipped(f"checkout não encontrado: {product_codename}")
 
         checkout_data = res.data[0]
         checkout_url = checkout_data.get("url", "")
@@ -327,7 +352,7 @@ async def process_slicktext_sync_task(
             logger.warning(
                 f"Produto não encontrado para o codename: {product_codename}"
             )
-            return
+            return AbandonOutcome.skipped(f"produto não encontrado: {product_codename}")
 
         product_info = checkout_data["products"]
         product_name = product_info.get("name")
@@ -346,7 +371,7 @@ async def process_slicktext_sync_task(
                 logger.info(
                     f"SlickText ignorado: 'aff_id_sms' vazio para '{product_name}' (codename: {product_codename})."
                 )
-                return
+                return AbandonOutcome.skipped(f"aff_id_sms vazio: {product_name}")
 
             url_abandonada_final = f"{checkout_url}&aff_id={aff_id_sms}"
 
@@ -354,7 +379,7 @@ async def process_slicktext_sync_task(
         logger.error(
             f"Erro ao buscar dados no banco para o codename '{product_codename}': {e}"
         )
-        return
+        return AbandonOutcome.retry(f"erro ao buscar checkout: {e}")
 
     # 2. Pega as contas SlickText mapeadas pro produto (pode ser mais de uma
     # -- envia a MESMA informação pra cada conta active, cada qual com seu
@@ -366,7 +391,7 @@ async def process_slicktext_sync_task(
     mappings = [m for m in raw_mappings if m.get("abandoned_list_id")]
     if not mappings:
         logger.warning(f"SlickText: Lista não mapeada para o produto '{product_name}'.")
-        return
+        return AbandonOutcome.skipped(f"lista de abandono não mapeada: {product_name}")
 
     try:
         credentials = credentials_by_account(
@@ -382,7 +407,7 @@ async def process_slicktext_sync_task(
         )
     except Exception as e:
         logger.error(f"[SlickText] Erro ao buscar credenciais das contas: {e}")
-        return
+        return AbandonOutcome.retry(f"erro ao buscar credenciais: {e}")
 
     targets = active_list_targets(mappings, "abandoned_list_id", credentials)
     if not targets:
@@ -390,7 +415,7 @@ async def process_slicktext_sync_task(
             f"SlickText: nenhuma conta active entre as {len(mappings)} com lista "
             f"mapeada para o produto '{product_name}'."
         )
-        return
+        return AbandonOutcome.skipped(f"nenhuma conta active: {product_name}")
 
     # 3. Valida telefone
     # BUG histórico: antes disso, qualquer país diferente de "US"/"united
@@ -405,14 +430,20 @@ async def process_slicktext_sync_task(
             f"SlickText ignorado: país '{country}' ({country_code}) fora do "
             f"escopo {sorted(SMS_ALLOWED_COUNTRIES)} (codename: {product_codename})."
         )
-        return
+        return AbandonOutcome.skipped(f"país fora do escopo: {country_code}")
 
     formatted_phone = format_phone_local(raw_phone, country_code)
+    if not formatted_phone:
+        return AbandonOutcome.skipped("telefone vazio ou inválido")
 
-    if not formatted_phone or not validate_phone_abstract(
-        formatted_phone, settings.abstract_api_key
-    ):
-        return
+    # requests é síncrono: roda em thread pra não travar o event loop
+    phone_ok = await asyncio.to_thread(
+        validate_phone_abstract, formatted_phone, settings.abstract_api_key
+    )
+    if phone_ok is None:
+        return AbandonOutcome.retry("AbstractAPI indisponível")
+    if not phone_ok:
+        return AbandonOutcome.skipped("telefone reprovado pela AbstractAPI")
 
     # 4. Envia para SlickText (Formato plano/flat)
     slicktext_payload = {
@@ -425,10 +456,11 @@ async def process_slicktext_sync_task(
         "plataforma": platform,
     }
 
+    failures = []
     for list_id, account in targets:
         # requests é síncrono: roda em thread pra não travar o event loop
         # durante as tentativas
-        await send_with_account_check(
+        result = await send_with_account_check(
             partial(
                 asyncio.to_thread,
                 _sync_to_slicktext,
@@ -444,3 +476,13 @@ async def process_slicktext_sync_task(
             api_url=settings.slicktext_api_url,
             deactivate=partial(asyncio.to_thread, _deactivate_account, db_repo),
         )
+        if result is not SendResult.SUCCESS:
+            failures.append(f"{account.get('name')}: {result.name}")
+
+    if failures:
+        # Retry reenvia pra todas as contas; a que já recebeu só atualiza o
+        # contato (POST duplicado -> 409 -> PUT).
+        return AbandonOutcome.retry(
+            f"falha em {len(failures)}/{len(targets)} conta(s): " + "; ".join(failures)
+        )
+    return AbandonOutcome.sent()

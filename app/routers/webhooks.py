@@ -1,22 +1,19 @@
 import hashlib
 import hmac
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Request, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from starlette.requests import ClientDisconnect
 from loguru import logger
 
 from app.config import Settings, get_settings
 from app.dependencies import (
-    get_database_repository,
     verify_secret_token,
     extract_payload,
     get_event_processor,
 )
-from app.repositories.database import DatabaseRepository
 from app.models.enums import NetworkType
 from app.services.event_processor import EventProcessor
-from app.services.slicktext_service import process_slicktext_sync_task
 
 # Importações para o cliente assíncrono do Supabase na Inbox
 from supabase import AsyncClient, create_async_client
@@ -360,9 +357,7 @@ async def webhook_digistore24_abandon(
     secret_token: str,
     request: Request,
     processor: Annotated[EventProcessor, Depends(get_event_processor)],
-    background_tasks: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
-    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
     auth: None = Depends(verify_secret_token),
 ) -> PlainTextResponse:
     """
@@ -410,23 +405,8 @@ async def webhook_digistore24_abandon(
                 raise HTTPException(
                     status_code=500, detail="Error processing abandoned cart"
                 )
-
-            background_tasks.add_task(
-                process_slicktext_sync_task,
-                payload={
-                    "name": " ".join(
-                        filter(
-                            None, [payload.get("first_name"), payload.get("last_name")]
-                        )
-                    ),
-                    "phone": payload.get("phone_no", ""),
-                    "product_codename": payload.get("product_id", ""),
-                    "country": payload.get("country_code") or "US",
-                },
-                settings=settings,
-                db_repo=db_repo,
-                platform=NetworkType.DIGISTORE24.value,
-            )
+            # SMS (SlickText): o processor já enfileirou o carrinho na
+            # slicktext_abandon_queue; o cron do worker envia.
 
         return PlainTextResponse("OK")
 
@@ -441,9 +421,6 @@ async def buygoods_abandon_webhook(
     secret_token: str,
     request: Request,
     processor: Annotated[EventProcessor, Depends(get_event_processor)],
-    background_tasks: BackgroundTasks,
-    settings: Annotated[Settings, Depends(get_settings)],
-    db_repo: Annotated[DatabaseRepository, Depends(get_database_repository)],
     auth: None = Depends(verify_secret_token),
 ):
     """Recebe Webhooks de Carrinho Abandonado da BuyGoods."""
@@ -467,14 +444,8 @@ async def buygoods_abandon_webhook(
                 status_code=500, detail="Error processing abandoned cart"
             )
 
-        # DISPARA O SLICKTEXT EM BACKGROUND
-        # Aqui o db_repo ainda é necessário porque é injetado na task em background
-        background_tasks.add_task(
-            process_slicktext_sync_task,
-            payload=payload,
-            settings=settings,
-            db_repo=db_repo,
-        )
+        # SMS (SlickText): o processor já enfileirou o carrinho na
+        # slicktext_abandon_queue; o cron do worker envia.
 
         return {"status": "success"}
 
