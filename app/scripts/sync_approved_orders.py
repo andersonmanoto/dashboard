@@ -25,6 +25,8 @@ from app.services.slicktext_accounts import (
     active_list_targets,
     credentials_by_account,
     deactivation_fields,
+    split_queue_rows,
+    target_fields,
     retry_transport,
     send_with_account_check,
 )
@@ -76,6 +78,32 @@ async def _deactivate_account(account_id: str) -> bool:
     return bool(res.data)
 
 
+async def _assign_targets(
+    db: AsyncClient, item: dict, targets: list[tuple[str, dict]]
+) -> None:
+    """A linha do lead fica com a primeira lista; as outras viram linhas novas."""
+    first, *others = targets
+    if others:
+        row = {"lead_type": "neworder", "event_id": item["event_id"]}
+        await retry_transport(
+            lambda: db.table("slicktext_sync_queue")
+            .upsert(
+                split_queue_rows(row, others),
+                on_conflict="event_id,list_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
+            "criar linhas por lista",
+        )
+    await retry_transport(
+        lambda: db.table("slicktext_sync_queue")
+        .update(target_fields(*first))
+        .eq("id", item["id"])
+        .execute(),
+        "gravar lista na linha do lead",
+    )
+
+
 async def _mark_retry_safely(db: AsyncClient, queue_id: str, error: str) -> None:
     """Marca o item como retry; se nem isso der (Supabase fora), só loga --
     o item continua pending/retry e a próxima rodada pega de novo."""
@@ -83,7 +111,7 @@ async def _mark_retry_safely(db: AsyncClient, queue_id: str, error: str) -> None
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "retry", "last_error": error})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
     except Exception as exc:
@@ -259,8 +287,9 @@ async def sync_contact_to_slicktext(
 
 async def process_queue_item(item: dict) -> None:
     db = await get_supabase()
-    queue_id = item["event_id"]
+    queue_id = item["id"]
     attempts = item.get("attempts", 0)
+    list_id = item.get("list_id")  # preenchido = telefone já validado
 
     event_data = item.get("events")
     if not event_data:
@@ -269,7 +298,7 @@ async def process_queue_item(item: dict) -> None:
             .update(
                 {"status": "failed", "last_error": "Dados do evento não encontrados"}
             )
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
         return
@@ -281,7 +310,7 @@ async def process_queue_item(item: dict) -> None:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": "max_attempts"})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
         return
@@ -295,7 +324,7 @@ async def process_queue_item(item: dict) -> None:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         )
-        .eq("event_id", queue_id)
+        .eq("id", queue_id)
         .execute()
     )
 
@@ -307,19 +336,19 @@ async def process_queue_item(item: dict) -> None:
     quantity = checkouts_data.get("quantity")
 
     # Pega as contas SlickText mapeadas pro produto (pode ser mais de uma --
-    # envia a MESMA informação pra cada conta active, cada qual com seu
-    # próprio list_id; a api_key vem do Vault)
+    # cada conta active recebe a MESMA informação na sua lista, numa linha
+    # própria da fila; a api_key vem do Vault)
     raw_mappings = products_data.get("slicktext_product_lists") or []
     if isinstance(raw_mappings, dict):
         raw_mappings = [raw_mappings]
 
     mappings = [m for m in raw_mappings if m.get("approved_list_id")]
-    if not mappings:
+    if not list_id and not mappings:
         logger.warning(f"Lista não mapeada para o produto: {product_name}")
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": "lista_nao_encontrada"})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
         return
@@ -338,7 +367,20 @@ async def process_queue_item(item: dict) -> None:
         logger.error(f"Erro ao buscar credenciais SlickText ({queue_id}): {exc}")
         await _mark_retry_safely(db, queue_id, "credenciais_indisponiveis")
         return
-    targets = active_list_targets(mappings, "approved_list_id", credentials)
+    if list_id:
+        account = credentials.get(item.get("slick_account_id"))
+        if not account:
+            logger.warning(f"Conta da lista {list_id} não está mais active.")
+            await (
+                db.table("slicktext_sync_queue")
+                .update({"status": "skipped", "last_error": "conta_inativa"})
+                .eq("id", queue_id)
+                .execute()
+            )
+            return
+        targets = [(list_id, account)]
+    else:
+        targets = active_list_targets(mappings, "approved_list_id", credentials)
     if not targets:
         logger.warning(
             f"Nenhuma conta active entre as {len(mappings)} com lista mapeada "
@@ -347,7 +389,7 @@ async def process_queue_item(item: dict) -> None:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": "sem_conta_active"})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
         return
@@ -358,28 +400,36 @@ async def process_queue_item(item: dict) -> None:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": "telefone_invalido"})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
         return
 
-    abstract_valid = await validate_phone_abstract(formatted_phone)
-    if abstract_valid is None:
-        await (
-            db.table("slicktext_sync_queue")
-            .update({"status": "retry", "last_error": "abstract_api_error"})
-            .eq("event_id", queue_id)
-            .execute()
-        )
-        return
-    if abstract_valid is False:
-        await (
-            db.table("slicktext_sync_queue")
-            .update({"status": "failed", "last_error": "rejeitado_abstract"})
-            .eq("event_id", queue_id)
-            .execute()
-        )
-        return
+    if not list_id:
+        abstract_valid = await validate_phone_abstract(formatted_phone)
+        if abstract_valid is None:
+            await (
+                db.table("slicktext_sync_queue")
+                .update({"status": "retry", "last_error": "abstract_api_error"})
+                .eq("id", queue_id)
+                .execute()
+            )
+            return
+        if abstract_valid is False:
+            await (
+                db.table("slicktext_sync_queue")
+                .update({"status": "failed", "last_error": "rejeitado_abstract"})
+                .eq("id", queue_id)
+                .execute()
+            )
+            return
+
+        try:
+            await _assign_targets(db, item, targets)
+        except Exception as exc:
+            logger.error(f"Erro ao dividir {queue_id} por lista: {exc}")
+            await _mark_retry_safely(db, queue_id, "erro_ao_dividir_listas")
+            return
 
     # Payload
     payload = {
@@ -390,58 +440,53 @@ async def process_queue_item(item: dict) -> None:
         "bottles": str(quantity),
     }
 
-    # Sincronização: envia a mesma informação pra cada conta mapeada
-    results = []
-    for list_id, account in targets:
-        result = await send_with_account_check(
-            partial(
-                sync_contact_to_slicktext,
-                payload,
-                customer,
-                list_id,
-                api_key=account["api_key"],
-                brand_id=account["brand_id"],
-            ),
-            lambda r: r is SyncResult.ACCOUNT_ERROR,
-            account,
-            api_url=SETTINGS.slicktext_api_url,
-            deactivate=_deactivate_account,
-        )
-        results.append(result)
+    # Sincronização: esta linha envia só pra primeira lista; as outras têm
+    # linha própria e saem na rodada seguinte
+    list_id, account = targets[0]
+    result = await send_with_account_check(
+        partial(
+            sync_contact_to_slicktext,
+            payload,
+            customer,
+            list_id,
+            api_key=account["api_key"],
+            brand_id=account["brand_id"],
+        ),
+        lambda r: r is SyncResult.ACCOUNT_ERROR,
+        account,
+        api_url=SETTINGS.slicktext_api_url,
+        deactivate=_deactivate_account,
+    )
 
-    # Agrega o resultado de todas as contas num status só: se qualquer uma
-    # deu erro de rede/API, tenta tudo de novo (SlickText já lida com
-    # duplicidade via upsert, então reenviar pra quem já deu certo é
-    # inofensivo); região não suportada é uma característica do telefone,
-    # não da conta, então nenhuma tentativa nova resolve. Erro de conta
-    # também vai pra retry: se a conta foi inativada, a próxima rodada já
-    # não manda pra ela.
-    if SyncResult.API_ERROR in results:
+    # Região não suportada é uma característica do telefone, então nenhuma
+    # tentativa nova resolve. Erro de conta vai pra retry: se a conta foi
+    # inativada, a próxima rodada marca a linha como skipped.
+    if result is SyncResult.API_ERROR:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "retry", "last_error": "slicktext_api_error"})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
-    elif SyncResult.ACCOUNT_ERROR in results:
+    elif result is SyncResult.ACCOUNT_ERROR:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "retry", "last_error": "slicktext_account_error"})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
-    elif SyncResult.UNSUPPORTED_REGION in results:
+    elif result is SyncResult.UNSUPPORTED_REGION:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": "regiao_nao_suportada"})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
-    elif SyncResult.MISSING_CREDENTIALS in results:
+    elif result is SyncResult.MISSING_CREDENTIALS:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "synced", "last_error": "missing_credentials_simulacao"})
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
     else:
@@ -454,7 +499,7 @@ async def process_queue_item(item: dict) -> None:
                     "sent_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
-            .eq("event_id", queue_id)
+            .eq("id", queue_id)
             .execute()
         )
 
@@ -469,7 +514,7 @@ async def fetch_pending_ids(limit: int = 15, max_retries: int = 2) -> list[str]:
         try:
             res = await (
                 db.table("slicktext_sync_queue")
-                .select("event_id")
+                .select("id")
                 .eq("lead_type", "neworder")
                 .in_("status", ["pending", "retry"])
                 .lt("attempts", MAX_ATTEMPTS)
@@ -480,7 +525,7 @@ async def fetch_pending_ids(limit: int = 15, max_retries: int = 2) -> list[str]:
             logger.info(
                 f"fetch_pending_ids: concluída em {time.monotonic() - start:.2f}s"
             )
-            return [row["event_id"] for row in (res.data or [])]
+            return [row["id"] for row in (res.data or [])]
 
         except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
             wait = 2**attempt
@@ -500,11 +545,12 @@ async def process_single_item(queue_id: str) -> None:
     res = await retry_transport(
         lambda: db.table("slicktext_sync_queue")
         .select(
-            "event_id, attempts, events(customer_name, customer_phone, "
+            "id, event_id, attempts, list_id, slick_account_id, "
+            "events(customer_name, customer_phone, "
             "products(name, slicktext_product_lists(approved_list_id, "
             "slicktext_accounts(id))), checkouts(quantity))"
         )
-        .eq("event_id", queue_id)
+        .eq("id", queue_id)
         .single()
         .execute(),
         f"buscar item {queue_id} da fila",

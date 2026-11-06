@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta
+from functools import partial
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -378,9 +379,22 @@ async def cron_send_slicktext_abandons(ctx):
         queue_id = row["id"]
         attempts = row.get("attempts", 0)
         network = row["networks"]["name"]
+        list_id = row.get("list_id")
+        assign_targets = (
+            None
+            if list_id
+            else partial(
+                asyncio.to_thread, db_repo.assign_slicktext_abandon_targets, row
+            )
+        )
         try:
             outcome = await process_slicktext_sync_task(
-                row["payload"], settings, db_repo, platform=network
+                row["payload"],
+                settings,
+                db_repo,
+                platform=network,
+                list_id=list_id,
+                assign_targets=assign_targets,
             )
         except Exception as exc:
             logger.exception(f"Erro ao enviar abandono SlickText {queue_id}")

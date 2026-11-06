@@ -15,6 +15,9 @@ fluxos: carrinho abandonado (slicktext_service.py) e compra aprovada
     conta responder 200, ela está viva e o problema foi outro (ex: list_id).
     Ao inativar grava allow_input=false e deactivated_at = hora da queda
     (deactivation_fields()) e manda um alerta no Slack (#tech-sms, slack_slicktext_channel).
+  - slicktext_sync_queue tem uma linha por lead e por lista. O lead entra com
+    list_id vazio; depois de validar o telefone, o cron usa target_fields() na
+    linha original (primeira lista) e split_queue_rows() pras listas restantes.
   - Chamadas ao Supabase passam por retry_transport(): o VPS já teve vários
     "timed out" em chamada pro Supabase, e sem retry o lead/compra se perdia.
 """
@@ -96,6 +99,27 @@ async def notify_account_deactivated(account: dict) -> None:
             f"[SlickText] Não consegui mandar o alerta de conta desativada "
             f"'{account['name']}' pro Slack: {exc}"
         )
+
+
+def target_fields(list_id, account: dict) -> dict:
+    """Colunas de slicktext_sync_queue que ligam a linha a uma lista da conta."""
+    return {"list_id": str(list_id), "slick_account_id": account["id"]}
+
+
+def split_queue_rows(row: dict, targets: list[tuple[str, dict]]) -> list[dict]:
+    """Uma linha nova de slicktext_sync_queue por lista, copiando o lead de `row`."""
+    lead = {
+        key: row.get(key)
+        for key in (
+            "lead_type",
+            "event_id",
+            "abandoned_cart_id",
+            "network_id",
+            "phone",
+            "payload",
+        )
+    }
+    return [{**lead, **target_fields(*target)} for target in targets]
 
 
 def credentials_by_account(rows: Optional[list[dict]]) -> dict[str, dict]:

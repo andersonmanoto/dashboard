@@ -8,6 +8,7 @@ from uuid import UUID
 from config import Settings
 from loguru import logger
 from models.enums import NetworkType
+from services.slicktext_accounts import split_queue_rows, target_fields
 from models.schemas import (
     Affiliate,
     CheckoutInfo,
@@ -924,7 +925,10 @@ class DatabaseRepository:
         try:
             response = (
                 self.client.table("slicktext_sync_queue")
-                .select("id, payload, attempts, networks(name)")
+                .select(
+                    "id, abandoned_cart_id, network_id, phone, payload, attempts, "
+                    "list_id, networks(name)"
+                )
                 .eq("lead_type", "abandon")
                 .eq("status", "pending")
                 .not_.is_("network_id", "null")
@@ -936,6 +940,32 @@ class DatabaseRepository:
         except Exception as e:
             logger.error(f"Erro ao buscar fila de abandonos SlickText: {e}")
             return []
+
+    def assign_slicktext_abandon_targets(
+        self, row: dict, targets: list[tuple[str, dict]]
+    ) -> list[tuple[str, dict]]:
+        """
+        A linha do abandono fica com a primeira lista; as outras viram linhas
+        novas, que saem na rodada seguinte. Devolve o que esta rodada envia.
+        """
+        first, *others = targets
+        if others:
+            (
+                self.client.table("slicktext_sync_queue")
+                .upsert(
+                    split_queue_rows({**row, "lead_type": "abandon"}, others),
+                    on_conflict="abandoned_cart_id,list_id",
+                    ignore_duplicates=True,
+                )
+                .execute()
+            )
+        (
+            self.client.table("slicktext_sync_queue")
+            .update(target_fields(*first))
+            .eq("id", row["id"])
+            .execute()
+        )
+        return [first]
 
     def mark_slicktext_abandon(
         self,

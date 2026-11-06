@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum, auto
 from functools import partial
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 import requests
 import phonenumbers
 from phonenumbers import NumberParseException, PhoneNumberFormat
@@ -272,6 +272,9 @@ def _sync_to_slicktext(
         return _failure(exc.response)
 
 
+AssignTargets = Callable[[list[tuple[str, dict]]], Awaitable[list[tuple[str, dict]]]]
+
+
 @dataclass(frozen=True)
 class AbandonOutcome:
     """Resultado do envio de um abandono, gravado na slicktext_sync_queue."""
@@ -297,6 +300,8 @@ async def process_slicktext_sync_task(
     settings: Settings,
     db_repo: DatabaseRepository,
     platform: str = NetworkType.BUYGOODS.value,
+    list_id: Optional[str] = None,
+    assign_targets: Optional[AssignTargets] = None,
 ) -> AbandonOutcome:
     """
     Envia um carrinho abandonado pro SlickText (SMS). Chamado pelo cron da
@@ -305,6 +310,11 @@ async def process_slicktext_sync_task(
     `platform` é a rede de origem do carrinho abandonado (valor de
     NetworkType) -- vai pro custom field `plataforma` do contato e decide
     como montar a url_abandonada.
+
+    `list_id` vem da linha já dividida da fila: envia só pra essa lista e não
+    valida o telefone de novo. `assign_targets` divide a linha do lead depois
+    da validação e devolve as listas que esta chamada deve enviar. Sem os dois
+    (backfill), envia pra todas as listas do produto.
 
     Devolve AbandonOutcome: synced, skipped (descarte de propósito, com o
     motivo) ou retry (erro temporário -- o cron tenta de novo).
@@ -410,6 +420,8 @@ async def process_slicktext_sync_task(
         return AbandonOutcome.retry(f"erro ao buscar credenciais: {e}")
 
     targets = active_list_targets(mappings, "abandoned_list_id", credentials)
+    if list_id:
+        targets = [target for target in targets if str(target[0]) == str(list_id)]
     if not targets:
         logger.warning(
             f"SlickText: nenhuma conta active entre as {len(mappings)} com lista "
@@ -436,14 +448,18 @@ async def process_slicktext_sync_task(
     if not formatted_phone:
         return AbandonOutcome.skipped("telefone vazio ou inválido")
 
-    # requests é síncrono: roda em thread pra não travar o event loop
-    phone_ok = await asyncio.to_thread(
-        validate_phone_abstract, formatted_phone, settings.abstract_api_key
-    )
-    if phone_ok is None:
-        return AbandonOutcome.retry("AbstractAPI indisponível")
-    if not phone_ok:
-        return AbandonOutcome.skipped("telefone reprovado pela AbstractAPI")
+    if not list_id:
+        # requests é síncrono: roda em thread pra não travar o event loop
+        phone_ok = await asyncio.to_thread(
+            validate_phone_abstract, formatted_phone, settings.abstract_api_key
+        )
+        if phone_ok is None:
+            return AbandonOutcome.retry("AbstractAPI indisponível")
+        if not phone_ok:
+            return AbandonOutcome.skipped("telefone reprovado pela AbstractAPI")
+
+    if assign_targets:
+        targets = await assign_targets(targets)
 
     # 4. Envia para SlickText (Formato plano/flat)
     slicktext_payload = {
