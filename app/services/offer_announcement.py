@@ -11,12 +11,14 @@ Formato (o mesmo do post fixado que a galera mandava na mão):
     Funil: 2
     TSL: https://dg.marobrain.com/about/
     DTC: https://dg.marobrain.com/dtc/
+    Plataforma: DigiStore24
 
 Os dados vêm do Supabase do dashboard (não do AutoPages): produto por nome
 (ilike), nicho por niche_id (não tem FK products -> niches, então são duas
 buscas) e TSL/DTC da products_urls filtrada pela rede da `plataforma` do
 payload, já que cada rede tem as próprias URLs (ex: MaroBrain tem
-dg.marobrain.com na DigiStore24 e marobrain.com na BuyGoods).
+dg.marobrain.com na DigiStore24 e marobrain.com na BuyGoods). A linha
+Plataforma é o networks.name dessa mesma rede.
 
 O que não for encontrado sai como "—": o aviso sai mesmo assim, e quem ler
 vê o que falta cadastrar. Qualquer erro aqui só loga: as offers já foram
@@ -69,6 +71,7 @@ def build_message(
     product_type: Optional[str],
     funil: str,
     urls: list[dict],
+    network_name: Optional[str],
 ) -> str:
     def urls_of(kind: str) -> str:
         found = [u["url"] for u in urls if u.get("type") == kind and u.get("url")]
@@ -83,6 +86,7 @@ def build_message(
             f"Funil: {funil}",
             f"TSL: {urls_of('tsl')}",
             f"DTC: {urls_of('dtc')}",
+            f"Plataforma: {network_name or MISSING}",
         ]
     )
 
@@ -99,7 +103,13 @@ async def _fetch_details(settings: Settings, produto: str, plataforma: str) -> d
     ).data
     if not products:
         logger.warning(f"[offers] Produto '{produto}' não achado no dashboard pro aviso.")
-        return {"name": produto, "niche_code": None, "type": None, "urls": []}
+        return {
+            "name": produto,
+            "niche_code": None,
+            "type": None,
+            "urls": [],
+            "network_name": None,
+        }
     product: dict = products[0]  # type: ignore[assignment]
 
     niche_code = None
@@ -118,7 +128,7 @@ async def _fetch_details(settings: Settings, produto: str, plataforma: str) -> d
     networks = (
         (
             await db.table("networks")
-            .select("id")
+            .select("id, name")
             .ilike("name", network_name)
             .limit(1)
             .execute()
@@ -144,6 +154,7 @@ async def _fetch_details(settings: Settings, produto: str, plataforma: str) -> d
         "niche_code": niche_code,
         "type": product.get("type"),
         "urls": urls,
+        "network_name": networks[0]["name"] if networks else None,
     }
 
 
@@ -158,6 +169,7 @@ async def notify_offer_created(settings: Settings, payload: dict) -> None:
             details["type"],
             payload["funil"],
             details["urls"],
+            details["network_name"],
         )
         client = WebClient(token=settings.slack_bot_token)
         await asyncio.to_thread(
