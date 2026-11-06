@@ -274,14 +274,14 @@ def _sync_to_slicktext(
 
 @dataclass(frozen=True)
 class AbandonOutcome:
-    """Resultado do envio de um abandono, gravado na slicktext_abandon_queue."""
+    """Resultado do envio de um abandono, gravado na slicktext_sync_queue."""
 
-    status: str  # "sent" | "skipped" | "retry"
+    status: str  # "synced" | "skipped" | "retry"
     reason: Optional[str] = None
 
     @classmethod
-    def sent(cls) -> "AbandonOutcome":
-        return cls("sent")
+    def synced(cls) -> "AbandonOutcome":
+        return cls("synced")
 
     @classmethod
     def skipped(cls, reason: str) -> "AbandonOutcome":
@@ -300,13 +300,13 @@ async def process_slicktext_sync_task(
 ) -> AbandonOutcome:
     """
     Envia um carrinho abandonado pro SlickText (SMS). Chamado pelo cron da
-    slicktext_abandon_queue (worker.py), que grava o resultado devolvido.
+    slicktext_sync_queue (worker.py), que grava o resultado devolvido.
 
     `platform` é a rede de origem do carrinho abandonado (valor de
     NetworkType) -- vai pro custom field `plataforma` do contato e decide
     como montar a url_abandonada.
 
-    Devolve AbandonOutcome: sent, skipped (descarte de propósito, com o
+    Devolve AbandonOutcome: synced, skipped (descarte de propósito, com o
     motivo) ou retry (erro temporário -- o cron tenta de novo).
     """
     customer_name = payload.get("name", "")
@@ -485,4 +485,4 @@ async def process_slicktext_sync_task(
         return AbandonOutcome.retry(
             f"falha em {len(failures)}/{len(targets)} conta(s): " + "; ".join(failures)
         )
-    return AbandonOutcome.sent()
+    return AbandonOutcome.synced()

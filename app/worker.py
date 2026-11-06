@@ -53,7 +53,7 @@ async def task_process_webhook(
             and payload.get("_pa_event") == PAGAMERICAN_ABANDON_EVENT
         ):
             # SMS (SlickText): o processor enfileira o carrinho na
-            # slicktext_abandon_queue; cron_send_slicktext_abandons envia.
+            # slicktext_sync_queue; cron_send_slicktext_abandons envia.
             success = await processor.process_pagamerican_abandon_cart(payload)
             log_id = payload.get("abandonedSaleUcode", "")
         else:
@@ -358,9 +358,9 @@ async def cron_send_aweber_leads(ctx):
 
 async def cron_send_slicktext_abandons(ctx):
     """
-    Lê a slicktext_abandon_queue (carrinhos abandonados das 3 redes, já
+    Lê os abandonos da slicktext_sync_queue (carrinhos das 3 redes, já
     salvos em abandoned_carts) e envia o SMS pro SlickText. Grava o
-    resultado de cada um: sent, skipped (descarte de propósito, com motivo)
+    resultado de cada um: synced, skipped (descarte de propósito, com motivo)
     ou retry (erro temporário -> pending de novo, até 3 -> failed).
     Sequencial: cada item faz até ~3 chamadas externas (AbstractAPI +
     SlickText por conta), e o lote é pequeno pra caber no timeout do cron.

@@ -883,11 +883,12 @@ class DatabaseRepository:
         max_retries: int = 3,
     ) -> Optional[dict]:
         """
-        Insere o carrinho abandonado na slicktext_abandon_queue (SMS). O envio
+        Insere o carrinho abandonado na slicktext_sync_queue (SMS). O envio
         é feito depois, pelo cron (worker.py). Mesmo padrão de retry de
         enqueue_aweber_lead.
         """
         row = {
+            "lead_type": "abandon",
             "network": network,
             "phone": payload.get("phone") or None,
             "payload": payload,
@@ -897,7 +898,7 @@ class DatabaseRepository:
         for attempt in range(1, max_retries + 1):
             try:
                 response = (
-                    self.client.table("slicktext_abandon_queue").insert(row).execute()
+                    self.client.table("slicktext_sync_queue").insert(row).execute()
                 )
                 return response.data[0] if response.data else None
             except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as exc:
@@ -922,8 +923,9 @@ class DatabaseRepository:
     def fetch_pending_slicktext_abandons(self, limit: int = 15) -> list[dict]:
         try:
             response = (
-                self.client.table("slicktext_abandon_queue")
+                self.client.table("slicktext_sync_queue")
                 .select("id, network, payload, attempts")
+                .eq("lead_type", "abandon")
                 .eq("status", "pending")
                 .order("created_at")
                 .limit(limit)
@@ -943,7 +945,7 @@ class DatabaseRepository:
         max_attempts: int = 3,
     ) -> None:
         """
-        Grava o resultado do envio. status: 'sent', 'skipped' ou 'retry'
+        Grava o resultado do envio. status: 'synced', 'skipped' ou 'retry'
         (erro temporário: volta pra 'pending', ou 'failed' ao esgotar as
         tentativas). `attempts` é o valor lido da fila, antes desta tentativa.
         """
@@ -957,11 +959,11 @@ class DatabaseRepository:
             "last_error": error[:500] if error else None,
             "updated_at": now,
         }
-        if status == "sent":
+        if status == "synced":
             fields["sent_at"] = now
         try:
             (
-                self.client.table("slicktext_abandon_queue")
+                self.client.table("slicktext_sync_queue")
                 .update(fields)
                 .eq("id", queue_id)
                 .execute()

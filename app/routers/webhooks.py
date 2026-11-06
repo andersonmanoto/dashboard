@@ -406,7 +406,7 @@ async def webhook_digistore24_abandon(
                     status_code=500, detail="Error processing abandoned cart"
                 )
             # SMS (SlickText): o processor já enfileirou o carrinho na
-            # slicktext_abandon_queue; o cron do worker envia.
+            # slicktext_sync_queue; o cron do worker envia.
 
         return PlainTextResponse("OK")
 
@@ -445,7 +445,7 @@ async def buygoods_abandon_webhook(
             )
 
         # SMS (SlickText): o processor já enfileirou o carrinho na
-        # slicktext_abandon_queue; o cron do worker envia.
+        # slicktext_sync_queue; o cron do worker envia.
 
         return {"status": "success"}
 
