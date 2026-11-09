@@ -90,7 +90,7 @@ async def notify_account_deactivated(account: dict) -> None:
             username="SlickText Monitor",
             icon_url="https://tigeroffers.com/assets/img/top-tiger.png",
             text=(
-                f"<!here> SlickText {account['name']} (brand_id {account['brand_id']}).\n"
+                f"<!channel> SlickText {account['name']} (brand_id {account['brand_id']}).\n"
                 f"A comunicação foi negada, conta possivelmente desativada."
             ),
         )
