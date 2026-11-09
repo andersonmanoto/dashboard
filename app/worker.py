@@ -426,11 +426,13 @@ async def task_slicktext_input_start(ctx, input_id: str):
 
 async def cron_send_slicktext_inputs(ctx):
     """
-    Envia a fila slicktext_input_queue em lotes reservados (lease), até ~45s
-    por rodada. Um input grande leva várias rodadas.
+    Envia a fila slicktext_input_queue em lotes reservados (lease), terminando
+    em ~40s por rodada. Um input grande leva várias rodadas. O timeout do cron
+    (120s) é folga pra um lote lento; se uma rodada invadir o minuto seguinte,
+    o lease impede as duas de pegarem a mesma linha.
     """
     try:
-        await slicktext_input_service.send_pending_rows(time_budget_seconds=45)
+        await slicktext_input_service.send_pending_rows(time_budget_seconds=40)
     except Exception:
         logger.exception("Falha no envio da fila de input de leads SlickText")
 
@@ -485,7 +487,7 @@ class WorkerSettings:
             minute={3, 8, 13, 18, 23, 28, 33, 38, 43, 48, 53, 58},
             timeout=240,
         ),
-        cron(cron_send_slicktext_inputs, minute=set(range(60)), timeout=60),
+        cron(cron_send_slicktext_inputs, minute=set(range(60)), timeout=120),
         cron(
             cron_sweep_slicktext_inputs,
             minute={6, 16, 26, 36, 46, 56},

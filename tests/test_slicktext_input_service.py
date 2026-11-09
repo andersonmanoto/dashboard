@@ -1,8 +1,14 @@
 """Input de leads em lote (slicktext_input_queue)."""
 
 import asyncio
+import os
+import sys
+from types import SimpleNamespace
 
 import pytest
+
+# app/repositories/database.py importa "config" (sem o prefixo app.)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../app")))
 
 from app.scripts.sync_approved_orders import SyncResult
 from app.services import slicktext_accounts
@@ -71,7 +77,13 @@ class FakeDB:
         self.rows = {
             "slicktext_input_lists": [{"slick_account_id": "acc-1", "list_id": "555"}],
             "slicktext_accounts": [
-                {"id": "acc-1", "name": "SMS 09", "brand_id": "77", "status": "Active"}
+                {
+                    "id": "acc-1",
+                    "name": "SMS 09",
+                    "brand_id": "77",
+                    "status": "Active",
+                    "allow_input": True,
+                }
             ],
             "events": [
                 {
@@ -288,6 +300,55 @@ def test_conta_ativa_em_portugues_vale(env):
     db.rows["slicktext_accounts"][0]["status"] = " ATIVA "
     dest = asyncio.run(svc.resolve_destination(db, "list-1", check_list=False))
     assert dest.list_id == "555" and dest.account["api_key"] == "k1"
+
+
+@pytest.mark.parametrize("allow_input", [False, None])
+def test_conta_com_envio_desligado_e_falha_do_input(env, allow_input):
+    db = env["db"]
+    db.rows["slicktext_accounts"][0]["allow_input"] = allow_input
+    with pytest.raises(InputFailure) as exc:
+        asyncio.run(svc.resolve_destination(db, "list-1", check_list=False))
+    assert exc.value.code == "envio_desligado"
+    assert db.rpcs == []  # nem lê a api key
+
+
+# --- prazo da rodada ---
+
+
+def _fake_rounds(monkeypatch, batch_seconds: float, batches: int = 10):
+    clock = {"t": 0.0}
+    sent = []
+
+    async def claim(_db):
+        return [_row(event_id=f"ev-{len(sent)}")] if len(sent) < batches else []
+
+    async def send_batch(_db, rows, _dest, _stopped):
+        sent.append(rows)
+        clock["t"] += batch_seconds
+
+    monkeypatch.setattr(svc, "time", SimpleNamespace(monotonic=lambda: clock["t"]))
+    monkeypatch.setattr(svc, "_claim", claim)
+    monkeypatch.setattr(svc, "_send_batch", send_batch)
+    return sent
+
+
+def test_nao_comeca_lote_que_nao_cabe_no_prazo(env, monkeypatch):
+    sent = _fake_rounds(monkeypatch, batch_seconds=15)
+    # 0-15, 15-30; o 3º terminaria em 45 > 40
+    assert asyncio.run(svc.send_pending_rows(time_budget_seconds=40)) == 2
+    assert len(sent) == 2
+
+
+def test_primeiro_lote_sempre_roda(env, monkeypatch):
+    sent = _fake_rounds(monkeypatch, batch_seconds=50)
+    assert asyncio.run(svc.send_pending_rows(time_budget_seconds=40)) == 1
+    assert len(sent) == 1
+
+
+def test_para_quando_a_fila_acaba(env, monkeypatch):
+    sent = _fake_rounds(monkeypatch, batch_seconds=1, batches=3)
+    assert asyncio.run(svc.send_pending_rows(time_budget_seconds=40)) == 3
+    assert len(sent) == 3
 
 
 def test_rpc_da_api_key_falhando_e_falha_do_input(env):

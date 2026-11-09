@@ -68,6 +68,7 @@ ERR_SLICKTEXT_API = "slicktext_api_error"
 
 # last_error do input inteiro
 INPUT_ERR_ACCOUNT = "conta_inativa"
+INPUT_ERR_SEND_OFF = "envio_desligado"  # allow_input=false (liga/desliga manual)
 INPUT_ERR_NO_BRAND = "conta_sem_brand_id"
 INPUT_ERR_API_KEY = "api_key_indisponivel"
 INPUT_ERR_LIST_ROW = "lista_input_nao_encontrada"
@@ -225,7 +226,7 @@ async def resolve_destination(db, input_list_id: str, *, check_list: bool) -> De
     account_id = input_list["slick_account_id"]
     res = await retry_transport(
         lambda: db.table("slicktext_accounts")
-        .select("id, name, brand_id, status")
+        .select("id, name, brand_id, status, allow_input")
         .eq("id", account_id)
         .limit(1)
         .execute(),
@@ -234,6 +235,9 @@ async def resolve_destination(db, input_list_id: str, *, check_list: bool) -> De
     account = (res.data or [None])[0]
     if not account or str(account.get("status") or "").strip().lower() not in ACTIVE_ACCOUNT_STATUSES:
         raise InputFailure(INPUT_ERR_ACCOUNT)
+    # mesmo filtro da get_slicktext_credentials(): allow_input null conta como false
+    if account.get("allow_input") is not True:
+        raise InputFailure(INPUT_ERR_SEND_OFF)
     if not account.get("brand_id"):
         raise InputFailure(INPUT_ERR_NO_BRAND)
 
@@ -479,18 +483,31 @@ async def _send_batch(
 
 
 async def send_pending_rows(time_budget_seconds: float) -> int:
-    """Reserva e envia lotes até acabar a fila ou o tempo. Devolve quantas linhas tocou."""
+    """
+    Reserva e envia lotes até acabar a fila ou o tempo. Devolve quantas linhas tocou.
+
+    `time_budget_seconds` é o prazo pra *terminar*: um lote novo só começa se o
+    lote mais demorado da rodada ainda couber no que sobra (o primeiro sempre
+    roda). Sem isso, um lote começado perto do fim passava do timeout do cron
+    e o arq cancelava no meio: lead já enviado ficava sem update até o lease
+    vencer e era reenviado (Abstract paga de novo).
+    """
     db = await get_supabase()
     deadline = time.monotonic() + time_budget_seconds
     destinations: dict[str, Destination] = {}
     stopped: set[str] = set()
     total = 0
+    slowest = 0.0
 
-    while time.monotonic() < deadline:
+    while True:
+        batch_start = time.monotonic()
+        if total and batch_start + slowest > deadline:
+            break
         rows = await _claim(db)
         if not rows:
             break
         await _send_batch(db, rows, destinations, stopped)
+        slowest = max(slowest, time.monotonic() - batch_start)
         total += len(rows)
 
     if total:

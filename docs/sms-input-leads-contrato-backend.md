@@ -42,6 +42,8 @@ Uma linha por input. O front lê esta tabela para mostrar o andamento. A edge n�
 | `enqueued_qty` | int, null | função `sms_input_leads` | Quantos leads deste input estão na fila. Null até a reunião terminar |
 | `status` | text | edge cria `pending`; backend avança | `pending` → `processing` → `done` ou `error` |
 | `last_error` | text, null | backend, só em `error` | Motivo do input inteiro. Não é o motivo de um lead |
+| `qty_synced` | int, default 0 | trigger na `slicktext_input_queue` | Linhas deste input com `status = 'synced'` (entraram na lista) |
+| `qty_failed` | int, default 0 | trigger na `slicktext_input_queue` | Linhas deste input com `status = 'failed'` |
 | `started_at`, `finished_at` | timestamptz | função / backend | |
 
 Há no máximo um input `pending` ou `processing` por lista.
@@ -219,7 +221,7 @@ where id = :input_id
 
 Não apagar as linhas já inseridas na fila. Um processamento futuro pode retomá-las se o status voltar a ser tratado. Neste contrato, `error` não é reprocessado automaticamente.
 
-`last_error` do input é texto curto e estável, por exemplo `conta_inativa`, `lista_nao_encontrada`, `falha_ao_reunir_leads`. Não colocar telefone nem API key.
+`last_error` do input é texto curto e estável, por exemplo `conta_inativa`, `envio_desligado` (conta com `allow_input = false`), `lista_nao_encontrada`, `falha_ao_reunir_leads`. Não colocar telefone nem API key.
 
 ## Rede de segurança
 
