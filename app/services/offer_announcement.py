@@ -176,7 +176,9 @@ async def notify_offer_created(settings: Settings, payload: dict) -> None:
             client.chat_postMessage,
             channel=settings.slack_offers_channel,
             username="Backend Bot",
-            text=text,
+            # <!here> pra notificar todo mundo online no canal, independente da
+            # preferência de notificação de cada um.
+            text=f"<!here> {text}",
             unfurl_links=False,
         )
         logger.info(f"[offers] Aviso de '{produto}' enviado pro Slack.")
