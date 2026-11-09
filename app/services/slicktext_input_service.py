@@ -68,7 +68,6 @@ ERR_SLICKTEXT_API = "slicktext_api_error"
 
 # last_error do input inteiro
 INPUT_ERR_ACCOUNT = "conta_inativa"
-INPUT_ERR_SEND_OFF = "envio_desligado"  # allow_input=false (liga/desliga manual)
 INPUT_ERR_NO_BRAND = "conta_sem_brand_id"
 INPUT_ERR_API_KEY = "api_key_indisponivel"
 INPUT_ERR_LIST_ROW = "lista_input_nao_encontrada"
@@ -226,18 +225,19 @@ async def resolve_destination(db, input_list_id: str, *, check_list: bool) -> De
     account_id = input_list["slick_account_id"]
     res = await retry_transport(
         lambda: db.table("slicktext_accounts")
-        .select("id, name, brand_id, status, allow_input")
+        .select("id, name, brand_id, status")
         .eq("id", account_id)
         .limit(1)
         .execute(),
         f"ler conta {account_id}",
     )
     account = (res.data or [None])[0]
+    # Só o status decide. allow_input NÃO entra aqui de propósito: ele é o
+    # liga/desliga dos envios automáticos (compra aprovada e abandono); o input
+    # em lote é disparo manual do painel e vale pra conta active com envio
+    # automático desligado (pedido do front, 09/11/2026).
     if not account or str(account.get("status") or "").strip().lower() not in ACTIVE_ACCOUNT_STATUSES:
         raise InputFailure(INPUT_ERR_ACCOUNT)
-    # mesmo filtro da get_slicktext_credentials(): allow_input null conta como false
-    if account.get("allow_input") is not True:
-        raise InputFailure(INPUT_ERR_SEND_OFF)
     if not account.get("brand_id"):
         raise InputFailure(INPUT_ERR_NO_BRAND)
 

@@ -221,7 +221,7 @@ where id = :input_id
 
 Não apagar as linhas já inseridas na fila. Um processamento futuro pode retomá-las se o status voltar a ser tratado. Neste contrato, `error` não é reprocessado automaticamente.
 
-`last_error` do input é texto curto e estável, por exemplo `conta_inativa`, `envio_desligado` (conta com `allow_input = false`), `lista_nao_encontrada`, `falha_ao_reunir_leads`. Não colocar telefone nem API key.
+`last_error` do input é texto curto e estável, por exemplo `conta_inativa`, `lista_nao_encontrada`, `falha_ao_reunir_leads`. Não colocar telefone nem API key.
 
 ## Rede de segurança
 

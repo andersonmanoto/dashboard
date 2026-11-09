@@ -303,12 +303,20 @@ def test_conta_ativa_em_portugues_vale(env):
 
 
 @pytest.mark.parametrize("allow_input", [False, None])
-def test_conta_com_envio_desligado_e_falha_do_input(env, allow_input):
+def test_allow_input_desligado_nao_barra_o_input(env, allow_input):
+    # allow_input é só dos envios automáticos; o input manual olha o status
     db = env["db"]
     db.rows["slicktext_accounts"][0]["allow_input"] = allow_input
+    dest = asyncio.run(svc.resolve_destination(db, "list-1", check_list=False))
+    assert dest.list_id == "555"
+
+
+def test_conta_inativa_e_falha_do_input(env):
+    db = env["db"]
+    db.rows["slicktext_accounts"][0]["status"] = "inactive"
     with pytest.raises(InputFailure) as exc:
         asyncio.run(svc.resolve_destination(db, "list-1", check_list=False))
-    assert exc.value.code == "envio_desligado"
+    assert exc.value.code == "conta_inativa"
     assert db.rpcs == []  # nem lê a api key
 
 
