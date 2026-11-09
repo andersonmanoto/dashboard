@@ -136,6 +136,19 @@ async def verify_slicktext_setup_key(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Credenciais inválidas")
 
 
+async def verify_slicktext_input_key(
+    x_api_key: Annotated[str, Header(alias="X-API-KEY")] = None,
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Valida chave de API do input de leads SlickText (POST /slicktext/inputs)."""
+    if not settings.slicktext_input_endpoint_key:
+        logger.critical("SLICKTEXT_INPUT_ENDPOINT_KEY não configurado!")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Config Error")
+
+    if x_api_key != settings.slicktext_input_endpoint_key:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Credenciais inválidas")
+
+
 async def verify_reports_key(
     x_api_key: Annotated[str, Header(alias="X-API-KEY")] = None,
     settings: Settings = Depends(get_settings),

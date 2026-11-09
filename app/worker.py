@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from arq.connections import RedisSettings
-from arq import cron
+from arq import cron, func
 from loguru import logger
 from concurrent.futures import ThreadPoolExecutor
 
@@ -24,6 +24,7 @@ from app.services.slicktext_service import (
 )
 
 from app.scripts.sync_approved_orders import fetch_pending_ids, process_single_item
+from app.services import slicktext_input_service
 
 
 async def task_process_webhook(
@@ -414,6 +415,35 @@ async def cron_send_slicktext_abandons(ctx):
     logger.info(f"{len(pending)} abandono(s) processado(s) pro SlickText.")
 
 
+async def task_slicktext_input_start(ctx, input_id: str):
+    """
+    Input de leads (POST /slicktext/inputs): resolve conta/lista e chama
+    sms_input_leads. O envio é do cron_send_slicktext_inputs.
+    """
+    logger.info(f"Input de leads SlickText | input_id={input_id}")
+    await slicktext_input_service.start_input(input_id)
+
+
+async def cron_send_slicktext_inputs(ctx):
+    """
+    Envia a fila slicktext_input_queue em lotes reservados (lease), até ~45s
+    por rodada. Um input grande leva várias rodadas.
+    """
+    try:
+        await slicktext_input_service.send_pending_rows(time_budget_seconds=45)
+    except Exception:
+        logger.exception("Falha no envio da fila de input de leads SlickText")
+
+
+async def cron_sweep_slicktext_inputs(ctx):
+    """Rede de segurança: input pending antigo volta pro job; processing ganha refresh."""
+    redis = ctx["redis"]
+    stale = await slicktext_input_service.sweep_inputs()
+    for input_id in stale:
+        logger.warning(f"Input SlickText {input_id} parado em pending; reenfileirando.")
+        await redis.enqueue_job("task_slicktext_input_start", input_id)
+
+
 class WorkerSettings:
     settings = get_settings()
 
@@ -425,7 +455,12 @@ class WorkerSettings:
 
     on_startup = startup
     on_shutdown = shutdown
-    functions = [task_process_webhook, task_sync_slicktext_item]
+    functions = [
+        task_process_webhook,
+        task_sync_slicktext_item,
+        # sms_input_leads pode demorar com período longo
+        func(task_slicktext_input_start, timeout=300, max_tries=1),
+    ]
 
     # AGENDAMENTO DO CRON: só enfileira, timeout curto é suficiente
     cron_jobs = [
@@ -449,6 +484,12 @@ class WorkerSettings:
             cron_send_slicktext_abandons,
             minute={3, 8, 13, 18, 23, 28, 33, 38, 43, 48, 53, 58},
             timeout=240,
+        ),
+        cron(cron_send_slicktext_inputs, minute=set(range(60)), timeout=60),
+        cron(
+            cron_sweep_slicktext_inputs,
+            minute={6, 16, 26, 36, 46, 56},
+            timeout=60,
         ),
         cron(
             cron_send_aweber_leads,

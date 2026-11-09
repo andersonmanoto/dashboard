@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     funnel_sync_api_key: str = ""
     redtrack_offers_api_key: str = ""
     slicktext_setup_endpoint_key: str = ""
+    # X-API-KEY do POST /slicktext/inputs (input de leads em lote, chamado pela edge)
+    slicktext_input_endpoint_key: str = ""
     # Secret Key da JVZoo (My Account → Seller Settings) -- valida o cverify do JVZIPN v2
     jvzoo_secret_key: str = ""
 
