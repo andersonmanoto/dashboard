@@ -52,11 +52,11 @@ _PAGAMERICAN_TRACKING_PARAMS = "?clickid={clickid}"
 # Formato: https://www.jvzoo.com/b/118423/453109/99?aid=3636247&tid={clickid}
 _JVZOO_TRACKING_PARAMS = "&tid={clickid}"
 
-# Digistore: o afiliado já vem no path do promolink (/redir/PRODUTO/AFILIADO),
-# então não leva aff_id. `cid` é o campo que o IPN devolve e o
+# Digistore: o aff_id do payload vai como `aff` (na DS24 o id do afiliado é o
+# próprio username, ex. "gestorfour"). `cid` é o campo que o IPN devolve e o
 # PayloadNormalizer lê como click_id (ver _normalize_digistore24).
-# Formato: https://www.checkout-ds24.com/product/609807?cid={clickid}&sid1={rt_campaign}&sid2={utm_campaign}
-_DIGISTORE_TRACKING_PARAMS = "cid={clickid}&sid1={rt_campaign}&sid2={utm_campaign}"
+# Formato: https://www.checkout-ds24.com/product/609807?aff=gestorfour&cid={clickid}&sid1={rt_campaign}&sid2={utm_campaign}
+_DIGISTORE_TRACKING_PARAMS = "&cid={clickid}&sid1={rt_campaign}&sid2={utm_campaign}"
 
 
 def _build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
@@ -67,7 +67,7 @@ def _build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
         return f"{checkout_url}?aid={aff_id}{_JVZOO_TRACKING_PARAMS}"
     if plataforma_lower in ("digistore", "digistore24"):
         separator = "&" if "?" in checkout_url else "?"
-        return f"{checkout_url}{separator}{_DIGISTORE_TRACKING_PARAMS}"
+        return f"{checkout_url}{separator}aff={aff_id}{_DIGISTORE_TRACKING_PARAMS}"
     return f"{checkout_url}&aff_id={aff_id}{_TRACKING_MACROS}"
 
 
