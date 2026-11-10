@@ -11,7 +11,7 @@ REDTRACK_CONVERSIONS_NETWORKS, fora os produtos de
 REDTRACK_CONVERSIONS_EXCLUDED_PRODUCT_IDS.
 
 Idempotente: pedido que já está na fila (em qualquer status) não é tocado,
-pela chave única (network, bg_order_id, conversion_type). Pode rodar quantas
+pela chave única (network, event_order_id, conversion_type). Pode rodar quantas
 vezes quiser. Pra REENVIAR algo que já está na fila (ex: failed), é um UPDATE
 direto: status='pending', attempts=0.
 

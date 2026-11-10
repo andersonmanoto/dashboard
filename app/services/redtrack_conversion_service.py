@@ -137,7 +137,9 @@ def build_conversion_row(event: NormalizedEvent, event_id: Optional[str]) -> dic
         "event_id": event_id,
         "network": _network_value(event.network),
         # Nome histórico (BuyGoods): é o order_id cru do payload da rede --
-        # na BuyGoods o numérico, diferente do events.order_id global.
+        # na BuyGoods o numérico, sequencial POR CONTA vendor (repete entre
+        # contas), diferente do events.order_id global. Só informativo: a
+        # chave única da fila é o event_order_id.
         "bg_order_id": str(payload.get("order_id") or event.order_id),
         "event_order_id": event.order_id,
         "conversion_type": REDTRACK_CONVERSION_TYPE,

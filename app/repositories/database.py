@@ -1058,7 +1058,7 @@ class DatabaseRepository:
     ) -> Optional[dict]:
         """
         Insere a conversão na redtrack_conversion_queue. Se o pedido já estiver
-        na fila (mesmo network + bg_order_id + conversion_type), não faz nada:
+        na fila (mesmo network + event_order_id + conversion_type), não faz nada:
         IPN reenviado, reprocess_inbox e a reconciliação podem chamar isso
         várias vezes pro mesmo pedido sem duplicar o envio.
 
@@ -1070,7 +1070,7 @@ class DatabaseRepository:
                     self.client.table("redtrack_conversion_queue")
                     .upsert(
                         row,
-                        on_conflict="network,bg_order_id,conversion_type",
+                        on_conflict="network,event_order_id,conversion_type",
                         ignore_duplicates=True,
                     )
                     .execute()
