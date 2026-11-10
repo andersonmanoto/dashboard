@@ -95,6 +95,16 @@ class Settings(BaseSettings):
     # -- exceção, ex: produto que ainda não migrou. Vazio = todo produto de
     # internal_aff_ids envia.
     redtrack_conversions_excluded_product_ids: str = ""
+    # Redes (NetworkType.value, separadas por vírgula) que enviam conversões.
+    # DigiStore24 fica de fora até a conta de afiliado da Tiger estar no ar e
+    # o IPN de afiliado validado com uma venda real.
+    redtrack_conversions_networks: str = "BuyGoods"
+
+    @property
+    def redtrack_conversions_network_set(self) -> frozenset[str]:
+        return frozenset(
+            n.strip() for n in self.redtrack_conversions_networks.split(",") if n.strip()
+        )
 
     @property
     def redtrack_conversions_excluded_product_id_set(self) -> frozenset[str]:

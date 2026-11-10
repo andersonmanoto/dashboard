@@ -17,6 +17,7 @@ from services.aweber_service import build_abandon_subscriber, build_order_subscr
 from services.redtrack_conversion_service import (
     REDTRACK_CONVERSION_TYPE,
     build_conversion_row,
+    is_new_sale,
 )
 from services.zapier_service import build_abandoned_cart_payload, build_order_payload
 from utils.date_utils import parse_date
@@ -41,6 +42,7 @@ class EventProcessor:
         zapier_webhook_enabled: bool = True,
         redtrack_send_from: Optional[str] = None,
         redtrack_excluded_product_ids: Optional[frozenset[str]] = None,
+        redtrack_networks: Optional[frozenset[str]] = None,
         aweber_enabled: bool = False,
         slicktext_abandon_enabled: bool = False,
     ):
@@ -62,6 +64,8 @@ class EventProcessor:
             redtrack_excluded_product_ids (Optional[frozenset[str]]):
                 products.id que não enviam conversões. None/vazio = todos os
                 produtos de internal_aff_ids enviam.
+            redtrack_networks (Optional[frozenset[str]]): redes
+                (NetworkType.value) que enviam conversões. None = só BuyGoods.
             aweber_enabled (bool): Se True, enfileira leads da PagAmerican
                 (vendas e abandonos) pro AWeber. Desligado por padrão pelo
                 mesmo motivo do RedTrack: só o worker liga (via config).
@@ -74,6 +78,11 @@ class EventProcessor:
         self.zapier_webhook_enabled = zapier_webhook_enabled
         self.redtrack_send_from = redtrack_send_from or None
         self.redtrack_excluded_product_ids = redtrack_excluded_product_ids or frozenset()
+        self.redtrack_networks = (
+            frozenset({NetworkType.BUYGOODS.value})
+            if redtrack_networks is None
+            else redtrack_networks
+        )
         self.aweber_enabled = aweber_enabled
         self.slicktext_abandon_enabled = slicktext_abandon_enabled
 
@@ -154,8 +163,8 @@ class EventProcessor:
             if not self.redtrack_send_from:
                 return
             if (
-                self._network_value(event.network) != NetworkType.BUYGOODS.value
-                or event.action_type != ActionType.NEWORDER
+                self._network_value(event.network) not in self.redtrack_networks
+                or not is_new_sale(event)
                 or event.is_test
                 or event.funnel_stage != REDTRACK_CONVERSION_TYPE
                 or not event.event_date

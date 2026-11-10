@@ -153,3 +153,125 @@ def test_processor_pula_produtos_excluidos():
 
     assert len(db.enqueued) == 1
     assert db.enqueued[0]["click_id"] == "6ab9e90dedb37fb6aea7aaef"
+
+
+# ========== DIGISTORE24 ==========
+# Payload ILUSTRATIVO de venda de afiliado (campos que o normalizer lê).
+# Ainda não validado contra um IPN real da conta de afiliado da Tiger.
+PAYLOAD_DS24_AFILIADO = {
+    "order_id": "DSABC123",
+    "transaction_type": "payment",
+    "datetime_full": "2026-11-10T14:05:00+01:00",
+    "amount_brutto": "69.00",
+    "amount_affiliate": "41.40",
+    "currency": "USD",
+    "cid": "6ab9e90dedb37fb6aea7aaef",
+    "sid1": "S231 - 1-X-X - TST - 25-09 - R01",
+    "affiliate_id": "tigeroffers",
+    "affiliate_name": "tigeroffers",
+    "product_id": "609807",
+    "product_name": "Produto Teste",
+    "email": "cliente@example.com",
+    "is_test_payment": "0",
+    "upsell_no": "0",
+}
+
+DS24 = frozenset({"BuyGoods", "DigiStore24"})
+
+
+def _ds24_event(**payload_overrides):
+    payload = {**PAYLOAD_DS24_AFILIADO, **payload_overrides}
+    event = PayloadNormalizer().normalize(NetworkType.DIGISTORE24, payload)
+    event.product_id = uuid4()
+    event.checkout_id = uuid4()
+    event.funnel_stage = "Purchase"
+    return event
+
+
+def test_row_ds24():
+    row = build_conversion_row(_ds24_event(), "evt-ds")
+
+    assert row["status"] == "pending"
+    assert row["network"] == "DigiStore24"
+    assert row["bg_order_id"] == "DSABC123"
+    assert row["payload"] == {
+        "campaign_id": "",
+        "clickid": "6ab9e90dedb37fb6aea7aaef",
+        "type": "Purchase",
+        "payout": 41.4,
+        # 14:05 em UTC+1 -> 13:05Z (usa o fuso do datetime_full)
+        "created_at": "2026-11-10T13:05:00Z",
+    }
+
+
+@pytest.mark.parametrize("datetime_full", ["", "2026-11-10 14:05:00", "lixo"])
+def test_ds24_sem_fuso_sai_skipped(datetime_full):
+    row = build_conversion_row(_ds24_event(datetime_full=datetime_full), None)
+    assert row["status"] == "skipped"
+    assert row["skip_reason"] == "missing_created_at"
+
+
+def test_ds24_clickid_invalido_sai_skipped():
+    row = build_conversion_row(_ds24_event(cid="IwZXh0bgNhZW0BMABwZG9m"), None)
+    assert row["skip_reason"] == "invalid_click_id"
+
+
+def test_ds24_desligado_por_padrao():
+    db = FakeDB(internal=True)
+    EventProcessor(db, redtrack_send_from="2026-09-28").enqueue_redtrack_conversion(
+        _ds24_event(), None
+    )
+    assert db.enqueued == []
+
+
+def test_ds24_enfileira_quando_ligado():
+    db = FakeDB(internal=True)
+    EventProcessor(
+        db, redtrack_send_from="2026-09-28", redtrack_networks=DS24
+    ).enqueue_redtrack_conversion(_ds24_event(), "evt-ds")
+    assert len(db.enqueued) == 1
+    assert db.enqueued[0]["network"] == "DigiStore24"
+
+
+@pytest.mark.parametrize(
+    "internal, overrides, funnel_stage",
+    [
+        (False, {}, "Purchase"),  # afiliado externo
+        (True, {}, "Up1"),  # upsell não vai
+        (True, {"is_test_payment": "1"}, "Purchase"),
+        (True, {"transaction_type": "refund"}, "Purchase"),
+        (True, {"transaction_type": "chargeback"}, "Purchase"),
+        (True, {"transaction_type": "rebill"}, "Purchase"),
+    ],
+)
+def test_ds24_nao_enfileira(internal, overrides, funnel_stage):
+    db = FakeDB(internal=internal)
+    event = _ds24_event(**overrides)
+    event.funnel_stage = funnel_stage
+    EventProcessor(
+        db, redtrack_send_from="2026-09-28", redtrack_networks=DS24
+    ).enqueue_redtrack_conversion(event, None)
+    assert db.enqueued == []
+
+
+def test_buygoods_desligado_quando_fora_da_lista():
+    db = FakeDB(internal=True)
+    EventProcessor(
+        db,
+        redtrack_send_from="2026-09-28",
+        redtrack_networks=frozenset({"DigiStore24"}),
+    ).enqueue_redtrack_conversion(_event(), None)
+    assert db.enqueued == []
+
+
+def test_pagamerican_nunca_enfileira_mesmo_na_lista():
+    """Rede sem created_at implementado não entra, mesmo listada na config."""
+    db = FakeDB(internal=True)
+    event = _event()
+    event.network = NetworkType.PAGAMERICAN
+    EventProcessor(
+        db,
+        redtrack_send_from="2026-09-28",
+        redtrack_networks=frozenset({"PagAmerican"}),
+    ).enqueue_redtrack_conversion(event, None)
+    assert db.enqueued == []

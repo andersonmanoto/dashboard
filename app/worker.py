@@ -124,6 +124,7 @@ async def startup(ctx):
         slack_service=slack,
         redtrack_send_from=settings.redtrack_conversions_send_from,
         redtrack_excluded_product_ids=settings.redtrack_conversions_excluded_product_id_set,
+        redtrack_networks=settings.redtrack_conversions_network_set,
         aweber_enabled=settings.aweber_enabled,
         slicktext_abandon_enabled=True,
     )
