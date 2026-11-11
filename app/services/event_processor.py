@@ -66,8 +66,8 @@ class EventProcessor:
                 produtos de internal_aff_ids enviam.
             redtrack_networks (Optional[frozenset[str]]): redes
                 (NetworkType.value) que enviam conversões. None = só BuyGoods.
-            aweber_enabled (bool): Se True, enfileira leads da PagAmerican
-                (vendas e abandonos) pro AWeber. Desligado por padrão pelo
+            aweber_enabled (bool): Se True, enfileira leads da PagAmerican,
+                BuyGoods e DigiStore24 (vendas e abandonos) pro AWeber. Desligado por padrão pelo
                 mesmo motivo do RedTrack: só o worker liga (via config).
             slicktext_abandon_enabled (bool): Se True, enfileira o carrinho
                 abandonado na slicktext_sync_queue (SMS). Desligado por
@@ -216,17 +216,18 @@ class EventProcessor:
     def _is_aweber_order(cls, event: NormalizedEvent) -> bool:
         """
         Venda que vira lead na lista New Order do AWeber. PagAmerican: toda
-        venda nova (comportamento original). BuyGoods: só o front
-        (funnel_stage "Purchase", inclui os checkouts calls_*) -- upsell e
-        downsell são a mesma pessoa e só gerariam chamadas a mais, igual ao
-        autoresponder nativo da BuyGoods que este fluxo substitui.
+        venda nova (comportamento original). BuyGoods e DigiStore24: só o
+        front (funnel_stage "Purchase", inclui os checkouts calls_* da
+        BuyGoods) -- upsell e downsell são a mesma pessoa e só gerariam
+        chamadas a mais, igual à integração nativa de cada rede que este
+        fluxo substitui.
         """
         if event.is_test or event.action_type != ActionType.NEWORDER:
             return False
         network = cls._network_value(event.network)
         if network == NetworkType.PAGAMERICAN.value:
             return True
-        if network == NetworkType.BUYGOODS.value:
+        if network in (NetworkType.BUYGOODS.value, NetworkType.DIGISTORE24.value):
             return event.funnel_stage == "Purchase"
         return False
 
@@ -769,6 +770,14 @@ class EventProcessor:
                 self._enqueue_zapier_webhook(
                     build_abandoned_cart_payload(cart_data, product_name=product_name),
                     context=f"abandon {customer_email}",
+                )
+
+            if result and self.aweber_enabled:
+                await asyncio.to_thread(
+                    self._enqueue_abandon_aweber,
+                    cart_data,
+                    result,
+                    NetworkType.DIGISTORE24,
                 )
 
             if result and self.slicktext_abandon_enabled:

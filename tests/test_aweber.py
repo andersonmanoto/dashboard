@@ -14,7 +14,11 @@ from services.aweber_service import (
 from services.event_processor import EventProcessor
 from services.normalizer import PayloadNormalizer
 
-from tests.test_normalizer import PAYLOAD_BUYGOODS_REAL, PAYLOAD_PAGAMERICAN_PURCHASE
+from tests.test_normalizer import (
+    PAYLOAD_BUYGOODS_REAL,
+    PAYLOAD_DIGISTORE_SALE,
+    PAYLOAD_PAGAMERICAN_PURCHASE,
+)
 
 SODAHORSE_ID = "f0494709-01fb-4d0e-8e8c-3e200f25b13c"
 SODAHORSE_LISTS = {"neworder_list_id": "6977002", "abandon_list_id": "6977004"}
@@ -43,6 +47,20 @@ BUYGOODS_ABANDON = {
     "country": "United States",
 }
 
+# Abandono da DigiStore24 ("Input of contact details on order forms") como
+# chega na rota /digistore24/abandon
+DIGISTORE_ABANDON = {
+    "event": "on_payment_missed",
+    "order_id": "CART-123",
+    "email": "Ana.Lima@Example.com",
+    "first_name": "Ana",
+    "last_name": "Lima",
+    "phone_no": "5551112222",
+    "country_code": "US",
+    "product_id": "753030",
+    "product_name": "SodaHorsePeak",
+}
+
 
 def _order_event(**customer_overrides):
     payload = {
@@ -57,6 +75,19 @@ def _buygoods_event(funnel_stage="Purchase", **overrides):
         NetworkType.BUYGOODS, {**PAYLOAD_BUYGOODS_REAL, **overrides}
     )
     event.funnel_stage = funnel_stage  # vem do _enrich_checkout no fluxo real
+    return event
+
+
+def _digistore_event(funnel_stage="Purchase", **overrides):
+    payload = {
+        **PAYLOAD_DIGISTORE_SALE,
+        "transaction_type": "payment",
+        "is_test_payment": "false",
+        "product_id": "753030",
+        **overrides,
+    }
+    event = PayloadNormalizer().normalize(NetworkType.DIGISTORE24, payload)
+    event.funnel_stage = funnel_stage
     return event
 
 
@@ -79,6 +110,28 @@ def test_subscriber_da_venda_buygoods():
         "tags": ["buygoods", "offer-abc9d"],
         "ip_address": "66.249.84.142",
     }
+
+
+def test_subscriber_da_venda_digistore24():
+    assert build_order_subscriber(_digistore_event(utm_source="fb")) == {
+        "email": "maria@email.com",
+        "update_existing": "true",
+        "name": "Maria Pereira",
+        "tags": ["digistore24", "offer-753030"],
+        "ad_tracking": "fb",
+    }
+    assert "ad_tracking" not in build_order_subscriber(_digistore_event(utm_source=""))
+
+
+def test_digistore24_so_front_neworder_ao_vivo_vira_lead():
+    ok = EventProcessor._is_aweber_order
+    assert ok(_digistore_event())
+    assert not ok(_digistore_event(funnel_stage="Up1"))
+    # checkout não cadastrado: sem funnel_stage, não manda
+    assert not ok(_digistore_event(funnel_stage=None))
+    assert not ok(_digistore_event(transaction_type="refund"))
+    assert not ok(_digistore_event(transaction_type="chargeback"))
+    assert not ok(_digistore_event(is_test_payment="true"))
 
 
 def test_ip_so_se_for_publico():
@@ -128,7 +181,7 @@ class FakeDB:
 
     def get_checkout_by_code(self, code, account_id=None):
         self.checkout_lookups.append((code, account_id))
-        if code in ("cEy6BQCE", "sohp_front_6b_fnn1"):
+        if code in ("cEy6BQCE", "sohp_front_6b_fnn1", "753030"):
             return FakeCheckout(SODAHORSE_ID)
         return None
 
@@ -198,6 +251,34 @@ def test_abandono_buygoods_vai_pra_lista_de_carrinho_do_produto():
     assert db.carts[0]["product_id"] == SODAHORSE_ID
     assert db.carts[0]["network_id"] == "net-BuyGoods"
     assert db.lead_origins == [("cart-1", None)]
+
+
+def test_abandono_digistore24_vai_pra_lista_de_carrinho_do_produto():
+    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
+    processor = EventProcessor(db, zapier_webhook_enabled=False, aweber_enabled=True)
+    assert asyncio.run(processor.process_digistore24_abandon_cart(DIGISTORE_ABANDON))
+    assert db.leads == [
+        (
+            "abandon",
+            "6977004",
+            {
+                "email": "ana.lima@example.com",
+                "update_existing": "true",
+                "name": "Ana Lima",
+                "tags": ["digistore24", "offer-753030"],
+            },
+        )
+    ]
+    assert db.carts[0]["product_id"] == SODAHORSE_ID
+    assert db.carts[0]["network_id"] == "net-DigiStore24"
+    assert db.lead_origins == [("cart-1", None)]
+
+
+def test_abandono_digistore24_nao_enfileira_com_aweber_desligado():
+    db = FakeDB(lists={SODAHORSE_ID: SODAHORSE_LISTS})
+    processor = EventProcessor(db, zapier_webhook_enabled=False, aweber_enabled=False)
+    assert asyncio.run(processor.process_digistore24_abandon_cart(DIGISTORE_ABANDON))
+    assert db.leads == []
 
 
 def test_carrinho_de_codename_desconhecido_salva_sem_produto():

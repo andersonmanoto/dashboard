@@ -1,10 +1,10 @@
 """
-Leads da PagAmerican e da BuyGoods pras listas do AWeber (POST /subscribers),
+Leads da PagAmerican, da BuyGoods e da DigiStore24 pras listas do AWeber (POST /subscribers),
 com OAuth.
 
 As funções build_* montam o corpo do subscriber que vai pra
 aweber_lead_queue (chamadas pelo EventProcessor). Cada lead leva a tag da
-rede de origem ("pagamerican" / "buygoods") e a da oferta ("offer-<código>").
+rede de origem ("pagamerican" / "buygoods" / "digistore24") e a da oferta ("offer-<código>").
 AWeberAPI é usada só pelo cron do worker: envia os pendentes e renova o
 access token (~2h), que fica na tabela aweber_oauth_tokens.
 """
@@ -31,7 +31,11 @@ def _public_ip(raw: Optional[str]) -> Optional[str]:
     return str(ip) if ip.is_global else None
 
 
-NETWORK_TAGS = {"PagAmerican": "pagamerican", "BuyGoods": "buygoods"}
+NETWORK_TAGS = {
+    "PagAmerican": "pagamerican",
+    "BuyGoods": "buygoods",
+    "DigiStore24": "digistore24",
+}
 
 
 def _subscriber(
@@ -64,7 +68,8 @@ def _subscriber(
 
 def build_order_subscriber(event) -> Optional[dict]:
     """
-    Subscriber de uma venda (evento normalizado), PagAmerican ou BuyGoods.
+    Subscriber de uma venda (evento normalizado), PagAmerican, BuyGoods ou
+    DigiStore24.
     None se sem email ou rede sem envio pro AWeber.
     """
     network = getattr(event.network, "value", event.network)
@@ -94,6 +99,18 @@ def build_order_subscriber(event) -> Optional[dict]:
             name=event.customer_name,
             offer_code=event.order_details.external_checkout_code,
             ip=payload.get("ipaddress"),
+        )
+
+    if network == "DigiStore24":
+        # IPN flat; o código da oferta é o product_id da DigiStore (o
+        # checkout_code dela). O IPN não manda IP do comprador. utm_source
+        # vai como ad_tracking igual à PagAmerican (hoje sempre vazio).
+        return _subscriber(
+            network,
+            email=event.customer_email,
+            name=event.customer_name,
+            offer_code=event.order_details.external_checkout_code,
+            utm_source=payload.get("utm_source"),
         )
 
     return None

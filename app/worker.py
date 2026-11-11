@@ -302,7 +302,7 @@ async def cron_sync_redtrack_creatives(ctx):
 
 async def cron_send_aweber_leads(ctx):
     """
-    Lê a fila aweber_lead_queue (leads de venda/abandono da PagAmerican já
+    Lê a fila aweber_lead_queue (leads de venda/abandono de todas as redes já
     montados pelo EventProcessor) e faz o POST /subscribers no AWeber.
     Mesmo esquema do Zapier, com retry no próximo tick (até 5 -> failed).
     Problema de OAuth (sem token, refresh recusado) não conta tentativa: os

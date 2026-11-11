@@ -124,8 +124,8 @@ class Settings(BaseSettings):
     # Zapier (leads: novos pedidos e carrinhos abandonados)
     zapier_webhook_url: str = ""
 
-    # AWeber (leads da PagAmerican e da BuyGoods: vendas e carrinhos
-    # abandonados). Os tokens OAuth ficam na tabela aweber_oauth_tokens, não
+    # AWeber (leads da PagAmerican, da BuyGoods e da DigiStore24: vendas e
+    # carrinhos abandonados). Os tokens OAuth ficam na tabela aweber_oauth_tokens, não
     # aqui.
     aweber_client_id: str = ""
     aweber_client_secret: str = ""
@@ -133,9 +133,9 @@ class Settings(BaseSettings):
     # As listas de destino são por produto (qualquer rede): tabela
     # aweber_product_lists.
     # Tags extras aplicadas a TODO lead, de qualquer rede, separadas por
-    # vírgula. A tag da rede ("pagamerican"/"buygoods") já vai em cada lead,
-    # então isto normalmente fica vazio -- "pagamerican" aqui marcaria os
-    # leads da BuyGoods como PagAmerican.
+    # vírgula. A tag da rede ("pagamerican"/"buygoods"/"digistore24") já vai
+    # em cada lead, então isto normalmente fica vazio -- "pagamerican" aqui
+    # marcaria os leads das outras redes como PagAmerican.
     aweber_default_tags: str = ""
 
     @property
