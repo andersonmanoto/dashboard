@@ -15,7 +15,7 @@ def test_build_message_format():
         "Novo funil cadastrado, disponível para afiliados:\n"
         "Produto: MaroBrain\n"
         "Nicho: ME\n"
-        "Formato: Comprimido\n"
+        "Formato: Capsula\n"
         "Funil: 2\n"
         "TSL: https://dg.marobrain.com/about/\n"
         "DTC: https://dg.marobrain.com/dtc/\n"
@@ -56,6 +56,8 @@ def test_build_message_urls_stay_on_their_lines():
 
 
 def test_format_formato():
-    assert format_formato("gummie") == "Gummy"
-    assert format_formato("capsula gelatinosa") == "Cápsula Gelatinosa"
-    assert format_formato("tipo_novo") == "tipo_novo"
+    assert format_formato("gummie") == "Gummie"
+    assert format_formato("capsula gelatinosa") == "Capsula gelatinosa"
+    assert format_formato("info") == "Info"
+    assert format_formato("  spray ") == "Spray"
+    assert format_formato("") == "—"

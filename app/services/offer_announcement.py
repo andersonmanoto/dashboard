@@ -7,7 +7,7 @@ Formato (o mesmo do post fixado que a galera mandava na mão):
     Novo funil cadastrado, disponível para afiliados:
     Produto: BakingSlim
     Nicho: WL
-    Formato: Comprimido
+    Formato: Capsula
     Funil: 2
     TSL: https://dg.marobrain.com/about/
     DTC: https://dg.marobrain.com/dtc/
@@ -36,19 +36,6 @@ from app.config import Settings
 
 MISSING = "—"
 
-# products.type -> texto do "Formato". O type não diferencia spray tópico de
-# bucal, então spray sai só "Spray".
-FORMATO_BY_TYPE = {
-    "capsula": "Comprimido",
-    "capsula gelatinosa": "Cápsula Gelatinosa",
-    "gummie": "Gummy",
-    "gotas": "Gotas",
-    "spray": "Spray",
-    "creme": "Creme",
-    "info": "Digital",
-    "digital": "Digital",
-}
-
 # `plataforma` do payload -> networks.name
 NETWORK_BY_PLATAFORMA = {
     "buygoods": "BuyGoods",
@@ -60,9 +47,12 @@ NETWORK_BY_PLATAFORMA = {
 
 
 def format_formato(product_type: Optional[str]) -> str:
-    if not product_type:
+    # Sai o próprio products.type, só com a primeira letra maiúscula
+    # (capsula -> Capsula, capsula gelatinosa -> Capsula gelatinosa).
+    t = (product_type or "").strip()
+    if not t:
         return MISSING
-    return FORMATO_BY_TYPE.get(product_type.strip().lower(), product_type)
+    return t[0].upper() + t[1:]
 
 
 def build_message(
