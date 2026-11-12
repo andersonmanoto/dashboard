@@ -193,3 +193,27 @@ class RedTrackAPI:
 
     async def get_offer(self, client: httpx.AsyncClient, offer_id: str) -> dict:
         return await self._get(client, f"/offers/{offer_id}")
+
+    async def update_offer(self, client: httpx.AsyncClient, offer: dict) -> dict:
+        """PUT /offers/{id} com o objeto COMPLETO da offer (o que veio do GET,
+        com os campos alterados). Validado em 12/11 contra a API real: com o
+        objeto inteiro, só `url` e `updated_at` mudaram; mandar tudo evita
+        qualquer reset de campo não enviado (mesma cautela do PUT de campanha
+        no hachi).
+        """
+        offer_id = offer["id"]
+        try:
+            response = await client.put(
+                f"{self.base_url}/offers/{offer_id}", headers=self.headers, json=offer
+            )
+        except httpx.TransportError as e:
+            raise RedTrackAPIError(
+                f"Falha de conexão ao atualizar offer '{offer_id}' no RedTrack: {e}"
+            ) from e
+
+        if response.status_code not in (200, 201):
+            raise RedTrackAPIError(
+                f"RedTrack retornou {response.status_code} ao atualizar offer "
+                f"'{offer_id}': {response.text[:300]}"
+            )
+        return json.loads(response.content.decode("utf-8", errors="replace"))

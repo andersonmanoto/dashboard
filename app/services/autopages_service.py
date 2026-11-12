@@ -103,3 +103,17 @@ class AutoPagesService:
         if not response.data:
             raise AutoPagesError("Falha ao criar checkout_link no AutoPages.")
         return response.data[0]
+
+    async def update_checkout_link_url(self, redtrack_id: str, link: str) -> int:
+        """Troca `link` (buylink cru) das linhas de checkout_links dessa offer.
+
+        Devolve quantas linhas mudaram (0 = offer sem linha no AutoPages).
+        """
+        client = await self._get_client()
+        response = (
+            await client.table("checkout_links")
+            .update({"link": link})
+            .eq("redtrack_id", redtrack_id)
+            .execute()
+        )
+        return len(response.data or [])

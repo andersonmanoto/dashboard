@@ -64,6 +64,48 @@ _JVZOO_TRACKING_PARAMS = "&tid={clickid}"
 _DIGISTORE_TRACKING_PARAMS = "&cid={clickid}&sid1={rt_campaign}&sid2={utm_campaign}"
 
 
+# Parâmetro de afiliado que _build_offer_url põe na URL, por rede
+# (PagAmerican não leva aff). O PUT /offers-rt-ap/url recupera o aff_id
+# atual da offer por aqui, já que o front manda só o buylink.
+AFF_PARAM_BY_PLATAFORMA = {
+    "buygoods": "aff_id",
+    "digistore": "aff",
+    "digistore24": "aff",
+    "jvzoo": "aid",
+}
+
+# Tudo que _build_offer_url acrescenta, por rede. strip_tracking_params tira
+# esses parâmetros de um buylink que já venha com tracking, pra não duplicar.
+_TRACKING_PARAMS_BY_PLATAFORMA = {
+    "buygoods": {"aff_id", "subid", "subid2", "utm_campaign", "subid3", "subid5"},
+    "pagamerican": {"clickid"},
+    "jvzoo": {"aid", "tid"},
+    "digistore": {"aff", "cid", "sid1", "sid2"},
+    "digistore24": {"aff", "cid", "sid1", "sid2"},
+}
+
+SUPPORTED_PLATAFORMAS = frozenset(_TRACKING_PARAMS_BY_PLATAFORMA)
+
+
+def strip_tracking_params(url: str, plataforma: str) -> str:
+    """Tira do buylink os parâmetros que _build_offer_url acrescenta.
+
+    Mexe só nos pares chave=valor dessas chaves; o resto da query fica
+    byte a byte igual (ex. o `redirect` base64 da BuyGoods, com `=` no fim).
+    """
+    keys = _TRACKING_PARAMS_BY_PLATAFORMA.get(plataforma.strip().lower(), set())
+    base, sep, rest = url.partition("?")
+    if not sep:
+        return url
+    query, hash_sep, fragment = rest.partition("#")
+    kept = [p for p in query.split("&") if p and p.split("=", 1)[0] not in keys]
+    return base + ("?" + "&".join(kept) if kept else "") + hash_sep + fragment
+
+
+def build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
+    return _build_offer_url(checkout_url, aff_id, plataforma)
+
+
 def _build_offer_url(checkout_url: str, aff_id: str, plataforma: str) -> str:
     plataforma_lower = plataforma.strip().lower()
     if plataforma_lower == "pagamerican":

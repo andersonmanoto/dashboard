@@ -9,6 +9,10 @@ from app.dependencies import verify_redtrack_offers_key
 from app.services.autopages_service import AutoPagesError
 from app.services.offer_announcement import notify_offer_created
 from app.services.redtrack_offer_service import RedTrackOfferService
+from app.services.redtrack_offer_url_service import (
+    OfferUrlUpdateError,
+    RedTrackOfferUrlService,
+)
 from app.services.redtrack_service import RedTrackAPIError
 
 router = APIRouter(tags=["RedTrack"])
@@ -20,6 +24,11 @@ class OfertaItem(BaseModel):
     # checkouts.id (dashboard) da linha Purchase deste pote. Opcional na
     # transição: sem ele, a linha é achada pelo checkout_code da URL.
     checkout_id: Optional[str] = None
+
+
+class UpdateOfferUrlRequest(BaseModel):
+    checkout_id: str
+    url: str
 
 
 class CreateOffersRequest(BaseModel):
@@ -73,3 +82,29 @@ async def create_redtrack_offers(
         "aff_id": payload.aff_id,
         "ofertas": ofertas_criadas,
     }
+
+
+@router.put(
+    "/offers-rt-ap/url",
+    dependencies=[Depends(verify_redtrack_offers_key)],
+)
+async def update_redtrack_offer_url(
+    payload: UpdateOfferUrlRequest,
+    settings: Settings = Depends(get_settings),
+):
+    """
+    Troca o buylink da offer do RedTrack ligada a `checkout_id`
+    (checkouts.id_rt_offer). O front manda o buylink cru; os parâmetros de
+    tracking são montados aqui pela rede do checkout, com o aff_id que a
+    offer já tem. Também atualiza checkouts.url/checkout_code e
+    checkout_links.link no AutoPages -- ver redtrack_offer_url_service.py.
+    """
+    try:
+        service = RedTrackOfferUrlService(settings)
+        return await service.update_offer_url(payload.checkout_id, payload.url)
+    except OfferUrlUpdateError as e:
+        logger.error(f"[redtrack] erro ao atualizar URL da offer: {e}")
+        raise HTTPException(e.status_code, str(e))
+    except (RedTrackAPIError, AutoPagesError) as e:
+        logger.error(f"[redtrack] erro ao atualizar URL da offer: {e}")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
