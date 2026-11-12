@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel
@@ -15,6 +17,9 @@ router = APIRouter(tags=["RedTrack"])
 class OfertaItem(BaseModel):
     numero_de_potes: str
     url: str
+    # checkouts.id (dashboard) da linha Purchase deste pote. Opcional na
+    # transição: sem ele, a linha é achada pelo checkout_code da URL.
+    checkout_id: Optional[str] = None
 
 
 class CreateOffersRequest(BaseModel):
@@ -44,6 +49,10 @@ async def create_redtrack_offers(
     de produto por `código_produto`, checkout resolvido por `plataforma`).
     Depois de tudo criado, manda o aviso de produto liberado no Slack
     (#backend-geral) em background -- ver offer_announcement.py.
+    O offer_id também é gravado em `checkouts.id_rt_offer` do dashboard
+    (pelo `checkout_id` de cada oferta ou, sem ele, pelo checkout_code da
+    URL) -- ver checkout_offer_link.py. Falha nesse vínculo não derruba a
+    requisição: a oferta volta com `checkout_id: null`.
     """
     try:
         service = RedTrackOfferService(settings)

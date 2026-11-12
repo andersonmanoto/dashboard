@@ -7,13 +7,18 @@ Monta a URL de tracking (URL do checkout + macros do RedTrack — aff_id do
 payload e macros completos pra BuyGoods, só `?clickid={clickid}` pra
 PagAmerican) e o título da offer, cria a offer via POST /offers e, com o
 offer_id retornado, grava a linha correspondente em `checkout_links`
-(criando o produto em `products` se ainda não existir).
+(criando o produto em `products` se ainda não existir). Por fim grava o
+offer_id em `checkouts.id_rt_offer` do dashboard (ver checkout_offer_link.py).
 """
 
+from typing import Optional
+
 from loguru import logger
+from supabase import AsyncClient, create_async_client
 
 from app.config import Settings
 from app.services.autopages_service import AutoPagesError, AutoPagesService
+from app.services.checkout_offer_link import link_offer_to_checkout, resolve_network_id
 from app.services.redtrack_service import RedTrackAPI, RedTrackAPIError
 
 # Offer source (program) de cada rede no RedTrack, por `plataforma`.
@@ -88,8 +93,23 @@ def _build_checkout_link_name(
 
 class RedTrackOfferService:
     def __init__(self, settings: Settings):
+        self.settings = settings
         self.redtrack = RedTrackAPI(settings)
         self.autopages = AutoPagesService(settings)
+
+    async def _get_dashboard_db(self, plataforma: str) -> tuple[Optional[AsyncClient], Optional[str]]:
+        """Client do Supabase do dashboard + network_id da plataforma (fallback).
+
+        Falha aqui só loga: o vínculo em `checkouts` é best-effort.
+        """
+        try:
+            db = await create_async_client(
+                self.settings.supabase_url, self.settings.supabase_key
+            )
+            return db, await resolve_network_id(db, plataforma)
+        except Exception as exc:
+            logger.error(f"[redtrack] Sem acesso ao Supabase do dashboard pra checkouts: {exc}")
+            return None, None
 
     async def create_offers_from_payload(self, payload: dict) -> list[dict]:
         plataforma = payload["plataforma"]
@@ -102,6 +122,7 @@ class RedTrackOfferService:
         checkout = await self.autopages.get_checkout(plataforma)
         product_id = await self.autopages.get_or_create_product(codigo_produto, produto)
         offer_source_id = _get_offer_source_id(plataforma)
+        dashboard_db, network_id = await self._get_dashboard_db(plataforma)
 
         created: list[dict] = []
         for oferta in payload["ofertas"]:
@@ -148,7 +169,21 @@ class RedTrackOfferService:
                     f"antes da falha: {[c['offer_id'] for c in created]}"
                 ) from e
 
-            logger.info(f"[redtrack] Offer criada e sincronizada: '{title}' (id={offer_id})")
+            checkout_id = None
+            if dashboard_db is not None:
+                checkout_id = await link_offer_to_checkout(
+                    dashboard_db,
+                    offer_id=offer_id,
+                    plataforma=plataforma,
+                    url=checkout_url,
+                    network_id=network_id,
+                    checkout_id=(oferta.get("checkout_id") or "").strip() or None,
+                )
+
+            logger.info(
+                f"[redtrack] Offer criada e sincronizada: '{title}' "
+                f"(id={offer_id}, checkout_id={checkout_id})"
+            )
             created.append(
                 {
                     "numero_de_potes": numero_de_potes,
@@ -156,6 +191,7 @@ class RedTrackOfferService:
                     "title": title,
                     "url": tracking_url,
                     "checkout_link_id": checkout_link["id"],
+                    "checkout_id": checkout_id,
                 }
             )
 
