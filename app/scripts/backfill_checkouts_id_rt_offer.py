@@ -8,7 +8,9 @@ do checkout em `link` e a plataforma via `checkout_id` -> `checkouts.name`
 fallback do endpoint: checkout_code extraído da URL + network_id + Purchase.
 
 Só preenche linhas com id_rt_offer null; se a linha já tiver outro valor,
-reporta como conflito e não mexe. Links sem match (legado de rede que nunca
+reporta como conflito e não mexe. Se o AutoPages tiver mais de uma offer pro
+mesmo checkout (offer recriada, ex. SodaHorsePeak DS24 em 27/10 e 10/11),
+vale a mais recente -- mesmo resultado que o endpoint teria gravado. Links sem match (legado de rede que nunca
 entrou no dashboard, ex. CartPanda / DS24 de 2025) só aparecem no relatório.
 
 Uso:
@@ -51,8 +53,9 @@ async def main(apply: bool) -> None:
 
     ap_checkouts = {c["id"]: c["name"] for c in await _all_rows(autopages, "checkouts", "id, name")}
     links = await _all_rows(
-        autopages, "checkout_links", "id, link, name, redtrack_id, checkout_id", not_null="redtrack_id"
+        autopages, "checkout_links", "id, link, name, redtrack_id, checkout_id, created_at", not_null="redtrack_id"
     )
+    links.sort(key=lambda link: link["created_at"])  # mais recente sobrescreve
     dash = await _all_rows(
         db, "checkouts", "id, checkout_code, network_id, funnel_stage, id_rt_offer"
     )
@@ -82,12 +85,16 @@ async def main(apply: bool) -> None:
         offer_id = link["redtrack_id"]
         if row.get("id_rt_offer") == offer_id:
             stats["já preenchido"] += 1
-        elif row.get("id_rt_offer") or (row["id"] in pending and pending[row["id"]] != offer_id):
+        elif row.get("id_rt_offer"):
             stats["conflito"] += 1
             print(
                 f"  [conflito] {link['name']} | checkout {row['id']} já tem "
-                f"{row.get('id_rt_offer') or pending[row['id']]}, AutoPages diz {offer_id}"
+                f"{row['id_rt_offer']}, AutoPages diz {offer_id}"
             )
+        elif row["id"] in pending:
+            stats["substituída por mais recente"] += 1
+            print(f"  [recriada] {link['name']} | {pending[row['id']]} -> {offer_id}")
+            pending[row["id"]] = offer_id
         else:
             pending[row["id"]] = offer_id
             stats["a preencher"] += 1
