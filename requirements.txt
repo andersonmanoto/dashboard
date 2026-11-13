@@ -19,3 +19,4 @@ resend==2.23.0
 email-validator==2.1.1
 phonenumbers==9.0.34
 pycountry==26.2.16
+pillow==12.1.1

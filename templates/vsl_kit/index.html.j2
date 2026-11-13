@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="[[ nome_com_slogan ]]">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="[[ nome ]]">
+  <meta property="og:description" content="[[ nome_com_slogan ]]">
+  <title>[[ nome ]]</title>
+  <link rel="preconnect" href="https://scripts.converteai.net" crossorigin>
+  <link rel="dns-prefetch" href="https://scripts.converteai.net">
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="stylesheet" href="assets/css/pricing-cards.css">
+[% if ap %]
+<style>.esconder{display:none;}</style>
+
+{% if estrutura.plataforma == 'fb' %}
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '{{ estrutura.pixelCode }}');
+fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none"
+src="https://www.facebook.com/tr?id={{ estrutura.pixelCode }}&ev=PageView&noscript=1"/>
+</noscript>
+<!-- End Meta Pixel Code -->
+{% endif %}
+[% else %]
+  <!-- ============================================================
+     ÁREA DE EDIÇÃO RÁPIDA
+     Edite SOMENTE o que está nesta seção.
+     ============================================================ -->
+<!-- ==============================================
+    COLE ABAIXO O SCRIPT DE VELOCIDADE DO VTURB:
+     ============================================== -->
+[[ vturb_speed_script ]]
+<!-- ==============================================
+    FIM DO SCRIPT DE VELOCIDADE DO VTURB
+     ============================================== -->
+<template id="edit-vsl">
+<!-- ==============================================
+  VSL — Cole ABAIXO o EMBED COMPLETO do VTurb.
+  (Apague o exemplo e cole o código que o VTurb te dá.)
+     ============================================== -->
+[[ vturb_embed ]]
+<!-- ==============================================
+    FIM DO SCRIPT DE EMBED DO VTURB
+     ============================================== -->
+</template>
+<!-- ==============================================
+  PITCH DA VSL — Segundos até revelar as seções (.esconder).
+  Altere SOMENTE o número abaixo (ex.: 1111 = aparece no segundo 1111 do vídeo).
+     ============================================== -->
+<script>
+  window.VSL_PITCH_SECONDS = [[ pitch_seconds ]];
+</script>
+<!-- ==============================================
+    FIM DA EDIÇÃO DO PITCH DA VSL
+     ============================================== -->
+<!--
+  LINKS — Cole seus 3 links de checkout entre as aspas.
+  Eles serão aplicados nos botões BUY NOW (desktop e mobile).
+-->
+<script>
+  window.CHECKOUT_LINKS = {
+    bottles2: "",
+    bottles3: "",
+    bottles6: "",
+  };
+</script>
+<!-- ==============================================
+    FIM DA ÁREA DE EDIÇÃO DE LINKS:
+     ============================================== -->
+<!-- ==============================================
+    COLE ABAIXO O SCRIPT DE PIXEL (SE NECESSÁRIO):
+     ============================================== -->
+
+
+
+
+<!-- ==============================================
+    FIM DO SCRIPT DE PIXEL
+     ============================================== -->
+<!-- ==============================================
+    COLE ABAIXO O SCRIPT DO SEU TRACKER (SE NECESSÁRIO):
+     ============================================== -->
+
+
+
+
+<!-- ==============================================
+    FIM DO SCRIPT DE TRACKER
+     ============================================== -->
+
+<!-- ============ FIM DA ÁREA DE EDIÇÃO ============ -->
+
+<!-- Motor: carrega VSL + links (não precisa editar) -->
+<script>
+  (function () {
+    function mountVsl() {
+      var tpl = document.getElementById("edit-vsl");
+      var mount = document.getElementById("vsl-mount");
+      if (!tpl || !mount) return;
+
+      var content = tpl.content.cloneNode(true);
+      content.querySelectorAll("script").forEach(function (oldScript) {
+        var neu = document.createElement("script");
+        Array.prototype.forEach.call(oldScript.attributes, function (attr) {
+          neu.setAttribute(attr.name, attr.value);
+        });
+        neu.textContent = oldScript.textContent;
+        oldScript.parentNode.replaceChild(neu, oldScript);
+      });
+      mount.innerHTML = "";
+      mount.appendChild(content);
+    }
+
+    function applyCheckoutLinks() {
+      var links = window.CHECKOUT_LINKS || {};
+      var map = {
+        "2b": links.bottles2,
+        "3b": links.bottles3,
+        "6b": links.bottles6,
+      };
+
+      Object.keys(map).forEach(function (key) {
+        var url = map[key];
+        if (!url) return;
+        document
+          .querySelectorAll(
+            '[data-checkout="' + key + '"], #switchLink-' + key
+          )
+          .forEach(function (el) {
+            el.setAttribute("href", url);
+          });
+      });
+    }
+
+    function boot() {
+      mountVsl();
+      applyCheckoutLinks();
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", boot);
+    } else {
+      boot();
+    }
+  })();
+</script>
+[% endif %]
+
+[[ tracking_scripts ]]
+</head>
+<body data-version="2.9">
+  <header>
+    <div class="container text-center">
+      Attention: This presentation is only available until <strong><span class="hoje"></span></strong>
+    </div>
+  </header>
+  <div class="a-s-d-svc14v a-b-cont-rr68h">
+    <div class="a-b-o-cont-nxkhs atomicat-container-006647a a-s-d-jtuig2 a-b-o-cont--legacy-margin-im17i">
+      <div class="a-o-cont a-cont-b">
+        <div class="a-cont a-i-cont a-s-d-gxw6rl">
+          <div class="a-b-o-cont--legacy-margin-im17i atomicat-container-aa7f32f a-b-o-cont-nxkhs">
+            <div class="a-cont-f-w a-o-cont a-s-d-l1qnc1">
+              <div class="a-cont a-i-cont a-s-d-s10riz">
+                <div class="a-c-cont-11a8d4e a-c-cont-o6k28 a-r a-s-d-8u63ub">
+                  <div class="a-r a-video atomicat-video atomicat-element-container-11a8d4e a-e-cont a-video-11a8d4e">
+[% if ap %]
+                    <!-- VSL -->
+{{ estrutura.vturbScript | safe }}
+<!-- END-->
+[% else %]
+                    <div id="vsl-mount"></div>
+[% endif %]
+                  </div>
+                  <p id="pv-watching-now" class="pv-watching-now"><span class="pv-live-dot" aria-hidden="true">●</span> <span id="pv-watching-count">790</span> people watching now</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="esconder">
+    <div class="a-b-o-cont--legacy-margin-im17i a-s-d-6cy9tb a-b-o-cont-nxkhs atomicat-container-10d2f94">
+      <div class="a-o-cont a-cont-b">
+        <div class="a-s-d-eomsvu a-cont a-i-cont">
+          <div class="atomicat-container-b6e604b a-b-o-cont--legacy-margin-im17i a-b-o-cont-nxkhs a-s-d-rdy523">
+            <div class="a-cont-f-w a-o-cont">
+              <div class="a-s-d-3e6puf a-i-cont a-cont">
+                <div class="a-c-cont-b5cf2c9 a-r a-c-cont-o6k28">
+                  <div class="atomicat-heading-title-b5cf2c9 atomicat-element-container-b5cf2c9 atomicat-text-b5cf2c9 a-r a-e-cont atomicat-heading-title">
+                    <h2 class="a-i-e-cont">
+                      <p>Secure your discounted [[ nome ]] now</p>
+                      <p>Only while supplies last!</p>
+                    </h2>
+                  </div>
+                </div>
+                <div class="a-c-cont-o6k28 a-r a-c-cont-fda19de">
+                  <div class="atomicat-heading-title atomicat-element-container-fda19de a-r atomicat-heading-title-fda19de a-e-cont atomicat-text-fda19de a-s-d-9sja5t">
+                    <h1 class="a-i-e-cont">
+                      <p><span data-time="20:00" id="atomicat-countdown-text-c9fe8cf1" class="atomicat-countdown-text">20:00</span></p>
+                    </h1>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="a-b-o-cont-nxkhs atomicat-container-ffd96a5 a-b-o-cont--legacy-margin-im17i">
+      <div class="a-o-cont a-cont-b">
+        <div class="a-cont a-i-cont">
+          <div class="a-s-d-lqnwv9 a-c-cont-o6k28 a-c-cont-9044e51 a-r">
+            <div class="a-s-d-y3tv98 atomicat-element-container-9044e51 a-e-cont a-icon atomicat-icon a-r a-icon-9044e51">
+              <div class="a-icon-wrap"><svg aria-hidden="true" focusable="false" data-prefix="fas" data-icon="caret-down" class="a-i-e-cont svg-inline--fa fa-caret-down" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512">
+                  <path fill="currentColor" d="M137.4 374.6c12.5 12.5 32.8 12.5 45.3 0l128-128c9.2-9.2 11.9-22.9 6.9-34.9s-16.6-19.8-29.6-19.8L32 192c-12.9 0-24.6 7.8-29.6 19.8s-2.2 25.7 6.9 34.9l128 128z"></path>
+                </svg></div>
+            </div>
+          </div>
+          <div class="a-c-cont-a3082f2 a-r a-c-cont-o6k28 a-s-d-egn7o4">
+            <div class="a-html atomicat-html a-r a-e-cont a-s-d-4usxf2 atomicat-element-container-a3082f2 a-html-a3082f2">
+              <div class="a-i-e-cont">
+<div class="pricing-cards-block">
+  <div class="row" id="desktop">
+    <div class="col-12 col-md-4 mb-4 mb-md-0 order-3 order-md-1">
+      <div class="theme-border-radius border border-2 border-gray text-center p-4 pricing-card">
+        <div class="center">
+          <h3 class="mb-0 fw-bold">Try Two</h3>
+          <p class="small mb-0">30 Day Supply, 2 Bottles</p>
+          <img src="images/pots/2b.webp" alt="[[ nome ]] 2 Bottles" class="img-fluid img-2-3" loading="lazy" decoding="async" width="700" height="525">
+        </div>
+        <div>
+          <div class="d-flex justify-content-center align-items-center">
+            <h4 class="display-2 fw-bold txt-size">[[ potes["2b"].por_pote ]]</h4>
+            <div class="ms-2 pb-2 small">
+              <span class="d-block text-start">Per</span>
+              <span class="d-block text-start">Bottle</span>
+            </div>
+          </div>
+          <p class="fw-bold mb-2 pc-save-green">YOU SAVE [[ potes["2b"].economia ]]</p>
+          <div class="col-12 text-center mb-4">
+            <a href="[[ links["2b"] ]]" data-checkout="2b">
+              <div class="pricing-card-btn sat-01">BUY NOW</div>
+            </a>
+          </div>
+          <div class="col-7 mx-auto mb-3"></div>
+          <p class="mb-1">TOTAL: <span class="text-decoration-line-through">[[ potes["2b"].total_de ]]</span>
+            <span class="fw-bold">[[ potes["2b"].total_por ]]</span>
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4 mb-4 mb-md-0 order-1 order-md-2">
+      <div class="theme-border-radius border-primary-new text-center p-4 card-bv pricing-card">
+        <div class="center">
+          <img src="images/pots/offer.webp" alt="offer" class="img-fluid offer" loading="lazy" decoding="async" width="500" height="375">
+          <p class="small mb-0">180 Day Supply, 6 Bottles</p>
+          <img src="images/pots/6b.webp" alt="[[ nome ]] 6 Bottles" class="img-fluid" loading="lazy" decoding="async" width="700" height="525">
+        </div>
+        <div>
+          <div class="d-flex justify-content-center align-items-center">
+            <h4 class="display-2 fw-bold txt-size">[[ potes["6b"].por_pote ]]</h4>
+            <div class="ms-2 pb-2 small">
+              <span class="d-block text-start">Per</span>
+              <span class="d-block text-start">Bottle</span>
+            </div>
+          </div>
+          <p class="fw-bold mb-2 pc-save-light">YOU SAVE [[ potes["6b"].economia ]]</p>
+          <div class="col-12 text-center mb-4">
+            <a href="[[ links["6b"] ]]" data-checkout="6b">
+              <div class="pricing-card-btn">BUY NOW</div>
+            </a>
+          </div>
+          <p class="small mb-3">60 Days Money Back Guarantee</p>
+          <div class="col-7 mx-auto mb-3">
+            <picture>
+              <img src="images/pots/cards.webp" alt="Card" class="img-fluid" loading="lazy" decoding="async" width="400" height="70">
+            </picture>
+          </div>
+          <p class="mb-1">TOTAL: <span class="text-decoration-line-through">[[ potes["6b"].total_de ]]</span>
+            <span class="fw-bold">[[ potes["6b"].total_por ]]</span>
+          </p>
+          <p class="fw-bold mb-0">*FREE SHIPPING</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4 mb-4 order-2 order-md-3">
+      <div class="theme-border-radius border border-2 border-gray text-center p-4 pricing-card">
+        <div class="center">
+          <h3 class="mb-0 fw-bold">Most Popular</h3>
+          <p class="small mb-0">90 Day Supply, 3 Bottles</p>
+          <img src="images/pots/3b.webp" alt="[[ nome ]] 3 Bottles" class="img-fluid img-2-3" loading="lazy" decoding="async" width="700" height="525">
+        </div>
+        <div>
+          <div class="d-flex justify-content-center align-items-center">
+            <h4 class="display-2 fw-bold txt-size">[[ potes["3b"].por_pote ]]</h4>
+            <div class="ms-2 pb-2 small">
+              <span class="d-block text-start">Per</span>
+              <span class="d-block text-start">Bottle</span>
+            </div>
+          </div>
+          <p class="fw-bold mb-2 pc-save-green">YOU SAVE [[ potes["3b"].economia ]]</p>
+          <div class="col-12 text-center mb-4">
+            <a href="[[ links["3b"] ]]" data-checkout="3b">
+              <div class="pricing-card-btn sat-01">BUY NOW</div>
+            </a>
+          </div>
+          <div class="col-7 mx-auto mb-3"></div>
+          <p class="mb-1">TOTAL: <span class="text-decoration-line-through">[[ potes["3b"].total_de ]]</span>
+            <span class="fw-bold">[[ potes["3b"].total_por ]]</span>
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 text-center mt-sm-3 order-4">
+      <p class="pc-rating">Our customers say <span class="fw-bold me-2">4.98/5</span> <img src="images/pots/stars.webp" alt="Stars" class="img-fluid pc-stars" loading="lazy" decoding="async" width="130" height="27"></p>
+    </div>
+  </div>
+  <div class="flex mobile">
+    <div class="col-12 col-md-4 mb-4 mb-md-0 order-3 order-md-1">
+      <div class="theme-border-radius border border-2 border-gray text-center p-4-2 pricing-card">
+        <div class="center">
+          <h3 class="mb-0 fw-bold">Try Two</h3>
+          <p class="small mb-0">30 Day Supply, 2 Bottles</p>
+          <img src="images/pots/2b.webp" alt="[[ nome ]] 2 Bottles" class="img-fluid img-2-3" loading="lazy" decoding="async" width="700" height="525">
+        </div>
+        <div>
+          <div class="d-flex justify-content-center align-items-center">
+            <h4 class="display-2 fw-bold txt-size">[[ potes["2b"].por_pote ]]</h4>
+            <div class="ms-2 pb-2 small">
+              <span class="d-block text-start span">Per</span>
+              <span class="d-block text-start span">Bottle</span>
+            </div>
+          </div>
+          <p class="fw-bold mb-2 pc-save-green">YOU SAVE [[ potes["2b"].economia ]]</p>
+          <div class="col-12 text-center mb-4 pc-mt-neg">
+            <a href="[[ links["2b"] ]]" data-checkout="2b">
+              <div class="pricing-card-btn sat-01">BUY NOW</div>
+            </a>
+          </div>
+          <div class="col-7 mx-auto mb-3 pc-mt-neg"></div>
+          <p class="mb-1">TOTAL: <span class="text-decoration-line-through span">[[ potes["2b"].total_de ]]</span>
+            <span class="fw-bold span">[[ potes["2b"].total_por ]]</span>
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4 mb-4 mb-md-0 order-1 order-md-2">
+      <div class="theme-border-radius border-primary-new text-center p-4-2 card-bv pricing-card">
+        <div class="center">
+          <img src="images/pots/offer.webp" alt="offer" class="img-fluid offer" loading="lazy" decoding="async" width="500" height="375">
+          <p class="small mb-0">180 Day Supply</p>
+          <img src="images/pots/6b.webp" alt="[[ nome ]] 6 Bottles" class="img-fluid" loading="lazy" decoding="async" width="700" height="525">
+        </div>
+        <div class="pc-mobile-6b">
+          <div class="d-flex justify-content-center align-items-center">
+            <h4 class="display-2 fw-bold txt-size">[[ potes["6b"].por_pote ]]</h4>
+            <div class="ms-2 pb-2 small">
+              <span class="d-block text-start span">Per</span>
+              <span class="d-block text-start span">Bottle</span>
+            </div>
+          </div>
+          <p class="fw-bold mb-2 pc-save-light">YOU SAVE [[ potes["6b"].economia ]]</p>
+          <div class="col-12 text-center mb-4 pc-mt-neg">
+            <a href="[[ links["6b"] ]]" data-checkout="6b">
+              <div class="pricing-card-btn">BUY NOW</div>
+            </a>
+          </div>
+          <p class="small mb-3 pc-mt-neg">60 Days Guarantee</p>
+          <div class="col-7 mx-auto mb-3">
+            <picture>
+              <img src="images/pots/cards.webp" alt="Card" class="img-fluid" loading="lazy" decoding="async" width="400" height="70">
+            </picture>
+          </div>
+          <p class="mb-1">TOTAL: <span class="text-decoration-line-through span">[[ potes["6b"].total_de ]]</span>
+            <span class="fw-bold span">[[ potes["6b"].total_por ]]</span>
+          </p>
+          <p class="fw-bold mb-0">*FREE SHIPPING</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4 mb-4 order-2 order-md-3">
+      <div class="theme-border-radius border border-2 border-gray text-center p-4-2 pricing-card">
+        <div class="center">
+          <h3 class="mb-0 fw-bold">Most Popular</h3>
+          <p class="small mb-0">90 Day Supply, 3 Bottles</p>
+          <img src="images/pots/3b.webp" alt="[[ nome ]] 3 Bottles" class="img-fluid img-2-3" loading="lazy" decoding="async" width="700" height="525">
+        </div>
+        <div>
+          <div class="d-flex justify-content-center align-items-center">
+            <h4 class="display-2 fw-bold txt-size">[[ potes["3b"].por_pote ]]</h4>
+            <div class="ms-2 pb-2 small">
+              <span class="d-block text-start span">Per</span>
+              <span class="d-block text-start span">Bottle</span>
+            </div>
+          </div>
+          <p class="fw-bold mb-2 pc-save-green">YOU SAVE [[ potes["3b"].economia ]]</p>
+          <div class="col-12 text-center mb-4 pc-mt-neg">
+            <a href="[[ links["3b"] ]]" data-checkout="3b">
+              <div class="pricing-card-btn sat-01">BUY NOW</div>
+            </a>
+          </div>
+          <div class="col-7 mx-auto mb-3 pc-mt-neg"></div>
+          <p class="mb-1">TOTAL: <span class="text-decoration-line-through span">[[ potes["3b"].total_de ]]</span>
+            <span class="fw-bold span">[[ potes["3b"].total_por ]]</span>
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 text-center mt-sm-3 order-4">
+      <p class="pc-rating">Our customers say <span class="fw-bold me-2">4.98/5</span> <img src="images/pots/stars.webp" alt="Stars" class="img-fluid pc-stars" loading="lazy" decoding="async" width="130" height="27"></p>
+    </div>
+  </div>
+</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div><!-- /.esconder -->
+  </div>
+  <footer class="pv-site-footer">
+    <div class="pv-site-footer__inner">
+      <p class="pv-site-footer__copy">&copy; 2026 Research Labs. All rights reserved.</p>
+[% if ap %]
+<br><br>{{ estrutura.campoLivre }}
+[% endif %]
+    </div>
+  </footer>
+  <script defer>
+    (function () {
+      var days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      var months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      var now = new Date();
+      var el = document.querySelector(".hoje");
+      if (el) {
+        el.textContent = days[now.getDay()] + ", " + now.getDate() + " " + months[now.getMonth()] + " " + now.getFullYear();
+      }
+    })();
+  </script>
+  <script defer>
+    function formatCountdown(ms) {
+      var totalSeconds = Math.max(0, Math.floor(ms / 1000));
+      var mins = Math.floor(totalSeconds / 60);
+      var secs = totalSeconds % 60;
+      return (mins < 10 ? "0" + mins : String(mins)) + ":" + (secs < 10 ? "0" + secs : String(secs));
+    }
+    (function () {
+      try {
+        document.querySelectorAll(".atomicat-countdown-text").forEach(function (el) {
+          var dataTime = el.getAttribute("data-time");
+          if (!dataTime || !el.id) {
+            return;
+          }
+          var parts = dataTime.split(":").map(Number);
+          var totalMs = ((parts[0] || 0) * 60 + (parts[1] || 0)) * 1000;
+          var storageKey = "pv_countdown_start_" + el.id;
+          var start = sessionStorage.getItem(storageKey);
+          if (!start) {
+            start = String(Date.now());
+            sessionStorage.setItem(storageKey, start);
+          }
+          function tick() {
+            var elapsed = Date.now() - parseInt(start, 10);
+            var remaining = totalMs - elapsed;
+            if (remaining <= 0) {
+              el.textContent = "00:00";
+              return;
+            }
+            el.textContent = formatCountdown(remaining);
+          }
+          tick();
+          setInterval(tick, 1000);
+        });
+      } catch (err) {
+        console.log(err);
+      }
+    })();
+  </script>
+  <script defer>
+    (function () {
+      try {
+        var countEl = document.getElementById("pv-watching-count");
+        if (!countEl) {
+          return;
+        }
+        var base = 790;
+        var offset = Math.floor(Math.random() * 41) - 20;
+        var current = base + offset;
+        function render() {
+          countEl.textContent = current.toLocaleString("en-US");
+        }
+        render();
+        setInterval(function () {
+          current += Math.floor(Math.random() * 7) - 3;
+          if (current < base - 120) {
+            current = base - 120;
+          }
+          if (current > base + 180) {
+            current = base + 180;
+          }
+          render();
+        }, 4000);
+      } catch (err) {
+        console.log(err);
+      }
+    })();
+  </script>
+[% if ap %]
+  <script>
+/* ALTERE O VALOR 10 PARA OS SEGUNDOS EM QUE AS SEÇÕES VÃO APARECER */
+const delaySeconds = {{ estrutura.pitchTime or 0 }};
+document.addEventListener("DOMContentLoaded", initDelayForHiddenElements);
+function initDelayForHiddenElements() {
+  const player = document.querySelector("vturb-smartplayer");
+  if (!player) return;
+  player.addEventListener("player:ready", () => {
+    showElementsAfterDelay(player, delaySeconds);
+  });
+}
+function showElementsAfterDelay(player, seconds) {
+  player.displayHiddenElements(seconds, [".esconder"], {
+    persist: true
+  });
+}
+</script>
+
+<!-- RED -->
+{% if estrutura.plataforma == 'fb' %}
+<script type="text/javascript" src="https://rt.{{ estrutura.dominio }}/track.js"></script>
+{% else %}
+{% for pv in estrutura.paginasDeVendas %}
+{{ pv.redtrackScript | safe }}
+{% endfor %}
+{% endif %}
+<!-- END -->
+[% else %]
+  <script>
+    document.addEventListener("DOMContentLoaded", initDelayForHiddenElements);
+    function initDelayForHiddenElements() {
+      const delaySeconds = Number(window.VSL_PITCH_SECONDS) || 0;
+      const player = document.querySelector("vturb-smartplayer");
+      if (!player) return;
+      player.addEventListener("player:ready", () => {
+        showElementsAfterDelay(player, delaySeconds);
+      });
+    }
+    function showElementsAfterDelay(player, seconds) {
+      player.displayHiddenElements(seconds, [".esconder"], {
+        persist: true
+      });
+    }
+  </script>
+[% endif %]
+  <script>document.addEventListener("DOMContentLoaded",function(){function e(e){const t=new URL(e);let r="";for(const[e,n]of t.searchParams)r+=`${r?"&":""}${e}=${n}`;return r}const t=e(window.location.href);if(t){document.querySelectorAll("a").forEach(e=>{const r=e.href.includes("?")?"&":"?";e.href+=`${r}${t}`})}});</script>
+</body>
+</html>

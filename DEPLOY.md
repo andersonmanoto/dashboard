@@ -152,6 +152,32 @@ Exec=arq app.worker.WorkerSettings
 WantedBy=default.target
 ```
 
+### 4.6. Chave SFTP do psstock (templates de VSL)
+
+O `/offers-rt-ap` gera os templates de VSL e sobe em `psstock.site/PVs` via
+SFTP (`admin@direct.tigeroffers.com`). A API usa uma chave própria, sem
+passphrase, guardada em base64 no `.env` (vale tanto pro `podman-compose`
+quanto pros quadlets, sem volume nem secret).
+
+```bash
+# Como usuário dashboard, na VPS
+ssh-keygen -t ed25519 -N "" -C "dashboard-psstock" -f ~/psstock_ed25519
+cat ~/psstock_ed25519.pub   # adicionar em ~admin/.ssh/authorized_keys no direct.tigeroffers.com
+ssh -i ~/psstock_ed25519 admin@direct.tigeroffers.com 'ls domains/psstock.site/public_html/PVs | head -3'
+
+echo "PSSTOCK_SFTP_KEY_B64=$(base64 -w0 ~/psstock_ed25519)" >> /opt/dashboard/.env
+rm ~/psstock_ed25519 ~/psstock_ed25519.pub
+```
+
+E no `.env`:
+
+```ini
+PSSTOCK_SFTP_HOST=direct.tigeroffers.com
+PSSTOCK_SFTP_PORT=22
+PSSTOCK_SFTP_USERNAME=admin
+PSSTOCK_PVS_DIR=/home/admin/domains/psstock.site/public_html/PVs
+```
+
 ## 5. Build e Start (Como usuário dashboard)
 
 Com os arquivos de configuração prontos, vamos construir as imagens e iniciar o sistema.

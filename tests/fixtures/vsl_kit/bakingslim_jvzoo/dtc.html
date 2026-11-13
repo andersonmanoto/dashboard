@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta http-equiv="content-type" content="text/html;charset=UTF-8">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BakingSlim™</title>
+    <meta name="description"
+        content="Advanced Lung Support - BakingSlim™ helps support healthy lung function naturally">
+    <link rel="stylesheet" href="css/bootstrap.min-card.css">
+    <link rel="stylesheet" href="css/style-card.css">
+
+    <script>
+/**
+ * JVZoo Affiliate Link Tracking & Rewriting Script
+ *
+ * This script performs two main functions:
+ * 1. Fires a tracking pixel when the page loads (once per page load)
+ * 2. Rewrites all JVZoo buy button links to include affiliate tracking parameters
+ *    (aid, tid and coupon are always passed through)
+ *
+ * Features:
+ * - Handles relative (/b/...) and absolute (https://...) links
+ * - Preserves existing query parameters and hash fragments
+ * - Case-insensitive parameter deduplication (prevents aid/AID duplicates)
+ * - Watches for dynamically-added links via MutationObserver
+ * - Works on vendor sites (non-JVZoo domains)
+ */
+;(function(){
+  // Prevent multiple initialization
+  if (window.__JVZ_B_LINK_INIT__) return;
+  window.__JVZ_B_LINK_INIT__ = true;
+
+  // ===== Browser Compatibility Check =====
+  // Exit early if required APIs are not available (IE10 and below)
+  if (typeof URL === 'undefined' || typeof URLSearchParams === 'undefined' || typeof MutationObserver === 'undefined') {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('[JVZ] Browser not supported (missing URL, URLSearchParams, or MutationObserver)');
+    }
+    return;
+  }
+
+  // ===== Configuration Options =====
+  /**
+   * Fallback product ID to use if no JVZoo links are found on the page.
+   * Leave empty ('') to skip tracking pixel if no product IDs are detected.
+   * Example: '123456'
+   */
+  const FALLBACK_PRODUCT_ID = '';
+
+  /**
+   * When true, ALL page query parameters are added to buy button links.
+   * When false, only parameters in ALWAYS_PASS are added.
+   */
+  const REWRITE_ENABLED = true;
+
+  /**
+   * Parameters that are ALWAYS added to buy button links, even when REWRITE_ENABLED is false.
+   * 'tid' is included so the affiliate's sub-tracking ID carries through to the JVZoo
+   * checkout and is attributed to the sale, not just the click pixel.
+   * These values are case-insensitive (matched as lowercase).
+   */
+  const ALWAYS_PASS = new Set(['aid','tid','coupon']);
+
+  /**
+   * Debounce delay (ms) for mutation observer to prevent excessive processing.
+   * Higher values reduce CPU usage but increase delay before new links are processed.
+   */
+  const DEBOUNCE_MS = 200;
+
+  /**
+   * Safety timeout (ms) for cleaning up tracking iframe if onload/onerror don't fire.
+   */
+  const IFRAME_CLEANUP_MS = 10000;
+
+  /**
+   * Whitelist of allowed JVZoo hostnames. Only links to these domains are processed.
+   */
+  const ALLOWED_HOSTNAMES = Object.freeze([
+    'www.jvzoo.com', 'i.jvzoo.com', 'jvzoo.com'
+  ]);
+
+  /**
+   * Regex pattern for validating parameter keys (security).
+   * Allows: 1-64 characters, alphanumeric + underscore + hyphen, cannot start with hyphen.
+   */
+  const PARAM_KEY_PATTERN = /^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$/;
+
+  // ===== Global State Management =====
+  /**
+   * Global state object for tracking script execution and preventing race conditions.
+   * Stored on window object to persist across function calls and allow external debugging.
+   */
+  window.__JVZ__ = window.__JVZ__ || {
+    updating: false,         // Reentry guard: prevents updateBuyLinks from calling itself
+    pageFired: false,        // Ensures tracking pixel fires only once per page load
+    pendingUpdateCount: 0    // Count of queued mutations (prevents starvation during rapid DOM changes)
+  };
+
+  // ===== Debug Logging =====
+  /**
+   * Set DEBUG = true to enable console logging, or set window.__JVZ_DEBUG__ = true in browser console.
+   */
+  const DEBUG = false;
+
+  /**
+   * Logs debug messages only when debugging is enabled.
+   * Used for tracking failures and skipped operations.
+   */
+  const dbgFail = (...args) => {
+    if (DEBUG || window.__JVZ_DEBUG__) {
+      if (typeof console !== 'undefined') {
+        (console.debug || console.log).apply(console, ['[JVZ]', ...args]);
+      }
+    }
+  };
+
+  // ===== Parse and Normalize Current Page Parameters =====
+  /**
+   * Extract query parameters from the current page URL and normalize affiliate params.
+   *
+   * IMPORTANT: JVZoo's affiliate system treats aid/tid/coupon as case-insensitive.
+   * We normalize these to lowercase to prevent duplicate parameters (e.g., AID + aid).
+   * If JVZoo changes this behavior, tracking may break.
+   *
+   * Examples:
+   *   Input:  ?AID=123&TID=456&foo=bar
+   *   Output: ?aid=123&tid=456&foo=bar
+   */
+  const qp = new URLSearchParams(window.location.search);
+  const pageParams = new URLSearchParams();
+
+  for (const [key, value] of qp.entries()) {
+    const kLower = key.toLowerCase();
+    // Normalize JVZoo-specific parameters to lowercase
+    if (kLower === 'aid' || kLower === 'tid' || kLower === 'coupon') {
+      pageParams.set(kLower, value);
+    } else {
+      // Preserve original case for all other parameters
+      pageParams.set(key, value);
+    }
+  }
+
+  // Extract affiliate ID and tracking ID for later use
+  const aidRaw = pageParams.get('aid');
+  const tidRaw = pageParams.get('tid');
+
+  // ===== URL Parser: Validates and Extracts JVZoo Link Information =====
+  /**
+   * Parses a URL to determine if it's a valid JVZoo link and extracts IDs.
+   *
+   * Supported URL formats:
+   *   - https://www.jvzoo.com/b/182/46/99 (full URL with /b/)
+   *   - https://i.jvzoo.com/182/46/99 (pixel form without /b/)
+   *   - //www.jvzoo.com/b/182/46/99 (protocol-relative)
+   *   - /b/182/46/99 (relative on vendor sites - normalized to jvzoo.com)
+   *   - /B/182/46/99 (uppercase B also supported)
+   *   - https://vendor.com/b/182/46/99 (absolute on vendor sites - normalized to jvzoo.com)
+   *
+   * @param {string} url - The URL to parse
+   * @returns {Object|null} - Object with {url, funnelId, productId, buttonId} or null if invalid
+   */
+  function parseJVZUrl(url) {
+    try {
+      // Security: Allow protocol-relative JVZoo links (//www.jvzoo.com/...) but reject others
+      const trimmedUrl = url && url.trim();
+      if (trimmedUrl && /^\/\/+/.test(trimmedUrl)) {
+        const testUrl = new URL('https:' + trimmedUrl);
+        const testHostname = testUrl.hostname.toLowerCase();
+        if (!ALLOWED_HOSTNAMES.includes(testHostname)) {
+          dbgFail('parseJVZUrl: protocol-relative URL not allowed', url);
+          return null;
+        }
+        // Valid JVZoo protocol-relative URL - continue processing
+      }
+
+      // Parse URL (relative URLs resolved against current page)
+      const u = new URL(url, window.location.href);
+
+      // Check if this is a /b/ or /B/ path
+      const hostname = u.hostname.toLowerCase();
+      const isBPath = /^\/[bB]\//.test(u.pathname);
+
+      // Handle vendor site links: if pathname starts with /b/ but domain isn't JVZoo, normalize it
+      if (!ALLOWED_HOSTNAMES.includes(hostname)) {
+        if (isBPath) {
+          // Rewrite vendor /b/ links to point to jvzoo.com, preserving query & hash
+          // Example: https://vendor.com/b/1/2/3?foo=bar#anchor → https://www.jvzoo.com/b/1/2/3?foo=bar#anchor
+          const relativeUrl = new URL('https://www.jvzoo.com' + u.pathname + u.search + u.hash);
+          const relativeMatch = relativeUrl.pathname.match(/^\/(?:[bB]\/)?(\d+)\/(\d+)(?:\/(\d+))?(?:[\/? #]|$)/);
+          if (relativeMatch) {
+            return {
+              url: relativeUrl,
+              funnelId: relativeMatch[1],
+              productId: relativeMatch[2],
+              buttonId: relativeMatch[3] || null
+            };
+          }
+        }
+
+        // Security: Reject untrusted subdomains (e.g., evil.jvzoo.com)
+        if (hostname.endsWith('.jvzoo.com')) {
+          dbgFail('parseJVZUrl: untrusted subdomain', hostname);
+        }
+        return null;
+      }
+
+      // Parse JVZoo URL pathname to extract IDs
+      // Pattern matches: /b/182/46/99 or /182/46/99 or /182/46 (buttonId optional)
+      const m = u.pathname.match(/^\/(?:[bB]\/)?(\d+)\/(\d+)(?:\/(\d+))?(?:[\/? #]|$)/);
+      if (!m) return null;
+
+      return {
+        url: u,
+        funnelId: m[1],
+        productId: m[2],
+        buttonId: m[3] || null  // null for tracking pixels
+      };
+    } catch (e) {
+      dbgFail('parseJVZUrl: error parsing', url, e);
+      return null;
+    }
+  }
+
+  // Scan for first match in anchors, areas, images, iframes (optimized to target JVZoo domains)
+  function findFirstIdsOnPage() {
+    const nodes = document.querySelectorAll('a[href*="jvzoo.com"], a[href^="/b/"], a[href^="/B/"], area[href*="jvzoo.com"], area[href^="/b/"], area[href^="/B/"], img[src*="jvzoo.com"], iframe[src*="jvzoo.com"]');
+    for (const el of nodes) {
+      const url = el.getAttribute('href') || el.getAttribute('src');
+      if (!url) continue;
+      const info = parseJVZUrl(url);
+      if (info) return { funnelId: info.funnelId, productId: info.productId };
+    }
+    return null;
+  }
+
+  // ===== 3) Fire the click once per page =====
+  function fireClickOnce() {
+    // Page-level guard: only fire once per page load
+    if (window.__JVZ__.pageFired) {
+      dbgFail('click: skip -> already fired this page load');
+      return;
+    }
+
+    // Explicitly check for empty string (e.g., ?aid= with no value)
+    if (!aidRaw || aidRaw.trim() === '') {
+      dbgFail('click: skip -> missing or empty aid');
+      return;
+    }
+
+    let ids = findFirstIdsOnPage();
+    let productId = ids && ids.productId;
+    if (!productId) {
+      if (FALLBACK_PRODUCT_ID && /^\d+$/.test(String(FALLBACK_PRODUCT_ID))) {
+        productId = String(FALLBACK_PRODUCT_ID);
+      } else {
+        dbgFail('click: skip -> no jvzoo id found in DOM and no valid FALLBACK_PRODUCT_ID');
+        return;
+      }
+    }
+
+    try {
+      const clickUrl = new URL(`https://www.jvzoo.com/c/${encodeURIComponent(aidRaw)}/${productId}`);
+      pageParams.forEach((v, k) => clickUrl.searchParams.set(k, v));
+
+      const iframe = document.createElement('iframe');
+      iframe.src = clickUrl.toString();
+      iframe.style.cssText = 'width:0;height:0;border:0;position:absolute;left:-9999px;top:-9999px;';
+
+      // Clean up iframe immediately on load/error, with safety timeout
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        try { iframe.remove(); } catch(_) {}
+      };
+
+      iframe.onload = cleanup;
+      iframe.onerror = cleanup;
+      setTimeout(cleanup, IFRAME_CLEANUP_MS);
+
+      (document.body || document.documentElement).appendChild(iframe);
+
+      // Mark as fired for this page load
+      window.__JVZ__.pageFired = true;
+    } catch (e) {
+      dbgFail('click: failed to create tracking iframe', e);
+    }
+  }
+
+  // ===== 4) Build URLSearchParams with case-insensitive keys =====
+  // More efficient: build params from scratch instead of modifying existing
+  function buildParamsWithCaseInsensitive(originalParams, overlayParams, shouldOverlay) {
+    const result = new URLSearchParams();
+    const seenKeysLower = new Map(); // track lowercase keys to prevent duplicates
+
+    // Helper to add param with case-insensitive deduplication
+    const addParam = (key, value) => {
+      // Validate parameter key for security (1-64 chars, can't start with hyphen)
+      if (!PARAM_KEY_PATTERN.test(key)) {
+        dbgFail('addParam: invalid parameter key', key);
+        return;
+      }
+
+      const keyLower = key.toLowerCase();
+      // If we've seen this key (case-insensitive), delete using the ORIGINAL case
+      const existingKey = seenKeysLower.get(keyLower);
+      if (existingKey !== undefined) {
+        result.delete(existingKey);  // URLSearchParams.delete() is case-sensitive!
+      }
+      result.set(key, value);
+      seenKeysLower.set(keyLower, key);
+    };
+
+    // Add original params first
+    originalParams.forEach((v, k) => addParam(k, v));
+
+    // Overlay page params based on rules
+    overlayParams.forEach((v, k) => {
+      const kLower = k.toLowerCase();
+
+      if (ALWAYS_PASS.has(kLower) || shouldOverlay) {
+        addParam(k, v);
+      }
+    });
+
+    return result;
+  }
+
+  // ===== 5) Rewrite /b/ anchors (only <a>, not images/iframes) =====
+  function updateBuyLinks() {
+    // Reentry guard: prevent triggering ourselves
+    if (window.__JVZ__.updating) return;
+    window.__JVZ__.updating = true;
+
+    try {
+      // Optimized selector: target JVZoo domain + relative /b/ or /B/ links
+      const selector = [
+        'a[href*="jvzoo.com"]:not([data-jvz-processed])',
+        'a[href^="/b/"]:not([data-jvz-processed])',
+        'a[href^="/B/"]:not([data-jvz-processed])'
+      ].join(', ');
+
+      document.querySelectorAll(selector).forEach(a => {
+        const href = a.getAttribute('href');
+        if (!href) return;
+
+        const info = parseJVZUrl(href);
+        if (!info) return;
+
+        try {
+          // Start from canonical origin+pathname (preserves funnel/product/button ids)
+          const newUrl = new URL(info.url.origin + info.url.pathname);
+
+          // Build params efficiently with case-insensitive deduplication
+          const newParams = buildParamsWithCaseInsensitive(
+            info.url.searchParams,  // original link params
+            pageParams,             // page params to overlay
+            REWRITE_ENABLED         // whether to overlay all params
+          );
+
+          newUrl.search = newParams.toString();
+
+          // Preserve hash fragment if present (for anchor links and SPAs)
+          if (info.url.hash) {
+            newUrl.hash = info.url.hash;
+          }
+
+          const newHref = newUrl.toString();
+
+          // Only update if href actually changed (avoid unnecessary mutations)
+          if (href !== newHref) {
+            a.setAttribute('href', newHref);
+          }
+
+          // Store the processed href value (not just boolean) to detect future changes
+          a.dataset.jvzProcessed = 'true';
+          a.dataset.jvzLastHref = newHref;
+        } catch (e) {
+          dbgFail('updateBuyLinks: error processing link', href, e);
+        }
+      });
+    } finally {
+      window.__JVZ__.updating = false;
+
+      // Process any mutations that arrived while we were updating
+      // Using counter prevents starvation if mutations arrive during setTimeout window
+      if (window.__JVZ__.pendingUpdateCount > 0) {
+        window.__JVZ__.pendingUpdateCount = 0;
+        // Schedule on next tick to avoid immediate recursion
+        setTimeout(() => updateBuyLinks(), 0);
+      }
+    }
+  }
+
+  // ===== 6) Debounce helper =====
+  function debounce(fn, delay) {
+    let timer = null;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), delay);
+    };
+  }
+
+  // ===== 7) Init & observe late-injected links =====
+  function init(){
+    updateBuyLinks();
+    fireClickOnce();
+
+    const handleMutations = debounce(() => {
+      updateBuyLinks();
+    }, DEBOUNCE_MS);
+
+    const observer = new MutationObserver(records => {
+      // If we're currently updating, increment counter for later processing
+      if (window.__JVZ__.updating) {
+        window.__JVZ__.pendingUpdateCount++;
+        return;
+      }
+
+      let shouldUpdate = false;
+      for (const rec of records) {
+        if (rec.type === 'attributes' && rec.attributeName === 'href' && rec.target instanceof Element) {
+          const wasProcessed = rec.target.dataset.jvzProcessed === 'true';
+          const href = rec.target.getAttribute('href') || '';
+
+          if (wasProcessed) {
+            const lastHref = rec.target.dataset.jvzLastHref || '';  // Fallback for undefined
+
+            // If href changed since we processed it, clear flags and trigger update
+            // Let updateBuyLinks determine if it's a valid JVZoo link
+            if (href !== lastHref) {
+              rec.target.removeAttribute('data-jvz-processed');
+              rec.target.removeAttribute('data-jvz-last-href');
+              shouldUpdate = true;
+              break;
+            }
+          } else {
+            // Unprocessed anchor changed to a JVZoo link - trigger update
+            if (parseJVZUrl(href)) {
+              shouldUpdate = true;
+              break;
+            }
+          }
+        }
+        for (const node of rec.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          // Use matchesFn for better browser compatibility
+          const matchesFn = node.matches || node.msMatchesSelector || node.webkitMatchesSelector;
+          const querySelectorFn = node.querySelector;
+
+          // Combined selector for efficiency (supports jvzoo.com, and relative /b/ or /B/)
+          const linkSelector = 'a[href*="jvzoo.com"], a[href^="/b/"], a[href^="/B/"]';
+
+          if (
+            (matchesFn && matchesFn.call(node, linkSelector)) ||
+            (querySelectorFn && querySelectorFn.call(node, linkSelector))
+          ) { shouldUpdate = true; break; }
+        }
+        if (shouldUpdate) break;
+      }
+      if (shouldUpdate) {
+        handleMutations();
+      }
+    });
+
+    // Attach observer to body (retry if body doesn't exist yet)
+    const attachObserver = (retries = 0) => {
+      if (!document.body) {
+        // Body still doesn't exist, wait and retry with limit
+        if (retries < 50) {  // Max 50 retries = ~500ms
+          setTimeout(() => attachObserver(retries + 1), 10);
+        } else {
+          dbgFail('attachObserver: gave up waiting for document.body after 50 retries');
+        }
+        return;
+      }
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['href']
+      });
+    };
+
+    attachObserver();
+  }
+
+  // ===== 8) Optional: Reset pageFired on SPA navigation =====
+  // Uncomment if you want to fire clicks on each route change (not just page load)
+  // window.addEventListener('popstate', () => {
+  //   window.__JVZ__.pageFired = false;
+  //   fireClickOnce();
+  // });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
+</script>
+
+</head>
+
+    <style type="text/css">
+        .row {
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+        }
+
+        .header-bg {
+            background: linear-gradient(135deg, #9b490b, #d7640c);
+            color: #f0f0f0;
+            width: 100%;
+            padding-top: 15px;
+            padding-bottom: 15px;
+            text-align: center;
+        }
+
+        .pricing-card {
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-right: 20px;
+            margin-left: 20px;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 50px #38393933;
+        }
+
+        .pricing-card-btn {
+            display: inline-block;
+            background: #ffc107;
+            color: #0a0a0a !important;
+            font-family: 'Inter', 'Barlow', sans-serif;
+            font-weight: 800;
+            font-size: 20px;
+            letter-spacing: 1px;
+            padding: 16px 60px;
+            border-radius: 50px;
+            text-decoration: none !important;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.3s ease;
+        }
+
+        .pricing-card-btn:hover {
+            transform: scale(1.06);
+            box-shadow: 0 8px 28px rgba(186, 168, 10, 0.4);
+            background: #f9c016;
+            color: #0a0a0a !important;
+        }
+
+        .pricing-card-btn:active {
+            transform: scale(0.97);
+            box-shadow: 0 2px 8px rgba(186, 168, 10, 0.4);
+        }
+
+        .pricing-card-btn::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 60%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .pricing-card-btn:hover::after {
+            left: 120%;
+        }
+
+        .center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .card-bv {
+            background: radial-gradient(circle, #d7640c 0%, #9b490b 70%);
+            color: #f0f0f0;
+            border: #9b490b;
+        }
+
+        .border {
+            border: 2px solid #d7640c !important;
+        }
+
+        .img-2-3 {
+            max-width: 70% !important;
+        }
+
+        .offer {
+            max-width: 45%;
+        }
+
+        .sat-01 {
+            background: #ffc107a8;
+        }
+
+        /* ============ COUNTDOWN + STATUS BAR ============ */
+        .status {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .countdown-pill {
+            display: block;
+            width: 50%;
+            border: 2px solid #d7640c;
+            border-radius: 5px;
+            font-size: 30px;
+            font-weight: 700;
+            text-align: center;
+            padding-top: 3px;
+            padding-bottom: 3px;
+        }
+
+        .status-bar {
+            display: flex;
+            width: 50%;
+            border: 2px solid #d7640c;
+            border-radius: 5px;
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            justify-content: space-evenly;
+        }
+
+        .status-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+        }
+
+        .status-item strong {
+            color: var(--color-heading);
+            font-weight: 800;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #2cc934;
+            display: inline-block;
+        }
+
+        .mobile {
+            display: none;
+        }
+
+        #desktop {
+            display: flex;
+        }
+
+        @media (max-width: 770px) {
+            #desktop {
+                display: none;
+            }
+
+            .mobile {
+                display: flex;
+            }
+
+            .container-2 {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .flex {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .img-2-3 {
+                max-width: 100% !important;
+            }
+
+            h3 {
+                font-size: 16px;
+            }
+
+            .txt-size {
+                font-size: 50px !important;
+            }
+
+            span {
+                font-size: 14px;
+            }
+
+            p {
+                font-size: 12px;
+            }
+
+            .pricing-card {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .pricing-card-btn {
+                width: 100%;
+                margin-top: 20px;
+                font-size: 15px;
+                padding: 10px 20px;
+            }
+
+            .offer {
+                max-width: 75%;
+            }
+
+            .countdown-pill {
+                width: 90%;
+                font-size: 16px;
+            }
+
+            .status-bar {
+                display: block;
+                width: 90%;
+                font-size: 16px;
+            }
+        }
+    </style>
+
+    <style>
+        #footer-bg-1 {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+        }
+
+        #footer-bg-2 {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+        }
+
+        @media (max-width: 580px) {
+            #footer-bg-1 {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+            }
+
+            #footer-bg-2 {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header-bg">
+        <h1 style="font-weight: 600;" class="heading-2 mb-5">Get the <b style="color:#e8c239;">Best Offer</b> on <b class="fw-bold">BakingSlim™</b> <br>
+            While Supplies Last!
+        </h1>
+    </div> <br>
+
+    <section class="py-5" style="background-color: #ffffff; color: #101010;">
+        <div class="container">
+
+            <!--<section class="status">
+                <div class="countdown-pill">Bonus Expires in <strong id="countdown">15:00</strong></div>
+                <br>
+                <div class="status-bar">
+                    <span class="status-item"><span class="status-dot"></span> Sale Status: <strong>Live</strong></span>
+                    <span class="status-item">&#8987; Bottles Remaining: <strong>27</strong></span>
+                </div>
+            </section> <br>-->
+
+            <!--NOVOS CARDS-->
+            <div class="row" id="desktop">
+                <div class="col-12 col-md-4 mb-4 mb-md-0 order-3 order-md-1">
+                    <div class="theme-border-radius border border-2 border-gray text-center p-4 pricing-card">
+                        <div class="center">
+                            <h3 class="mb-0 fw-bold">Try Two</h3>
+                            <p class="small mb-0">30 Day Supply, 2 Bottles</p>
+                            <img src="img/2b.png" alt="2b" class="img-fluid img-2-3"> 
+                            <img src='https://i.jvzoo.com/118423/453105/99' alt="BakingSlim - 2 Bottles" border="0" width='1' height='1' />
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$79</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #11bc27;" class="fw-bold mb-2">YOU SAVE $200</p>
+                            <div class="col-12 text-center mb-4">
+                                <a href="https://www.jvzoo.com/b/118423/453105/99" target="">
+                                    <div class="pricing-card-btn sat-01">BUY NOW</div>
+                                </a>
+                            </div>
+                            <div class="col-7 mx-auto mb-3">
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$358</span>
+                                <span class="fw-bold">$158</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 mb-4 mb-md-0 order-1 order-md-2">
+                    <div class="theme-border-radius border-primary-new text-center p-4 card-bv pricing-card">
+
+                        <div class="center">
+                            <img src="img/offer.png" alt="offer" class="img-fluid offer">
+                            <p class="small mb-0">180 Day Supply, 6 Bottles</p>
+                            <img src="img/6b.png" alt="6b" class="img-fluid">
+                            <img src='https://i.jvzoo.com/118423/453109/99' alt="BakingSlim - 6 Bottles" border="0" width='1' height='1' />
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$49</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #bbffaf;" class="fw-bold mb-2">YOU SAVE $780!</p>
+                            <div class="col-12 text-center mb-4">
+                                <a href="https://www.jvzoo.com/b/118423/453109/99" target="">
+                                    <div class="pricing-card-btn">BUY NOW</div>
+                                </a>
+                            </div>
+                            <p class="small mb-3">60 Days Money Back Guarantee</p>
+                            <div class="col-7 mx-auto mb-3">
+                                <picture>
+                                    <img src="img/cards.png" alt="Card" class="img-fluid">
+                                </picture>
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$1074</span>
+                                <span class="fw-bold">$294</span>
+                            </p>
+                            <p class="fw-bold mb-0">*FREE SHIPPING</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 mb-4 order-2 order-md-3">
+                    <div class="theme-border-radius border border-2 border-gray text-center p-4 pricing-card">
+
+                        <div class="center">
+                            <h3 class="mb-0 fw-bold">Most Popular</h3>
+                            <p class="small mb-0">90 Day Supply, 3 Bottles</p>
+                            <img src="img/3b.png" alt="4b" class="img-fluid img-2-3">
+                            <img src='https://i.jvzoo.com/118423/453107/99' alt="BakingSlim - 3 Bottles" border="0" width='1' height='1' />
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$69</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #11bc27;" class="fw-bold mb-2">YOU SAVE $330</p>
+                            <div class="col-12 text-center mb-4">
+                                <a href="https://www.jvzoo.com/b/118423/453107/99" target="">
+                                    <div class="pricing-card-btn sat-01">BUY NOW</div>
+                                </a>
+                            </div>
+                            <div class="col-7 mx-auto mb-3">
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$537</span>
+                                <span class="fw-bold">$207</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 text-center mt-sm-3 order-4">
+                    <p>Our customers say <span class="fw-bold me-2">4.98/5</span> <img src="img/stars.png" alt="Stars"
+                            class="img-fluid pb-2"></p>
+                </div>
+
+            </div>
+            <!--NOVOS CARDS-->
+
+            <!--MOBILE-->
+            <div class="flex mobile">
+                <div class="col-12 col-md-4 mb-4 mb-md-0 order-3 order-md-1">
+                    <div class="theme-border-radius border border-2 border-gray text-center p-4-2 pricing-card">
+                        <div>
+                            <h3 class="mb-0 fw-bold">Try Two</h3>
+                            <p class="small mb-0">30 Day Supply, 2 Bottles</p>
+                            <img src="img/2b.png" alt="2b" class="img-fluid img-2-3">
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$79</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #11bc27;" class="fw-bold mb-2">YOU SAVE $200</p>
+                            <div class="col-12 text-center mb-4" style="margin-top: -15px;">
+                                <a href="https://www.jvzoo.com/b/118423/453105/99" target="">
+                                    <div class="pricing-card-btn sat-01">BUY NOW</div>
+                                </a>
+                            </div>
+                            <div class="col-7 mx-auto mb-3" style="margin-top: -15px;">
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$358</span>
+                                <span class="fw-bold">$158</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 mb-4 mb-md-0 order-1 order-md-2">
+                    <div class="theme-border-radius border-primary-new text-center p-4-2 card-bv pricing-card">
+
+                        <div>
+                            <img src="img/offer.png" alt="offer" class="img-fluid offer">
+                            <p class="small mb-0">180 Day Supply</p>
+                            <img src="img/6b.png" alt="6b" class="img-fluid">
+                        </div>
+
+                        <div style="max-width: 50%;">
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$49</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #bbffaf;" class="fw-bold mb-2">YOU SAVE $780!</p>
+                            <div class="col-12 text-center mb-4" style="margin-top: -15px;">
+                                <a href="https://www.jvzoo.com/b/118423/453109/99" target="">
+                                    <div class="pricing-card-btn">BUY NOW</div>
+                                </a>
+                            </div>
+                            <p class="small mb-3" style="margin-top: -15px;">60 Days Guarantee</p>
+                            <div class="col-7 mx-auto mb-3">
+                                <picture>
+                                    <img src="img/cards.png" alt="Card" class="img-fluid">
+                                </picture>
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$1074</span>
+                                <span class="fw-bold">$294</span>
+                            </p>
+                            <p class="fw-bold mb-0">*FREE SHIPPING</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 mb-4 order-2 order-md-3">
+                    <div class="theme-border-radius border border-2 border-gray text-center p-4-2 pricing-card">
+
+                        <div>
+                            <h3 class="mb-0 fw-bold">Most Popular</h3>
+                            <p class="small mb-0">90 Day Supply, 3 Bottles</p>
+                            <img src="img/3b.png" alt="4b" class="img-fluid img-2-3">
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$69</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #11bc27;" class="fw-bold mb-2">YOU SAVE $330</p>
+                            <div class="col-12 text-center mb-4" style="margin-top: -15px;">
+                                <a href="https://www.jvzoo.com/b/118423/453107/99"
+                                    target="">
+                                    <div class="pricing-card-btn sat-01">BUY NOW</div>
+                                </a>
+                            </div>
+                            <div class="col-7 mx-auto mb-3" style="margin-top: -15px;">
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$537</span>
+                                <span class="fw-bold">$207</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 text-center mt-sm-3 order-4">
+                    <p>Our customers say <span class="fw-bold me-2">4.98/5</span> <img src="img/stars.png" alt="Stars"
+                            class="img-fluid pb-2"></p>
+                </div>
+
+            </div>
+            <!--MOBILE-->
+        </div>
+    </section>
+
+    <!--FOOTER-->
+    <section style="background-color: #000; padding-top: 50px; padding-bottom: 50px;">
+    <style>
+      #footer-bg-1 {
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        align-items: center;
+        gap: 20px;
+      }
+
+      #footer-bg-2 {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 20px;
+      }
+
+      .disc{
+        padding: 8px;
+        border: 1px solid #b8b8b8;
+        border-radius: 3px; 
+        font-size: small; 
+        color: #f8f8f8; 
+        max-width: 1200px; 
+        text-align: left;
+      }
+
+      @media (max-width: 580px) {
+        #footer-bg-1 {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+        }
+
+        #footer-bg-2 {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          padding: 16px;
+        }
+      }
+    </style>
+    <div style="display: flex; flex-direction: column; justify-content: center; align-items: center;">
+
+      <div id="footer-bg-1">
+        <a href="https://jvz.bakingslim.com/info/terms.html" style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">TERMS</a>
+        <a href="https://jvz.bakingslim.com/info/privacy.html" style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">PRIVACY</a>
+        <a href="https://jvz.bakingslim.com/info/contact.html" style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">CONTACT</a>
+        <a href="https://jvz.bakingslim.com/info/refund.html"
+          style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">REFUND</a>
+        <a href="https://jvz.bakingslim.com/info/disclaimer.html"
+          style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">DISCLAIMER</a>
+        <a href="https://jvz.bakingslim.com/info/references.html"
+          style="font-weight: normal; text-decoration: none; color: #f8f8f8;">REFERENCES</a>
+        <a href="https://jvz.bakingslim.com/info/shipping.html"
+          style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">SHIPPING</a>
+        <a href="https://9doffers.com/"
+          style="font-weight: normal; text-decoration: none; color: #f8f8f8;">AFFILIATE</a>
+      </div> <br>
+
+      <div id="footer-bg-2"> 
+
+        <p class="p-01 disc">Not intended for use by individuals under the age of 18. <br><br>
+          
+          *Disclaimer: Please note that this product does not provide any guarantee of income or success. The results achieved by the product owner or any other individuals mentioned are not indicative of future success or earnings. This website is not affiliated with FaceBook or any of its associated entities. Once you navigate away from FaceBook, the responsibility for the content and its usage lies solely with the user. All content on this website, including but not limited to text, images, and multimedia, is protected by copyright law and the Digital Millennium Copyright Act. Unauthorized copying, duplication, modification, or theft, whether intentional or unintentional, is strictly prohibited. Violators will be prosecuted to the fullest extent of the law. <br> <br>
+
+        We want to clarify that JVZoo serves as the retailer for the products featured on this site. JVZoo® is a registered trademark of BBC Systems Inc., a Florida corporation located at 1809 E. Broadway Street, Suite 125, Oviedo, FL 32765, USA, and is used with permission. The role of JVZoo as a retailer does not constitute an endorsement, approval, or review of these products or any claims, statements, or opinions used in their promotion. <br><br>
+
+        **This product has not been evaluated by the FDA. This product is not intended to diagnose, treat, cure or prevent any disease. Results in description and testimonials may not be typical results and individual results may vary. This product is intended to be used in conjunction with a healthy diet and regular exercise. Consult your physician before starting any diet, exercise program, and taking any diet pill to avoid any health issues.
+        </p>
+        <p style="font-size: small; color: #f8f8f8; max-width: 1200px; text-align: left;">All statements and results presented on this website are for informational purposes only. They are not specific medical advice for any individual. Neither the website, nor product should substitute medical advice given by a certified health professional. If you have a health problem, or you have sensible allergies, are pregnant or diagnosed with chronic conditions, it is strongly recommended that you consult your doctor immediately and before taking any pills or vitamins. Individual results may vary depending on the case.</p>
+      </div> <br>
+
+      <p style="color: #fff;">Copyright © 2026. All Rights Reserved.</p>
+
+    </div>
+  </section>
+    <!--FOOTER-->
+
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            function getAllParams(url) {
+                const urlObj = new URL(url);
+                let paramString = "";
+
+                for (const [key, value] of urlObj.searchParams) {
+                    paramString += `${paramString ? '&' : ''}${key}=${value}`;
+                }
+
+                return paramString;
+            }
+
+            // Countdown timer (15:00) — set to the real offer expiry before production
+            var remaining = 15 * 60;
+            var cd = document.getElementById('countdown');
+            var timer = setInterval(function () {
+                remaining--;
+                if (remaining <= 0) { remaining = 0; clearInterval(timer); }
+                var m = String(Math.floor(remaining / 60)).padStart(2, '0');
+                var s = String(remaining % 60).padStart(2, '0');
+                cd.textContent = m + ':' + s;
+            }, 1000);
+
+            const params = getAllParams(window.location.href);
+
+            if (params) {
+                const links = document.querySelectorAll("a");
+
+                links.forEach(link => {
+                    const separator = link.href.includes("?") ? "&" : "?";
+                    link.href += `${separator}${params}`;
+                });
+            }
+        });
+    </script>
+
+    <script>document.addEventListener("DOMContentLoaded",function(){function e(e){const t=new URL(e);let r="";for(const[e,n]of t.searchParams)r+=`${r?"&":""}${e}=${n}`;return r}const t=e(window.location.href);if(t){document.querySelectorAll("a").forEach(e=>{const r=e.href.includes("?")?"&":"?";e.href+=`${r}${t}`})}});</script>
+
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"669e8c2dd0d74c7dafbb1e8add32b2c7","r":1,"spa":2}' crossorigin="anonymous"></script>
+</body>
+
+</html>

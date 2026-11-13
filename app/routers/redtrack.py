@@ -8,6 +8,7 @@ from app.config import Settings, get_settings
 from app.dependencies import verify_redtrack_offers_key
 from app.services.autopages_service import AutoPagesError
 from app.services.offer_announcement import notify_offer_created
+from app.services.vsl_template_auto import generate_vsl_templates_for_offer
 from app.services.redtrack_offer_service import RedTrackOfferService
 from app.services.redtrack_offer_url_service import (
     OfferUrlUpdateError,
@@ -62,6 +63,9 @@ async def create_redtrack_offers(
     (pelo `checkout_id` de cada oferta ou, sem ele, pelo checkout_code da
     URL) -- ver checkout_offer_link.py. Falha nesse vínculo não derruba a
     requisição: a oferta volta com `checkout_id: null`.
+    Por último, também em background, gera o kit de VSL do produto no
+    psstock (PVs/{codigo_produto}/pv1 e pv1(ap)) a partir da DTC cadastrada
+    em products_urls, se ainda não existir -- ver vsl_template_auto.py.
     """
     try:
         service = RedTrackOfferService(settings)
@@ -73,6 +77,9 @@ async def create_redtrack_offers(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
 
     background_tasks.add_task(notify_offer_created, settings, payload.model_dump())
+    background_tasks.add_task(
+        generate_vsl_templates_for_offer, settings, payload.model_dump()
+    )
 
     return {
         "plataforma": payload.plataforma,

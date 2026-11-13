@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta http-equiv="content-type" content="text/html;charset=UTF-8">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TitanHoney™</title>
+    <meta name="description"
+        content="Advanced Lung Support - TitanHoney™ helps support healthy lung function naturally">
+    <link rel="stylesheet" href="css/bootstrap.min-card.css">
+    <link rel="stylesheet" href="css/style-card.css">
+
+    <style type="text/css">
+        .row {
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+        }
+
+        .header-bg {
+            background: linear-gradient(135deg, #7a1200, #e8622e);
+            color: #f0f0f0;
+            width: 100%;
+            padding-top: 15px;
+            padding-bottom: 15px;
+            text-align: center;
+        }
+
+        .pricing-card {
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-right: 20px;
+            margin-left: 20px;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 50px #38393933;
+        }
+
+        .pricing-card-btn {
+            display: inline-block;
+            background: #ffc107;
+            color: #0a0a0a !important;
+            font-family: 'Inter', 'Barlow', sans-serif;
+            font-weight: 800;
+            font-size: 20px;
+            letter-spacing: 1px;
+            padding: 16px 60px;
+            border-radius: 50px;
+            text-decoration: none !important;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.3s ease;
+        }
+
+        .pricing-card-btn:hover {
+            transform: scale(1.06);
+            box-shadow: 0 8px 28px rgba(186, 168, 10, 0.4);
+            background: #f9c016;
+            color: #0a0a0a !important;
+        }
+
+        .pricing-card-btn:active {
+            transform: scale(0.97);
+            box-shadow: 0 2px 8px rgba(186, 168, 10, 0.4);
+        }
+
+        .pricing-card-btn::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 60%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .pricing-card-btn:hover::after {
+            left: 120%;
+        }
+
+        .center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .card-bv {
+            background: radial-gradient(circle, #e8622e 0%, #7a1200 70%);
+            color: #f0f0f0;
+            border: #7a1200;
+        }
+
+        .border {
+            border: 2px solid #e8622e !important;
+        }
+
+        .img-2-3 {
+            max-width: 70% !important;
+        }
+
+        .offer {
+            max-width: 45%;
+        }
+
+        .sat-01 {
+            background: #ffc107a8;
+        }
+
+        /* ============ COUNTDOWN + STATUS BAR ============ */
+        .status {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .countdown-pill {
+            display: block;
+            width: 50%;
+            border: 2px solid #e8622e;
+            border-radius: 5px;
+            font-size: 30px;
+            font-weight: 700;
+            text-align: center;
+            padding-top: 3px;
+            padding-bottom: 3px;
+        }
+
+        .status-bar {
+            display: flex;
+            width: 50%;
+            border: 2px solid #e8622e;
+            border-radius: 5px;
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            justify-content: space-evenly;
+        }
+
+        .status-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+        }
+
+        .status-item strong {
+            color: var(--color-heading);
+            font-weight: 800;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #2cc934;
+            display: inline-block;
+        }
+
+        .mobile {
+            display: none;
+        }
+
+        #desktop {
+            display: flex;
+        }
+
+        @media (max-width: 770px) {
+            #desktop {
+                display: none;
+            }
+
+            .mobile {
+                display: flex;
+            }
+
+            .container-2 {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .flex {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .img-2-3 {
+                max-width: 100% !important;
+            }
+
+            h3 {
+                font-size: 16px;
+            }
+
+            .txt-size {
+                font-size: 50px !important;
+            }
+
+            span {
+                font-size: 14px;
+            }
+
+            p {
+                font-size: 12px;
+            }
+
+            .pricing-card {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .pricing-card-btn {
+                width: 100%;
+                margin-top: 20px;
+                font-size: 15px;
+                padding: 10px 20px;
+            }
+
+            .offer {
+                max-width: 75%;
+            }
+
+            .countdown-pill {
+                width: 90%;
+                font-size: 16px;
+            }
+
+            .status-bar {
+                display: block;
+                width: 90%;
+                font-size: 16px;
+            }
+        }
+    </style>
+
+    <style>
+        #footer-bg-1 {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+        }
+
+        #footer-bg-2 {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+        }
+
+        @media (max-width: 580px) {
+            #footer-bg-1 {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+            }
+
+            #footer-bg-2 {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                padding: 16px;
+            }
+        }
+    </style>
+
+    <script>var mysrc = "https://tracking.buygoods.com/track/?a=13732&firstcookie=0"+"&tracking_redirect=&referrer="+encodeURIComponent(document.referrer)+"&sessid2="+ReadCookie('sessid2')+"&product=tit2,tit3,tit6&vid1=&vid2=&vid3=&caller_url="+encodeURIComponent(window.location.href); if(typeof add_to_cart !== 'undefined') { mysrc = mysrc+'&add_to_cart='+add_to_cart; } var newScript = document.createElement('script'); newScript.type = 'text/javascript'; newScript.defer = true; newScript.src = mysrc; var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(newScript, s); function ReadCookie(name){name += '='; var parts = document.cookie.split(/;\s*/);for (var i = 0; i < parts.length; i++) {var part = parts[i]; if (part.indexOf(name) == 0) return part.substring(name.length)} return '';}</script>
+
+<script type="text/javascript">setTimeout(function () {var i = document.createElement("iframe"),oid = new URLSearchParams(window.location.search);i.async = true;i.style="display:none";i.setAttribute("src", "https://buygoods.com/affiliates/go/conversion/iframe/bg?a=13732&t=25b3a3fa806b007e510b78651a473036&s="+ReadCookie('sessid2'));document.body.appendChild(i);}, 1000);</script>
+</head>
+
+<body>
+    <div class="header-bg">
+        <h1 style="font-weight: 600;" class="heading-2 mb-5">Limited-Time Offer: <br> Get the <b
+                style="color:#e8c239;">Best Offer</b> on
+            <b class="fw-bold">TitanHoney™</b>
+        </h1>
+    </div>
+    <section class="py-5" style="background-color: #ffffff; color: #101010;">
+        <div class="container">
+
+            <section class="status">
+                <div class="countdown-pill">Bonus Expires in <strong id="countdown">15:00</strong></div>
+                <br>
+                <div class="status-bar">
+                    <span class="status-item"><span class="status-dot"></span> Sale Status: <strong>Live</strong></span>
+                    <span class="status-item">&#8987; Bottles Remaining: <strong>27</strong></span>
+                </div>
+            </section> <br>
+
+            <!--NOVOS CARDS-->
+            <div class="row" id="desktop">
+                <div class="col-12 col-md-4 mb-4 mb-md-0 order-3 order-md-1">
+                    <div class="theme-border-radius border border-2 border-gray text-center p-4 pricing-card">
+                        <div class="center">
+                            <h3 class="mb-0 fw-bold">Try Two</h3>
+                            <p class="small mb-0">30 Day Supply, 2 Bottles</p>
+                            <img src="img/2b.png" alt="2b" class="img-fluid img-2-3">
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$79</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #11bc27;" class="fw-bold mb-2">YOU SAVE $200</p>
+                            <div class="col-12 text-center mb-4">
+                                <a href="https://buygoods.com/secure/checkout.html?account_id=13732&product_codename=tthn_front_2b_fnn1&redirect=aHR0cHM6Ly90aXRhbmhvbmV5LmNvbS91cDEtMmIv" target="">
+                                    <div class="pricing-card-btn sat-01">BUY NOW</div>
+                                </a>
+                            </div>
+                            <div class="col-7 mx-auto mb-3">
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$358</span>
+                                <span class="fw-bold">$158</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 mb-4 mb-md-0 order-1 order-md-2">
+                    <div class="theme-border-radius border-primary-new text-center p-4 card-bv pricing-card">
+
+                        <div class="center">
+                            <img src="img/offer.png" alt="offer" class="img-fluid offer">
+                            <p class="small mb-0">180 Day Supply, 6 Bottles</p>
+                            <img src="img/6b.png" alt="6b" class="img-fluid">
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$49</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #bbffaf;" class="fw-bold mb-2">YOU SAVE $780</p>
+                            <div class="col-12 text-center mb-4">
+                                <a href="https://buygoods.com/secure/checkout.html?account_id=13732&product_codename=tthn_front_6b_fnn1&redirect=aHR0cHM6Ly90aXRhbmhvbmV5LmNvbS91cDEtNmIv" target="">
+                                    <div class="pricing-card-btn">BUY NOW</div>
+                                </a>
+                            </div>
+                            <p class="small mb-3">60 Days Money Back Guarantee</p>
+                            <div class="col-7 mx-auto mb-3">
+                                <picture>
+                                    <img src="img/cards.png" alt="Card" class="img-fluid">
+                                </picture>
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$1074</span>
+                                <span class="fw-bold">$294</span>
+                            </p>
+                            <p class="fw-bold mb-0">*FREE SHIPPING</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 mb-4 order-2 order-md-3">
+                    <div class="theme-border-radius border border-2 border-gray text-center p-4 pricing-card">
+
+                        <div class="center">
+                            <h3 class="mb-0 fw-bold">Most Popular</h3>
+                            <p class="small mb-0">90 Day Supply, 3 Bottles</p>
+                            <img src="img/3b.png" alt="4b" class="img-fluid img-2-3">
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$69</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #11bc27;" class="fw-bold mb-2">YOU SAVE $330</p>
+                            <div class="col-12 text-center mb-4">
+                                <a href="https://buygoods.com/secure/checkout.html?account_id=13732&product_codename=tthn_front_3b_fnn1&redirect=aHR0cHM6Ly90aXRhbmhvbmV5LmNvbS91cDEtM2Iv" target="">
+                                    <div class="pricing-card-btn sat-01">BUY NOW</div>
+                                </a>
+                            </div>
+                            <div class="col-7 mx-auto mb-3">
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$537</span>
+                                <span class="fw-bold">$207</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 text-center mt-sm-3 order-4">
+                    <p>Our customers say <span class="fw-bold me-2">4.98/5</span> <img src="img/stars.png" alt="Stars"
+                            class="img-fluid pb-2"></p>
+                </div>
+
+            </div>
+            <!--NOVOS CARDS-->
+
+            <!--MOBILE-->
+            <div class="flex mobile">
+                <div class="col-12 col-md-4 mb-4 mb-md-0 order-3 order-md-1">
+                    <div class="theme-border-radius border border-2 border-gray text-center p-4-2 pricing-card">
+                        <div>
+                            <h3 class="mb-0 fw-bold">Try Two</h3>
+                            <p class="small mb-0">30 Day Supply, 2 Bottles</p>
+                            <img src="img/2b.png" alt="2b" class="img-fluid img-2-3">
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$79</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #11bc27;" class="fw-bold mb-2">YOU SAVE $200</p>
+                            <div class="col-12 text-center mb-4" style="margin-top: -15px;">
+                                <a href="https://buygoods.com/secure/checkout.html?account_id=13732&product_codename=tthn_front_2b_fnn1&redirect=aHR0cHM6Ly90aXRhbmhvbmV5LmNvbS91cDEtMmIv" target="">
+                                    <div class="pricing-card-btn sat-01">BUY NOW</div>
+                                </a>
+                            </div>
+                            <div class="col-7 mx-auto mb-3" style="margin-top: -15px;">
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$358</span>
+                                <span class="fw-bold">$158</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 mb-4 mb-md-0 order-1 order-md-2">
+                    <div class="theme-border-radius border-primary-new text-center p-4-2 card-bv pricing-card">
+
+                        <div>
+                            <img src="img/offer.png" alt="offer" class="img-fluid offer">
+                            <p class="small mb-0">180 Day Supply</p>
+                            <img src="img/6b.png" alt="6b" class="img-fluid">
+                        </div>
+
+                        <div style="max-width: 50%;">
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$49</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #bbffaf;" class="fw-bold mb-2">YOU SAVE $780</p>
+                            <div class="col-12 text-center mb-4" style="margin-top: -15px;">
+                                <a href="https://buygoods.com/secure/checkout.html?account_id=13732&product_codename=tthn_front_6b_fnn1&redirect=aHR0cHM6Ly90aXRhbmhvbmV5LmNvbS91cDEtNmIv" target="">
+                                    <div class="pricing-card-btn">BUY NOW</div>
+                                </a>
+                            </div>
+                            <p class="small mb-3" style="margin-top: -15px;">60 Days Guarantee</p>
+                            <div class="col-7 mx-auto mb-3">
+                                <picture>
+                                    <img src="img/cards.png" alt="Card" class="img-fluid">
+                                </picture>
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$1074</span>
+                                <span class="fw-bold">$294</span>
+                            </p>
+                            <p class="fw-bold mb-0">*FREE SHIPPING</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 mb-4 order-2 order-md-3">
+                    <div class="theme-border-radius border border-2 border-gray text-center p-4-2 pricing-card">
+
+                        <div>
+                            <h3 class="mb-0 fw-bold">Most Popular</h3>
+                            <p class="small mb-0">90 Day Supply, 3 Bottles</p>
+                            <img src="img/3b.png" alt="4b" class="img-fluid img-2-3">
+                        </div>
+
+                        <div>
+                            <div class="d-flex justify-content-center align-items-center">
+                                <h4 class="display-2 fw-bold txt-size">$69</h4>
+                                <div class="ms-2 pb-2 small">
+                                    <span class="d-block text-start">Per</span>
+                                    <span class="d-block text-start">Bottle</span>
+                                </div>
+                            </div>
+                            <p style="color: #11bc27;" class="fw-bold mb-2">YOU SAVE $330</p>
+                            <div class="col-12 text-center mb-4" style="margin-top: -15px;">
+                                <a href="https://buygoods.com/secure/checkout.html?account_id=13732&product_codename=tthn_front_3b_fnn1&redirect=aHR0cHM6Ly90aXRhbmhvbmV5LmNvbS91cDEtM2Iv"
+                                    target="">
+                                    <div class="pricing-card-btn sat-01">BUY NOW</div>
+                                </a>
+                            </div>
+                            <div class="col-7 mx-auto mb-3" style="margin-top: -15px;">
+                            </div>
+                            <p class="mb-1">TOTAL: <span class="text-decoration-line-through">$537</span>
+                                <span class="fw-bold">$207</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 text-center mt-sm-3 order-4">
+                    <p>Our customers say <span class="fw-bold me-2">4.98/5</span> <img src="img/stars.png" alt="Stars"
+                            class="img-fluid pb-2"></p>
+                </div>
+
+            </div>
+            <!--MOBILE-->
+        </div>
+    </section>
+
+    <!--FOOTER-->
+    <section style="background-color: #000; padding-top: 50px; padding-bottom: 50px;">
+        <div style="display: flex; flex-direction: column; justify-content: center; align-items: center;">
+
+            <div id="footer-bg-1">
+                <a href="https://titanhoney.com/info/terms.html"
+                    style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">TERMS</a>
+                <a href="https://titanhoney.com/info/privacy.html"
+                    style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">PRIVACY</a>
+                <a href="https://titanhoney.com/info/contact.html"
+                    style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">CONTACT</a>
+                <a href="https://titanhoney.com/info/refund.html"
+                    style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">REFUND</a>
+                <a href="https://titanhoney.com/info/disclaimer.html"
+                    style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">DISCLAIMER</a>
+                <a href="https://titanhoney.com/info/shipping.html"
+                    style="font-weight: lighter; text-decoration: none; color: #f8f8f8;">SHIPPING</a>
+                <a href="https://9doffers.com/"
+                    style="font-weight: normal; text-decoration: none; color: #f8f8f8;">AFFILIATE</a>
+            </div> <br>
+
+            <div id="footer-bg-2">
+                <img src="https://cdn.buygoods.com/assets/images/buygoods-logo-white.svg" alt=""
+                    style="max-width: 180px;">
+                <p style="font-size: small; color: #f8f8f8; max-width: 1200px;">BuyGoods is the retailer of this
+                    product. BuyGoods is a registered trademark of BuyGoods, a Delaware corporation located at 1201 N
+                    Orange Street Suite #7223, Wilmington, DE, 19801, USA and used by permission. BuyGoods role as
+                    retailer does not constitute an endorsement, approval or review of this product or any claim,
+                    statement or opinion used in promotion of this product. Statements on this website have not been
+                    evaluated by the Food and Drug Administration. Products are not intended to diagnose, treat, cure or
+                    prevent any disease.</p>
+            </div> <br>
+
+            <p style="color: #fff;">Copyright © 2026. All Rights Reserved.</p>
+
+        </div>
+
+    </section>
+    <!--FOOTER-->
+
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            function getAllParams(url) {
+                const urlObj = new URL(url);
+                let paramString = "";
+
+                for (const [key, value] of urlObj.searchParams) {
+                    paramString += `${paramString ? '&' : ''}${key}=${value}`;
+                }
+
+                return paramString;
+            }
+
+            // Countdown timer (15:00) — set to the real offer expiry before production
+            var remaining = 15 * 60;
+            var cd = document.getElementById('countdown');
+            var timer = setInterval(function () {
+                remaining--;
+                if (remaining <= 0) { remaining = 0; clearInterval(timer); }
+                var m = String(Math.floor(remaining / 60)).padStart(2, '0');
+                var s = String(remaining % 60).padStart(2, '0');
+                cd.textContent = m + ':' + s;
+            }, 1000);
+
+            const params = getAllParams(window.location.href);
+
+            if (params) {
+                const links = document.querySelectorAll("a");
+
+                links.forEach(link => {
+                    const separator = link.href.includes("?") ? "&" : "?";
+                    link.href += `${separator}${params}`;
+                });
+            }
+        });
+    </script>
+
+</body>
+
+</html>

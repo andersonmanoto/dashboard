@@ -117,6 +117,23 @@ class Settings(BaseSettings):
     # PagAmerican
     pagamerican_api_key: str = ""
 
+    # Templates de VSL (gerados pelo /offers-rt-ap; POST /vsl-templates pra
+    # regerar): o psstock.site no ar NÃO é o da hospedagem do ssh_host (lá só
+    # tem uma cópia antiga de PVs/) -- tem credencial SFTP própria.
+    psstock_sftp_host: str = ""
+    psstock_sftp_port: int = 22
+    psstock_sftp_username: str = ""
+    psstock_sftp_password: str = ""
+    # Chave privada, em ordem de prioridade: conteúdo em base64 (produção:
+    # `base64 -w0 chave` no .env, chave própria do dashboard sem passphrase),
+    # caminho de arquivo, ou a senha acima.
+    psstock_sftp_key_b64: str = ""
+    psstock_sftp_key_path: str = ""
+    psstock_sftp_key_passphrase: str = ""
+    # Pasta remota que é servida em psstock_pvs_url (.../public_html/PVs)
+    psstock_pvs_dir: str = ""
+    psstock_pvs_url: str = "https://psstock.site/PVs"
+
     # AutoPages (projeto Supabase separado)
     autopages_supabase_url: str = ""
     autopages_supabase_service_role: str = ""
