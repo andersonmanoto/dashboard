@@ -13,6 +13,9 @@
   <title>[[ nome ]]</title>
   <link rel="preconnect" href="https://scripts.converteai.net" crossorigin>
   <link rel="dns-prefetch" href="https://scripts.converteai.net">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="assets/css/main.css">
   <link rel="stylesheet" href="assets/css/pricing-cards.css">
 [% if ap %]
@@ -164,79 +167,25 @@ src="https://www.facebook.com/tr?id={{ estrutura.pixelCode }}&ev=PageView&noscri
 
 [[ tracking_scripts ]]
 </head>
-<body data-version="2.9">
-  <header>
-    <div class="container text-center">
-      Attention: This presentation is only available until <strong><span class="hoje"></span></strong>
-    </div>
-  </header>
-  <div class="a-s-d-svc14v a-b-cont-rr68h">
-    <div class="a-b-o-cont-nxkhs atomicat-container-006647a a-s-d-jtuig2 a-b-o-cont--legacy-margin-im17i">
-      <div class="a-o-cont a-cont-b">
-        <div class="a-cont a-i-cont a-s-d-gxw6rl">
-          <div class="a-b-o-cont--legacy-margin-im17i atomicat-container-aa7f32f a-b-o-cont-nxkhs">
-            <div class="a-cont-f-w a-o-cont a-s-d-l1qnc1">
-              <div class="a-cont a-i-cont a-s-d-s10riz">
-                <div class="a-c-cont-11a8d4e a-c-cont-o6k28 a-r a-s-d-8u63ub">
-                  <div class="a-r a-video atomicat-video atomicat-element-container-11a8d4e a-e-cont a-video-11a8d4e">
+<body data-version="2.9" class="pv-vm">
+  <!-- Layout de referência: preview do VapoMend (psstock.site/PVs/VpMnd/pv1) -->
+  <section class="pv-vm-vsl">
+    <div class="pv-vm-vsl__inner">
 [% if ap %]
                     <!-- VSL -->
 {{ estrutura.vturbScript | safe }}
 <!-- END-->
 [% else %]
-                    <div id="vsl-mount"></div>
+      <div id="vsl-mount"></div>
 [% endif %]
-                  </div>
-                  <p id="pv-watching-now" class="pv-watching-now"><span class="pv-live-dot" aria-hidden="true">●</span> <span id="pv-watching-count">790</span> people watching now</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
+  </section>
 
-    <div class="esconder">
-    <div class="a-b-o-cont--legacy-margin-im17i a-s-d-6cy9tb a-b-o-cont-nxkhs atomicat-container-10d2f94">
-      <div class="a-o-cont a-cont-b">
-        <div class="a-s-d-eomsvu a-cont a-i-cont">
-          <div class="atomicat-container-b6e604b a-b-o-cont--legacy-margin-im17i a-b-o-cont-nxkhs a-s-d-rdy523">
-            <div class="a-cont-f-w a-o-cont">
-              <div class="a-s-d-3e6puf a-i-cont a-cont">
-                <div class="a-c-cont-b5cf2c9 a-r a-c-cont-o6k28">
-                  <div class="atomicat-heading-title-b5cf2c9 atomicat-element-container-b5cf2c9 atomicat-text-b5cf2c9 a-r a-e-cont atomicat-heading-title">
-                    <h2 class="a-i-e-cont">
-                      <p>Secure your discounted [[ nome ]] now</p>
-                      <p>Only while supplies last!</p>
-                    </h2>
-                  </div>
-                </div>
-                <div class="a-c-cont-o6k28 a-r a-c-cont-fda19de">
-                  <div class="atomicat-heading-title atomicat-element-container-fda19de a-r atomicat-heading-title-fda19de a-e-cont atomicat-text-fda19de a-s-d-9sja5t">
-                    <h1 class="a-i-e-cont">
-                      <p><span data-time="20:00" id="atomicat-countdown-text-c9fe8cf1" class="atomicat-countdown-text">20:00</span></p>
-                    </h1>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+  <div class="esconder">
+    <div class="header-bg">
+      <h1 class="pv-vm-heading">Limited-Time Offer: <br> Get the <b class="pv-vm-highlight">Best Offer</b> on <b>[[ nome ]]</b></h1>
     </div>
-    <div class="a-b-o-cont-nxkhs atomicat-container-ffd96a5 a-b-o-cont--legacy-margin-im17i">
-      <div class="a-o-cont a-cont-b">
-        <div class="a-cont a-i-cont">
-          <div class="a-s-d-lqnwv9 a-c-cont-o6k28 a-c-cont-9044e51 a-r">
-            <div class="a-s-d-y3tv98 atomicat-element-container-9044e51 a-e-cont a-icon atomicat-icon a-r a-icon-9044e51">
-              <div class="a-icon-wrap"><svg aria-hidden="true" focusable="false" data-prefix="fas" data-icon="caret-down" class="a-i-e-cont svg-inline--fa fa-caret-down" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512">
-                  <path fill="currentColor" d="M137.4 374.6c12.5 12.5 32.8 12.5 45.3 0l128-128c9.2-9.2 11.9-22.9 6.9-34.9s-16.6-19.8-29.6-19.8L32 192c-12.9 0-24.6 7.8-29.6 19.8s-2.2 25.7 6.9 34.9l128 128z"></path>
-                </svg></div>
-            </div>
-          </div>
-          <div class="a-c-cont-a3082f2 a-r a-c-cont-o6k28 a-s-d-egn7o4">
-            <div class="a-html atomicat-html a-r a-e-cont a-s-d-4usxf2 atomicat-element-container-a3082f2 a-html-a3082f2">
-              <div class="a-i-e-cont">
+    <section class="pv-vm-cards">
 <div class="pricing-cards-block">
   <div class="row" id="desktop">
     <div class="col-12 col-md-4 mb-4 mb-md-0 order-3 order-md-1">
@@ -429,101 +378,20 @@ src="https://www.facebook.com/tr?id={{ estrutura.pixelCode }}&ev=PageView&noscri
     </div>
   </div>
 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+    </section>
+  </div><!-- /.esconder -->
+
+  <footer class="pv-vm-footer">
+    <div class="pv-vm-footer__links">
+      <a>TERMS</a>
+      <a>PRIVACY</a>
     </div>
-    </div><!-- /.esconder -->
-  </div>
-  <footer class="pv-site-footer">
-    <div class="pv-site-footer__inner">
-      <p class="pv-site-footer__copy">&copy; 2026 Research Labs. All rights reserved.</p>
+    <p class="pv-vm-footer__disclaimer">The information on this website has not been evaluated by the Food &amp; Drug Administration or any other medical body. We do not aim to diagnose, treat, cure or prevent any illness or disease. Information is shared for educational purposes only. You should always consult your doctor before acting on any content on this website, especially if you are pregnant, nursing, taking medication or have a medical condition</p>
 [% if ap %]
-<br><br>{{ estrutura.campoLivre }}
+    {{ estrutura.campoLivre }}
 [% endif %]
-    </div>
+    <p class="pv-vm-footer__copy">Copyright &copy; 2026. All Rights Reserved.</p>
   </footer>
-  <script defer>
-    (function () {
-      var days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-      var months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-      var now = new Date();
-      var el = document.querySelector(".hoje");
-      if (el) {
-        el.textContent = days[now.getDay()] + ", " + now.getDate() + " " + months[now.getMonth()] + " " + now.getFullYear();
-      }
-    })();
-  </script>
-  <script defer>
-    function formatCountdown(ms) {
-      var totalSeconds = Math.max(0, Math.floor(ms / 1000));
-      var mins = Math.floor(totalSeconds / 60);
-      var secs = totalSeconds % 60;
-      return (mins < 10 ? "0" + mins : String(mins)) + ":" + (secs < 10 ? "0" + secs : String(secs));
-    }
-    (function () {
-      try {
-        document.querySelectorAll(".atomicat-countdown-text").forEach(function (el) {
-          var dataTime = el.getAttribute("data-time");
-          if (!dataTime || !el.id) {
-            return;
-          }
-          var parts = dataTime.split(":").map(Number);
-          var totalMs = ((parts[0] || 0) * 60 + (parts[1] || 0)) * 1000;
-          var storageKey = "pv_countdown_start_" + el.id;
-          var start = sessionStorage.getItem(storageKey);
-          if (!start) {
-            start = String(Date.now());
-            sessionStorage.setItem(storageKey, start);
-          }
-          function tick() {
-            var elapsed = Date.now() - parseInt(start, 10);
-            var remaining = totalMs - elapsed;
-            if (remaining <= 0) {
-              el.textContent = "00:00";
-              return;
-            }
-            el.textContent = formatCountdown(remaining);
-          }
-          tick();
-          setInterval(tick, 1000);
-        });
-      } catch (err) {
-        console.log(err);
-      }
-    })();
-  </script>
-  <script defer>
-    (function () {
-      try {
-        var countEl = document.getElementById("pv-watching-count");
-        if (!countEl) {
-          return;
-        }
-        var base = 790;
-        var offset = Math.floor(Math.random() * 41) - 20;
-        var current = base + offset;
-        function render() {
-          countEl.textContent = current.toLocaleString("en-US");
-        }
-        render();
-        setInterval(function () {
-          current += Math.floor(Math.random() * 7) - 3;
-          if (current < base - 120) {
-            current = base - 120;
-          }
-          if (current > base + 180) {
-            current = base + 180;
-          }
-          render();
-        }, 4000);
-      } catch (err) {
-        console.log(err);
-      }
-    })();
-  </script>
 [% if ap %]
   <script>
 /* ALTERE O VALOR 10 PARA OS SEGUNDOS EM QUE AS SEÇÕES VÃO APARECER */

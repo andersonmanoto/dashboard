@@ -5,7 +5,9 @@ sobe no psstock via SFTP:
   {psstock_pvs_dir}/{codigo}/{pagina}/       preview (área de edição rápida)
   {psstock_pvs_dir}/{codigo}/{pagina}(ap)/   AutoPages (variáveis Jinja2)
 
-O esqueleto é fixo (templates/vsl_kit/, extraído do kit do TitanHoney). Da DTC
+O esqueleto é fixo (templates/vsl_kit/): área de edição e cards do kit do
+TitanHoney, layout da página (vídeo em fundo branco, faixa "Best Offer" na
+cor do produto, rodapé com disclaimer) do preview do VapoMend. Da DTC
 só vêm: nome/slogan (<title>), as 2 cores do produto (.card-bv), os scripts de
 tracking da BuyGoods (copiados sem alteração), os preços dos potes 2b/3b/6b e
 as imagens (img/*.png → images/pots/*.webp). O vídeo e o pitch do vturb só

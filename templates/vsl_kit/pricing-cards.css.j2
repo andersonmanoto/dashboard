@@ -288,3 +288,90 @@
     width: 100%;
   }
 }
+
+/* ===== Layout da página (referência: preview do VapoMend) ===== */
+body.pv-vm {
+  background: #ffffff;
+  color: #101010;
+  font-family: Poppins, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+body.pv-vm .pricing-cards-block {
+  font-family: Poppins, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+.pv-vm-vsl {
+  background: #ffffff;
+  padding: 48px 16px 20px;
+}
+.pv-vm-vsl__inner {
+  max-width: 1000px;
+  width: 100%;
+  margin: 0 auto;
+}
+.header-bg {
+  background: linear-gradient(135deg, [[ cor_primaria ]], [[ cor_escura ]]);
+  color: #f0f0f0;
+  width: 100%;
+  padding: 15px 16px;
+  text-align: center;
+  margin-bottom: 30px;
+}
+.pv-vm-heading {
+  font-family: Poppins, sans-serif;
+  font-weight: 600;
+  font-size: calc(1.375rem + 1.5vw);
+  line-height: 1.2;
+  margin: 0;
+}
+@media (min-width: 1200px) {
+  .pv-vm-heading {
+    font-size: 2.5rem;
+  }
+}
+.pv-vm-heading b {
+  font-weight: 700;
+}
+.pv-vm-highlight {
+  color: #e8c239;
+}
+.pv-vm-cards {
+  background: #ffffff;
+  padding: 0 12px 120px;
+}
+.pv-vm-footer {
+  background: #000000;
+  color: #f8f8f8;
+  padding: 50px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  font-family: Poppins, sans-serif;
+}
+.pv-vm-footer__links {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.pv-vm-footer__links a {
+  color: #f8f8f8;
+  font-weight: lighter;
+  text-decoration: none;
+}
+.pv-vm-footer__disclaimer {
+  font-size: small;
+  max-width: 1200px;
+  margin: 0 0 24px;
+}
+.pv-vm-footer__copy {
+  color: #ffffff;
+  margin: 0;
+}
+@media (max-width: 580px) {
+  .pv-vm-footer__links {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+body.pv-vm .pricing-cards-block h3 {
+  text-transform: none;
+}

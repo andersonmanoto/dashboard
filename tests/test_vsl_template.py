@@ -60,32 +60,82 @@ def _render(produto, url, slogan, ap):
     )
 
 
-@pytest.mark.parametrize("produto,url,slogan", PRODUTOS)
-def test_preview_reproduz_kit_do_front(produto, url, slogan):
-    out = _render(produto, url, slogan, ap=False)["index.html"].decode()
-    esperado = [
-        l
-        for l in _linhas(_read(produto, "pv1.html"))
-        if not l.startswith("Valor inicial: template não tinha pitch")
-    ]
-    assert _linhas(out) == esperado
+# O layout da página mudou pro do preview do VapoMend (psstock.site/PVs/VpMnd/pv1):
+# sem a barra "Attention", o "people watching" e o cronômetro; faixa "Best Offer"
+# e rodapé com disclaimer. A área de edição (<head>), o bloco dos cards e o CSS
+# dos cards continuam iguais aos kits feitos à mão pelo front.
+FONTE_POPPINS = ("fonts.googleapis.com", "fonts.gstatic.com")
 
 
-@pytest.mark.parametrize("produto,url,slogan", PRODUTOS)
-def test_ap_reproduz_kit_do_front_com_correcoes(produto, url, slogan):
-    out = _render(produto, url, slogan, ap=True)["index.html"].decode()
-    esperado = (
+def _head(texto: str) -> list[str]:
+    head = texto.replace("\r", "").split("</head>")[0]
+    return [l for l in _linhas(head) if not any(f in l for f in FONTE_POPPINS)]
+
+
+def _cards(texto: str) -> list[str]:
+    linhas = _linhas(texto)
+    ini = linhas.index('<div class="pricing-cards-block">')
+    fim = ini + 1 + linhas[ini + 1 :].index('<div class="flex mobile">')
+    # bloco desktop + início do mobile; o mobile é simétrico
+    return linhas[ini:fim]
+
+
+def _ap_esperado(produto: str) -> str:
+    return (
         _read(produto, "ap.html")
         .replace("{{ estrutura.pitchTime }}", "{{ estrutura.pitchTime or 0 }}")
         .replace("{{ pv.redtrackScript }}", "{{ pv.redtrackScript | safe }}")
     )
-    assert _linhas(out) == _linhas(esperado)
+
+
+@pytest.mark.parametrize("produto,url,slogan", PRODUTOS)
+def test_preview_mantem_area_de_edicao_e_cards_do_kit(produto, url, slogan):
+    out = _render(produto, url, slogan, ap=False)["index.html"].decode()
+    kit = _read(produto, "pv1.html")
+    esperado_head = [
+        l for l in _head(kit) if not l.startswith("Valor inicial: template não tinha pitch")
+    ]
+    assert _head(out) == esperado_head
+    assert _cards(out) == _cards(kit)
+
+
+@pytest.mark.parametrize("produto,url,slogan", PRODUTOS)
+def test_ap_mantem_head_e_cards_do_kit(produto, url, slogan):
+    out = _render(produto, url, slogan, ap=True)["index.html"].decode()
+    esperado = _ap_esperado(produto)
+    assert _head(out) == _head(esperado)
+    assert _cards(out) == _cards(esperado)
+    # o resto do motor do AutoPages continua lá
+    for trecho in (
+        "{{ estrutura.vturbScript | safe }}",
+        "{{ estrutura.pitchTime or 0 }}",
+        "{{ pv.redtrackScript | safe }}",
+        "{{ estrutura.campoLivre }}",
+    ):
+        assert trecho in out
+
+
+@pytest.mark.parametrize("ap", [False, True])
+def test_layout_do_vapomend(ap):
+    out = _render(*PRODUTOS[1], ap=ap)["index.html"].decode()
+    assert 'class="header-bg"' in out
+    assert "Get the <b class=\"pv-vm-highlight\">Best Offer</b> on <b>BullSodaRise</b>" in out
+    assert "has not been evaluated by the Food &amp; Drug Administration" in out
+    assert "Copyright &copy; 2026. All Rights Reserved." in out
+    for antigo in ("people watching", "atomicat-countdown", "This presentation is only available", "Research Labs"):
+        assert antigo not in out
+    # faixa + cards só aparecem no pitch
+    assert out.index('<div class="esconder">') < out.index('class="header-bg"')
 
 
 @pytest.mark.parametrize("produto,url,slogan", PRODUTOS)
 def test_pricing_css_com_cores_da_dtc(produto, url, slogan):
+    dtc = parse_dtc(_read(produto, "dtc.html"), url)
     out = _render(produto, url, slogan, ap=False)["assets/css/pricing-cards.css"].decode()
-    assert _linhas(out) == _linhas(_read(produto, "pricing-cards.css"))
+    esperado = _linhas(_read(produto, "pricing-cards.css"))
+    assert _linhas(out)[: len(esperado)] == esperado
+    # faixa do layout novo com as cores do produto
+    assert f"linear-gradient(135deg, {dtc.cor_primaria}, {dtc.cor_escura})" in out
 
 
 def test_parse_dtc_titanhoney():
@@ -185,3 +235,18 @@ def test_parse_dtc_jvzoo_copia_script_e_avisa_que_fica_inativo():
     assert "__JVZ_B_LINK_INIT__" in dtc.tracking_scripts
     assert "static.cloudflareinsights.com" not in dtc.tracking_scripts
     assert any("JVZoo" in w and "inativo" in w for w in dtc.warnings)
+
+
+# --- escolha da DTC (vsl_template_auto) ---------------------------------
+
+from app.services.vsl_template_auto import pick_dtc_url
+
+
+def _url(tipo, rede, url="https://x"):
+    return {"type": tipo, "url": url, "networks": {"name": rede}}
+
+
+def test_pick_dtc_prefere_rede_da_plataforma():
+    rows = [_url("dtc", "BuyGoods", "https://bg"), _url("dtc", "DigiStore24", "https://ds")]
+    assert pick_dtc_url(rows, "DigiStore24") == "https://ds"
+    assert pick_dtc_url(rows, "JVZoo") == "https://bg"

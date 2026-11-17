@@ -9,7 +9,9 @@ offers criadas e do aviso no Slack.
             URLs) e caindo pra qualquer DTC do produto se essa rede não tiver
   - vídeo/pitch do preview: os padrões (os do VapoMend)
 
-O /offers-rt-ap roda uma vez por funil/plataforma, então o kit é gerado só na
+Só pra produto novo: se o produto (por nome ou codigo_produto) já tem
+qualquer sales page em `sales_pages` do AutoPages, não gera. E o
+/offers-rt-ap roda uma vez por funil/plataforma, então o kit é gerado só na
 primeira vez: se as pastas já existem, não mexe (pra regerar, POST
 /vsl-templates com overwrite=true). Sem as credenciais do psstock no .env,
 não faz nada. Nunca levanta erro: as offers já foram criadas.
@@ -22,6 +24,7 @@ from loguru import logger
 from supabase import create_async_client
 
 from app.config import Settings
+from app.services.autopages_service import AutoPagesService
 from app.services.offer_announcement import NETWORK_BY_PLATAFORMA
 from app.services.vsl_template_service import (
     DEFAULT_PITCH_SECONDS,
@@ -32,7 +35,22 @@ from app.services.vsl_template_service import (
 )
 
 
-async def find_dtc_url(settings: Settings, produto: str, plataforma: str) -> str | None:
+def _network_name(row: dict) -> str:
+    return ((row.get("networks") or {}).get("name") or "").strip().lower()
+
+
+def pick_dtc_url(rows: list[dict], plataforma: str) -> str | None:
+    """DTC da rede da plataforma; senão, a primeira DTC do produto."""
+    dtcs = [r for r in rows if r.get("type") == "dtc" and r.get("url")]
+    network = (NETWORK_BY_PLATAFORMA.get(plataforma.strip().lower()) or "").lower()
+    for r in dtcs:
+        if _network_name(r) == network:
+            return r["url"]
+    return dtcs[0]["url"] if dtcs else None
+
+
+async def fetch_product_urls(settings: Settings, produto: str) -> list[dict] | None:
+    """products_urls do produto (todas as redes/tipos); None se o produto não existe."""
     db = await create_async_client(settings.supabase_url, settings.supabase_key)
 
     products = (
@@ -41,25 +59,15 @@ async def find_dtc_url(settings: Settings, produto: str, plataforma: str) -> str
     if not products:
         return None
     product: dict = products[0]  # type: ignore[assignment]
-    product_id = product["id"]
 
     rows = (
         await db.table("products_urls")
-        .select("url, network_id, networks(name)")
-        .eq("product_id", product_id)
-        .eq("type", "dtc")
+        .select("type, url, network_id, networks(name)")
+        .eq("product_id", product["id"])
         .order("created_at")
         .execute()
     ).data or []
-    rows = [r for r in rows if isinstance(r, dict) and r.get("url")]
-    if not rows:
-        return None
-
-    network_name = (NETWORK_BY_PLATAFORMA.get(plataforma.strip().lower()) or "").lower()
-    for r in rows:
-        if ((r.get("networks") or {}).get("name") or "").lower() == network_name:
-            return r["url"]
-    return rows[0]["url"]
+    return [r for r in rows if isinstance(r, dict)]
 
 
 async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) -> None:
@@ -77,7 +85,19 @@ async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) ->
         if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", codigo):
             raise ValueError(f"codigo_produto {codigo!r} inválido pra nome de pasta")
 
-        dtc_url = await find_dtc_url(settings, produto, payload["plataforma"])
+        # Só produto novo: se já existe qualquer sales page dele no AutoPages
+        # (em qualquer plataforma), aborta.
+        sales_pages = await AutoPagesService(settings).find_sales_pages(produto, codigo)
+        if sales_pages:
+            logger.info(
+                f"[vsl-templates] {produto} ({codigo}): kit não gerado -- produto já "
+                f"tem sales page no AutoPages ({sales_pages[0]['url']})"
+            )
+            return
+
+        rows = await fetch_product_urls(settings, produto) or []
+
+        dtc_url = pick_dtc_url(rows, payload["plataforma"])
         if not dtc_url:
             raise ValueError(
                 "produto sem URL de DTC em products_urls (type='dtc') no dashboard"
