@@ -19,7 +19,6 @@ import asyncio
 import re
 
 from loguru import logger
-from slack_sdk import WebClient
 from supabase import create_async_client
 
 from app.config import Settings
@@ -63,15 +62,6 @@ async def find_dtc_url(settings: Settings, produto: str, plataforma: str) -> str
     return rows[0]["url"]
 
 
-def _slack(settings: Settings, text: str) -> None:
-    WebClient(token=settings.slack_bot_token).chat_postMessage(
-        channel=settings.slack_offers_channel,
-        username="Backend Bot",
-        text=text,
-        unfurl_links=False,
-    )
-
-
 async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) -> None:
     """Background task do /offers-rt-ap. Nunca levanta erro."""
     produto = payload["produto"]
@@ -111,25 +101,11 @@ async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) ->
         return
     except Exception as e:
         logger.error(f"[vsl-templates] {produto} ({codigo}): falha ao gerar kit: {e}")
-        try:
-            await asyncio.to_thread(
-                _slack,
-                settings,
-                f":warning: Templates de VSL de *{produto}* (`{codigo}`) não foram "
-                f"gerados: {e}",
-            )
-        except Exception as slack_exc:
-            logger.error(f"[vsl-templates] falha ao avisar no Slack: {slack_exc}")
         return
 
-    logger.info(f"[vsl-templates] {codigo}: kit gerado ({result['preview_url']})")
-    linhas = [
-        f"Templates de VSL de *{produto}* gerados:",
-        f"Preview: {result['preview_url']}",
-        f"AutoPages: {result['ap_url']}",
-    ]
-    linhas += [f":warning: {w}" for w in result["warnings"]]
-    try:
-        await asyncio.to_thread(_slack, settings, "\n".join(linhas))
-    except Exception as e:
-        logger.error(f"[vsl-templates] falha ao avisar no Slack: {e}")
+    logger.info(
+        f"[vsl-templates] {codigo}: kit gerado -- preview {result['preview_url']} "
+        f"| AutoPages {result['ap_url']}"
+    )
+    for w in result["warnings"]:
+        logger.warning(f"[vsl-templates] {codigo}: {w}")
