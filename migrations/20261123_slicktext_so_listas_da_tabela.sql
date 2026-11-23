@@ -54,22 +54,22 @@ create trigger trg_slicktext_queue_only_mapped_products
 
 -- Leads "lista não mapeada" que ainda estão na fila, no mesmo recorte da
 -- snapshot (dia do primeiro created_at em São Paulo, rede, produto).
-create temporary table _sem_lista on commit drop as
-select
-  (min(q.created_at) at time zone 'America/Sao_Paulo')::date as snapshot_date,
-  q.lead_type,
-  coalesce(e.network_id, ac.network_id, q.network_id) as network_id,
-  coalesce(e.product_id, ac.product_id) as product_id
-from public.slicktext_sync_queue q
-left join public.events e on e.id = q.event_id
-left join public.abandoned_carts ac on ac.id = q.abandoned_cart_id
-where (q.last_error in ('lista_nao_encontrada', 'lista_nao_mapeada')
-       or q.last_error like 'lista de abandono não mapeada:%')
-  and coalesce(e.product_id, ac.product_id) is not null
-group by q.lead_type,
-         coalesce(q.event_id::text, q.abandoned_cart_id::text, q.id::text),
-         3, 4;
-
+with sem_lista as (
+  select
+    (min(q.created_at) at time zone 'America/Sao_Paulo')::date as snapshot_date,
+    q.lead_type,
+    coalesce(e.network_id, ac.network_id, q.network_id) as network_id,
+    coalesce(e.product_id, ac.product_id) as product_id
+  from public.slicktext_sync_queue q
+  left join public.events e on e.id = q.event_id
+  left join public.abandoned_carts ac on ac.id = q.abandoned_cart_id
+  where (q.last_error in ('lista_nao_encontrada', 'lista_nao_mapeada')
+         or q.last_error like 'lista de abandono não mapeada:%')
+    and coalesce(e.product_id, ac.product_id) is not null
+  group by q.lead_type,
+           coalesce(q.event_id::text, q.abandoned_cart_id::text, q.id::text),
+           3, 4
+)
 update public.snapshot_daily_leads_sms s
 set qty_neworder_error = greatest(0, s.qty_neworder_error - x.n_neworder),
     qty_abandon_error  = greatest(0, s.qty_abandon_error - x.n_abandon),
@@ -78,7 +78,7 @@ from (
   select snapshot_date, network_id, product_id,
          count(*) filter (where lead_type = 'neworder') as n_neworder,
          count(*) filter (where lead_type = 'abandon')  as n_abandon
-  from _sem_lista
+  from sem_lista
   group by 1, 2, 3
 ) x
 where s.snapshot_date = x.snapshot_date
