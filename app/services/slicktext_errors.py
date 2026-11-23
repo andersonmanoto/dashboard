@@ -12,6 +12,8 @@ from typing import Optional
 import phonenumbers
 
 ERR_EMPTY_PHONE = "telefone_vazio"  # lead chegou sem telefone
+# venda sem telefone esperando o carrinho do mesmo email (retry, não é final)
+ERR_WAITING_CART_PHONE = "aguardando_telefone_carrinho"
 ERR_INVALID_PHONE = "telefone_invalido"  # tem telefone, mas não é número válido
 ERR_ABSTRACT = "rejeitado_abstract"  # AbstractAPI reprovou o telefone
 ERR_ABSTRACT_API = "abstract_api_error"  # AbstractAPI fora (retry)

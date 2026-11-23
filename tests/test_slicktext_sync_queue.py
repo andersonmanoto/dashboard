@@ -27,8 +27,25 @@ class FakeDB:
         self._pending = None
         self._delete = False
         self._data = []
+        self.carts = []  # linhas de abandoned_carts devolvidas na busca por email
+        self.cart_lookups = []
 
-    def table(self, _name):
+    def table(self, name):
+        if name == "abandoned_carts":
+            self._data = self.carts
+        return self
+
+    def select(self, *_a, **_kw):
+        return self
+
+    def in_(self, column, values):
+        self.cart_lookups.append((column, sorted(values)))
+        return self
+
+    def order(self, *_a, **_kw):
+        return self
+
+    def limit(self, _n):
         return self
 
     def rpc(self, _name):
@@ -219,3 +236,50 @@ def test_venda_com_telefone_de_porto_rico_e_regiao_nao_suportada(env):
     assert env["abstract_calls"] == 0
     assert env["sent"] == []
     assert env["db"].updates["q-1"]["last_error"] == "regiao_nao_suportada"
+
+
+# --- venda sem telefone: telefone do carrinho pelo email ---------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def _sem_telefone(minutes_ago=None, **kw):
+    item = _item(**kw)
+    item["events"]["customer_phone"] = None
+    item["events"]["customer_email"] = "John@Mail.com"
+    if minutes_ago is not None:
+        item["created_at"] = (
+            datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+        ).isoformat()
+    return item
+
+
+def test_venda_sem_telefone_usa_o_telefone_do_carrinho(env):
+    env["db"].carts = [{"customer_phone": ""}, {"customer_phone": "+1 202-555-0123"}]
+    _run(_sem_telefone(minutes_ago=2))
+    db = env["db"]
+    assert db.cart_lookups == [("customer_email", ["John@Mail.com", "john@mail.com"])]
+    assert env["abstract_calls"] == 1
+    assert env["sent"] == [("100", "1")]
+    assert db.updates["q-1"]["status"] == "synced"
+
+
+def test_venda_sem_telefone_e_sem_carrinho_espera_sem_gastar_tentativa(env):
+    _run(_sem_telefone(minutes_ago=5, attempts=1))
+    fields = env["db"].updates["q-1"]
+    assert fields["status"] == "retry"
+    assert fields["last_error"] == "aguardando_telefone_carrinho"
+    assert fields["attempts"] == 1
+    assert env["sent"] == []
+
+
+def test_venda_sem_telefone_depois_da_espera_e_telefone_vazio(env):
+    _run(_sem_telefone(minutes_ago=sync.CART_PHONE_WAIT_MINUTES + 1))
+    fields = env["db"].updates["q-1"]
+    assert fields["status"] == "failed"
+    assert fields["last_error"] == "telefone_vazio"
+
+
+def test_venda_com_telefone_nao_busca_carrinho(env):
+    _run(_item())
+    assert env["db"].cart_lookups == []

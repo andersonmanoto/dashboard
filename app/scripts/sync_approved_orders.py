@@ -30,6 +30,7 @@ from app.services.slicktext_errors import (
     ERR_OPTED_OUT,
     ERR_PRODUCT_UNKNOWN,
     ERR_REGION,
+    ERR_WAITING_CART_PHONE,
     SLICKTEXT_REGION_ERROR,
     is_empty_phone,
     is_opted_out,
@@ -65,6 +66,11 @@ async def get_supabase() -> AsyncClient:
 MAX_ATTEMPTS = 3
 SLICKTEXT_TIMEOUT = 10.0
 ABSTRACT_TIMEOUT = 10.0
+# Venda sem telefone (a DigiStore não manda telefone no postback) espera o
+# carrinho do mesmo email por até isso, contado do created_at da linha. O
+# webhook de contato da DigiStore às vezes chega uns minutos DEPOIS da venda;
+# com o cron de 15 em 15 min, 30 dá pelo menos duas rodadas.
+CART_PHONE_WAIT_MINUTES = 30
 
 
 class SyncResult(Enum):
@@ -119,6 +125,46 @@ async def _assign_targets(
         .execute(),
         "gravar lista na linha do lead",
     )
+
+
+async def phone_from_cart(db: AsyncClient, email: Optional[str]) -> Optional[str]:
+    """
+    Telefone do carrinho abandonado mais recente com o mesmo email (qualquer
+    rede). Usado quando a venda chega sem telefone: na DigiStore o postback de
+    venda não tem placeholder de telefone, só o webhook de contato do checkout
+    ("Input of contact details", que vira abandoned_carts) traz.
+    """
+    email = (email or "").strip()
+    if not email:
+        return None
+    variants = list({email, email.lower()})
+    res = await retry_transport(
+        lambda: db.table("abandoned_carts")
+        .select("customer_phone")
+        .in_("customer_email", variants)
+        .order("created_at", desc=True)
+        .limit(10)
+        .execute(),
+        "buscar telefone no carrinho",
+    )
+    for row in res.data or []:
+        if isinstance(row, dict) and not is_empty_phone(row.get("customer_phone")):
+            return str(row["customer_phone"]).strip()
+    return None
+
+
+def _waiting_for_cart(created_at: Optional[str]) -> bool:
+    """A linha ainda está dentro da janela de espera pelo carrinho?"""
+    if not created_at:
+        return False
+    try:
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - created
+    return age.total_seconds() < CART_PHONE_WAIT_MINUTES * 60
 
 
 async def _mark_retry_safely(db: AsyncClient, queue_id: str, error: str) -> None:
@@ -430,6 +476,35 @@ async def process_queue_item(item: dict) -> None:
         return
 
     # Validação
+    if is_empty_phone(raw_phone) and not list_id:
+        try:
+            raw_phone = await phone_from_cart(db, event_data.get("customer_email"))
+        except Exception as exc:
+            logger.error(f"Erro ao buscar telefone no carrinho ({queue_id}): {exc}")
+            await _mark_retry_safely(db, queue_id, "erro_ao_buscar_carrinho")
+            return
+        if raw_phone:
+            logger.info(
+                f"[SlickText] Venda sem telefone (fila {queue_id}, produto "
+                f"{product_name}): usando o telefone do carrinho do mesmo email."
+            )
+        elif _waiting_for_cart(item.get("created_at")):
+            # carrinho pode chegar depois da venda: volta pra fila sem gastar
+            # tentativa (a snapshot só conta linha final, retry não entra)
+            await (
+                db.table("slicktext_sync_queue")
+                .update(
+                    {
+                        "status": "retry",
+                        "last_error": ERR_WAITING_CART_PHONE,
+                        "attempts": attempts,
+                    }
+                )
+                .eq("id", queue_id)
+                .execute()
+            )
+            return
+
     if is_empty_phone(raw_phone):
         logger.warning(
             f"[SlickText] Telefone VAZIO no evento (fila {queue_id}, produto "
@@ -617,8 +692,8 @@ async def process_single_item(queue_id: str) -> None:
     res = await retry_transport(
         lambda: db.table("slicktext_sync_queue")
         .select(
-            "id, event_id, attempts, list_id, slick_account_id, "
-            "events(customer_name, customer_phone, "
+            "id, event_id, attempts, list_id, slick_account_id, created_at, "
+            "events(customer_name, customer_email, customer_phone, "
             "products(name, slicktext_product_lists(approved_list_id, "
             "slicktext_accounts(id))), checkouts(quantity))"
         )
