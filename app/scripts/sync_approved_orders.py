@@ -28,7 +28,11 @@ from app.services.slicktext_errors import (
     ERR_LIST_NOT_MAPPED,
     ERR_NO_ACTIVE_ACCOUNT,
     ERR_PRODUCT_UNKNOWN,
+    ERR_REGION,
+    SLICKTEXT_REGION_ERROR,
     is_empty_phone,
+    is_supported_region,
+    phone_region,
 )
 from app.services.slicktext_accounts import (
     ACCOUNT_ERROR_STATUSES,
@@ -263,7 +267,7 @@ async def sync_contact_to_slicktext(
                         )
                         return _status_error_result(update_exc)
                 else:
-                    if "us and ca" in error_msg:
+                    if SLICKTEXT_REGION_ERROR in error_msg:
                         logger.error(
                             f"SlickText rejeitou a região do telefone para {customer}."
                         )
@@ -444,6 +448,19 @@ async def process_queue_item(item: dict) -> None:
         )
         return
 
+    if not is_supported_region(formatted_phone):
+        logger.info(
+            f"[SlickText] Telefone {formatted_phone} é de {phone_region(formatted_phone)}, "
+            f"fora de EUA/Canadá (fila {queue_id}, produto {product_name})."
+        )
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": ERR_REGION})
+            .eq("id", queue_id)
+            .execute()
+        )
+        return
+
     if not list_id:
         abstract_valid = await validate_phone_abstract(formatted_phone)
         if abstract_valid is None:
@@ -517,7 +534,7 @@ async def process_queue_item(item: dict) -> None:
     elif result is SyncResult.UNSUPPORTED_REGION:
         await (
             db.table("slicktext_sync_queue")
-            .update({"status": "failed", "last_error": "regiao_nao_suportada"})
+            .update({"status": "failed", "last_error": ERR_REGION})
             .eq("id", queue_id)
             .execute()
         )

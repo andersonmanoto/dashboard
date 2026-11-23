@@ -26,7 +26,11 @@ from app.services.slicktext_errors import (
     ERR_INVALID_PHONE,
     ERR_LIST_NOT_MAPPED,
     ERR_NO_ACTIVE_ACCOUNT,
+    ERR_REGION,
+    SLICKTEXT_REGION_ERROR,
     is_empty_phone,
+    is_supported_region,
+    phone_region,
 )
 from app.utils.formatters import country_to_alpha2
 
@@ -102,6 +106,7 @@ class SendResult(Enum):
     SUCCESS = auto()
     FAILED = auto()
     ACCOUNT_ERROR = auto()  # 401/404: a conta pode ter caído (ver slicktext_accounts.py)
+    UNSUPPORTED_REGION = auto()  # SlickText recusou o país do telefone
 
 
 def _failure(response: Optional[requests.Response]) -> SendResult:
@@ -245,6 +250,11 @@ def _sync_to_slicktext(
                 )
                 return SendResult.FAILED
         else:
+            if SLICKTEXT_REGION_ERROR in error_msg:
+                logger.warning(
+                    f"[SlickText] Região do telefone {mobile_number} recusada pela SlickText."
+                )
+                return SendResult.UNSUPPORTED_REGION
             logger.error("[SlickText] Erro na criação (não é duplicidade). Abortando.")
             return _failure(exc.response)
 
@@ -481,6 +491,14 @@ async def process_slicktext_sync_task(
         )
         return AbandonOutcome.skipped(ERR_INVALID_PHONE)
 
+    if not is_supported_region(formatted_phone):
+        # país do checkout pode ser US e o número ser de Porto Rico (+1 787)
+        logger.info(
+            f"SlickText ignorado: telefone {formatted_phone} é de "
+            f"{phone_region(formatted_phone)}, fora de EUA/Canadá ({product_codename})."
+        )
+        return AbandonOutcome.skipped(ERR_REGION)
+
     if not list_id:
         # requests é síncrono: roda em thread pra não travar o event loop
         phone_ok = await asyncio.to_thread(
@@ -525,6 +543,9 @@ async def process_slicktext_sync_task(
             api_url=settings.slicktext_api_url,
             deactivate=partial(asyncio.to_thread, _deactivate_account, db_repo),
         )
+        if result is SendResult.UNSUPPORTED_REGION:
+            # é do telefone, não da conta: nenhuma conta/tentativa resolve
+            return AbandonOutcome.skipped(ERR_REGION)
         if result is not SendResult.SUCCESS:
             failures.append(f"{account.get('name')}: {result.name}")
 

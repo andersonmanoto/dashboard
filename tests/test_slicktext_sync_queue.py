@@ -210,3 +210,12 @@ def test_erro_de_api_so_retenta_a_linha_da_conta(env):
     assert env["sent"] == [("200", "2")]
     fields = env["db"].updates["q-2"]
     assert (fields["status"], fields["last_error"]) == ("retry", "slicktext_api_error")
+
+
+def test_venda_com_telefone_de_porto_rico_e_regiao_nao_suportada(env):
+    item = _item()
+    item["events"]["customer_phone"] = "7873473234"
+    _run(item)
+    assert env["abstract_calls"] == 0
+    assert env["sent"] == []
+    assert env["db"].updates["q-1"]["last_error"] == "regiao_nao_suportada"

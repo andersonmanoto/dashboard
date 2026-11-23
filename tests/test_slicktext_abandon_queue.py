@@ -483,3 +483,42 @@ def test_assign_slicktext_abandon_targets():
         {"list_id": "173009", "slick_account_id": "acc-1"},
         ("id", "q-1"),
     ]
+
+
+# --- Região do telefone ---------------------------------------------------------
+
+
+def test_telefone_de_porto_rico_com_checkout_us_e_regiao_nao_suportada(phone, slicktext):
+    # 787 = Porto Rico: +1 e checkout "United States", mas a SlickText recusa
+    out = _send({**PAYLOAD, "phone": "7873473234", "country": "United States"})
+    assert out == AbandonOutcome.skipped("regiao_nao_suportada")
+    assert slicktext["calls"] == []
+
+
+def test_telefone_do_mexico_com_checkout_ca_e_regiao_nao_suportada(phone, slicktext):
+    out = _send({**PAYLOAD, "phone": "+523221324437", "country": "CA"})
+    assert out == AbandonOutcome.skipped("regiao_nao_suportada")
+    assert slicktext["calls"] == []
+
+
+def test_slicktext_recusando_regiao_nao_vira_retry(phone, slicktext):
+    slicktext["value"] = SendResult.UNSUPPORTED_REGION
+    assert _send() == AbandonOutcome.skipped("regiao_nao_suportada")
+
+
+def test_resposta_us_and_ca_da_slicktext_vira_unsupported_region(monkeypatch):
+    import requests
+
+    resp = requests.Response()
+    resp.status_code = 400
+    resp._content = b'{"error":"Only US and CA numbers are supported"}'
+
+    def fake_post(*a, **k):
+        return resp
+
+    monkeypatch.setattr(slicktext_service.requests, "post", fake_post)
+    result = slicktext_service._sync_to_slicktext(
+        {"mobile_number": "+12025550123"}, "John", 1,
+        api_key="k", brand_id="1", api_url="https://slicktext.test",
+    )
+    assert result is SendResult.UNSUPPORTED_REGION

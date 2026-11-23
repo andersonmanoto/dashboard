@@ -495,3 +495,9 @@ def test_endpoint_status(api, rows, code, enqueued):
 
 def test_endpoint_periodo_invertido_422(api):
     assert _post(api, {**BODY, "end_date": "2026-09-30"}).status_code == 422
+
+
+def test_input_com_telefone_de_porto_rico_e_regiao_nao_suportada(env):
+    outcome = asyncio.run(svc.send_row(_row(customer_phone="17873473234"), {}, DEST))
+    assert outcome == RowOutcome("failed", "regiao_nao_suportada")
+    assert env["abstract_calls"] == 0
