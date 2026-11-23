@@ -200,6 +200,12 @@ def test_telefone_invalido_nao_chama_abstract(env):
     assert env["abstract_calls"] == 0
 
 
+def test_telefone_vazio_tem_codigo_proprio(env):
+    outcome = asyncio.run(svc.send_row(_row(customer_phone=""), {}, DEST))
+    assert outcome == RowOutcome("failed", "telefone_vazio")
+    assert env["abstract_calls"] == 0
+
+
 def test_fora_de_eua_e_canada_e_regiao_nao_suportada(env):
     outcome = asyncio.run(svc.send_row(_row(customer_phone="5511987654321"), {}, DEST))
     assert outcome == RowOutcome("failed", "regiao_nao_suportada")

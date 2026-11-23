@@ -630,6 +630,18 @@ class EventProcessor:
         }
         context = f"abandon {cart_data.get('customer_email')}"
         try:
+            # SMS só pras listas da slicktext_product_lists. Sem product_id
+            # (checkout não achado) enfileira assim mesmo: o cron registra o
+            # erro, que é pra corrigir.
+            product_id = cart_data.get("product_id")
+            if product_id and not self.db.has_slicktext_list(
+                product_id, "abandoned_list_id"
+            ):
+                logger.info(
+                    f"Produto {product_id} sem lista de abandono na "
+                    f"slicktext_product_lists: SMS não enfileirado ({context})"
+                )
+                return
             if self.db.enqueue_slicktext_abandon(cart.get("id"), network.value, payload):
                 logger.info(f"Abandono enfileirado pro SlickText | {context}")
             else:

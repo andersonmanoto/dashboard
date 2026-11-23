@@ -19,6 +19,15 @@ from app.services.slicktext_accounts import (
     retry_transport,
     send_with_account_check,
 )
+from app.services.slicktext_errors import (
+    ERR_ABSTRACT,
+    ERR_ABSTRACT_API,
+    ERR_EMPTY_PHONE,
+    ERR_INVALID_PHONE,
+    ERR_LIST_NOT_MAPPED,
+    ERR_NO_ACTIVE_ACCOUNT,
+    is_empty_phone,
+)
 from app.utils.formatters import country_to_alpha2
 
 logger = logging.getLogger(__name__)
@@ -279,7 +288,7 @@ AssignTargets = Callable[[list[tuple[str, dict]]], Awaitable[list[tuple[str, dic
 class AbandonOutcome:
     """Resultado do envio de um abandono, gravado na slicktext_sync_queue."""
 
-    status: str  # "synced" | "skipped" | "retry"
+    status: str  # "synced" | "skipped" | "retry" | "discard" (apaga a linha)
     reason: Optional[str] = None
 
     @classmethod
@@ -293,6 +302,10 @@ class AbandonOutcome:
     @classmethod
     def retry(cls, reason: str) -> "AbandonOutcome":
         return cls("retry", reason)
+
+    @classmethod
+    def discard(cls, reason: str) -> "AbandonOutcome":
+        return cls("discard", reason)
 
 
 async def process_slicktext_sync_task(
@@ -400,8 +413,17 @@ async def process_slicktext_sync_task(
 
     mappings = [m for m in raw_mappings if m.get("abandoned_list_id")]
     if not mappings:
-        logger.warning(f"SlickText: Lista não mapeada para o produto '{product_name}'.")
-        return AbandonOutcome.skipped(f"lista de abandono não mapeada: {product_name}")
+        logger.info(
+            f"SlickText: '{product_name}' sem lista de abandono na "
+            "slicktext_product_lists. Linha descartada."
+        )
+        return AbandonOutcome.discard(ERR_LIST_NOT_MAPPED)
+    if list_id and str(list_id) not in {str(m["abandoned_list_id"]) for m in mappings}:
+        logger.info(
+            f"SlickText: lista {list_id} saiu da slicktext_product_lists "
+            f"('{product_name}'). Linha descartada."
+        )
+        return AbandonOutcome.discard(ERR_LIST_NOT_MAPPED)
 
     try:
         credentials = credentials_by_account(
@@ -427,7 +449,7 @@ async def process_slicktext_sync_task(
             f"SlickText: nenhuma conta active entre as {len(mappings)} com lista "
             f"mapeada para o produto '{product_name}'."
         )
-        return AbandonOutcome.skipped(f"nenhuma conta active: {product_name}")
+        return AbandonOutcome.skipped(ERR_NO_ACTIVE_ACCOUNT)
 
     # 3. Valida telefone
     # BUG histórico: antes disso, qualquer país diferente de "US"/"united
@@ -444,9 +466,20 @@ async def process_slicktext_sync_task(
         )
         return AbandonOutcome.skipped(f"país fora do escopo: {country_code}")
 
+    if is_empty_phone(raw_phone):
+        logger.warning(
+            f"SlickText: telefone VAZIO no carrinho abandonado ({product_codename}): "
+            "o lead chegou sem telefone."
+        )
+        return AbandonOutcome.skipped(ERR_EMPTY_PHONE)
+
     formatted_phone = format_phone_local(raw_phone, country_code)
     if not formatted_phone:
-        return AbandonOutcome.skipped("telefone vazio ou inválido")
+        logger.warning(
+            f"SlickText: telefone inválido no carrinho abandonado ({product_codename}, "
+            f"{country_code}): {raw_phone!r}"
+        )
+        return AbandonOutcome.skipped(ERR_INVALID_PHONE)
 
     if not list_id:
         # requests é síncrono: roda em thread pra não travar o event loop
@@ -454,9 +487,9 @@ async def process_slicktext_sync_task(
             validate_phone_abstract, formatted_phone, settings.abstract_api_key
         )
         if phone_ok is None:
-            return AbandonOutcome.retry("AbstractAPI indisponível")
+            return AbandonOutcome.retry(ERR_ABSTRACT_API)
         if not phone_ok:
-            return AbandonOutcome.skipped("telefone reprovado pela AbstractAPI")
+            return AbandonOutcome.skipped(ERR_ABSTRACT)
 
     if assign_targets:
         targets = await assign_targets(targets)

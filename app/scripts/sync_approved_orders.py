@@ -20,6 +20,16 @@ from phonenumbers import NumberParseException, PhoneNumberFormat
 from supabase import AsyncClient, create_async_client
 
 from app.config import get_settings
+from app.services.slicktext_errors import (
+    ERR_ABSTRACT,
+    ERR_ABSTRACT_API,
+    ERR_EMPTY_PHONE,
+    ERR_INVALID_PHONE,
+    ERR_LIST_NOT_MAPPED,
+    ERR_NO_ACTIVE_ACCOUNT,
+    ERR_PRODUCT_UNKNOWN,
+    is_empty_phone,
+)
 from app.services.slicktext_accounts import (
     ACCOUNT_ERROR_STATUSES,
     active_list_targets,
@@ -342,15 +352,27 @@ async def process_queue_item(item: dict) -> None:
     if isinstance(raw_mappings, dict):
         raw_mappings = [raw_mappings]
 
-    mappings = [m for m in raw_mappings if m.get("approved_list_id")]
-    if not list_id and not mappings:
-        logger.warning(f"Lista não mapeada para o produto: {product_name}")
+    if not event_data.get("products"):
+        logger.warning(f"[SlickText] Venda sem produto identificado (fila {queue_id}).")
         await (
             db.table("slicktext_sync_queue")
-            .update({"status": "failed", "last_error": "lista_nao_encontrada"})
+            .update({"status": "failed", "last_error": ERR_PRODUCT_UNKNOWN})
             .eq("id", queue_id)
             .execute()
         )
+        return
+
+    # SMS só pras listas da slicktext_product_lists: produto sem lista (ou
+    # lista que saiu da tabela depois de enfileirar) não é dessa fila. O
+    # trigger já barra a maioria; isto cobre o que entrou antes.
+    mappings = [m for m in raw_mappings if m.get("approved_list_id")]
+    mapped_ids = {str(m["approved_list_id"]) for m in mappings}
+    if (list_id and str(list_id) not in mapped_ids) or not mappings:
+        logger.info(
+            f"[SlickText] {product_name}: lista {list_id or ''} fora da "
+            f"slicktext_product_lists ({ERR_LIST_NOT_MAPPED}). Linha descartada."
+        )
+        await db.table("slicktext_sync_queue").delete().eq("id", queue_id).execute()
         return
 
     try:
@@ -388,18 +410,35 @@ async def process_queue_item(item: dict) -> None:
         )
         await (
             db.table("slicktext_sync_queue")
-            .update({"status": "failed", "last_error": "sem_conta_active"})
+            .update({"status": "failed", "last_error": ERR_NO_ACTIVE_ACCOUNT})
             .eq("id", queue_id)
             .execute()
         )
         return
 
     # Validação
-    formatted_phone = format_phone_local(raw_phone)
-    if not formatted_phone:
+    if is_empty_phone(raw_phone):
+        logger.warning(
+            f"[SlickText] Telefone VAZIO no evento (fila {queue_id}, produto "
+            f"{product_name}): o lead chegou sem telefone."
+        )
         await (
             db.table("slicktext_sync_queue")
-            .update({"status": "failed", "last_error": "telefone_invalido"})
+            .update({"status": "failed", "last_error": ERR_EMPTY_PHONE})
+            .eq("id", queue_id)
+            .execute()
+        )
+        return
+
+    formatted_phone = format_phone_local(raw_phone)
+    if not formatted_phone:
+        logger.warning(
+            f"[SlickText] Telefone inválido (fila {queue_id}, produto "
+            f"{product_name}): {raw_phone!r}"
+        )
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "failed", "last_error": ERR_INVALID_PHONE})
             .eq("id", queue_id)
             .execute()
         )
@@ -410,7 +449,7 @@ async def process_queue_item(item: dict) -> None:
         if abstract_valid is None:
             await (
                 db.table("slicktext_sync_queue")
-                .update({"status": "retry", "last_error": "abstract_api_error"})
+                .update({"status": "retry", "last_error": ERR_ABSTRACT_API})
                 .eq("id", queue_id)
                 .execute()
             )
@@ -418,7 +457,7 @@ async def process_queue_item(item: dict) -> None:
         if abstract_valid is False:
             await (
                 db.table("slicktext_sync_queue")
-                .update({"status": "failed", "last_error": "rejeitado_abstract"})
+                .update({"status": "failed", "last_error": ERR_ABSTRACT})
                 .eq("id", queue_id)
                 .execute()
             )

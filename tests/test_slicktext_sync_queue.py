@@ -23,7 +23,9 @@ class FakeDB:
         self.credentials = credentials
         self.updates = {}
         self.upserts = []
+        self.deleted = []
         self._pending = None
+        self._delete = False
         self._data = []
 
     def table(self, _name):
@@ -41,8 +43,15 @@ class FakeDB:
         self.upserts.append((rows, kw))
         return self
 
+    def delete(self):
+        self._delete = True
+        return self
+
     def eq(self, column, value):
-        if self._pending is not None:
+        if self._delete:
+            self.deleted.append(value)
+            self._delete = False
+        elif self._pending is not None:
             assert column == "id"
             self.updates.setdefault(value, {}).update(self._pending)
             self._pending = None
@@ -140,6 +149,42 @@ def test_telefone_reprovado_nao_divide(env):
     assert db.updates["q-1"]["status"] == "failed"
     assert db.updates["q-1"]["last_error"] == "rejeitado_abstract"
     assert "list_id" not in db.updates["q-1"]
+
+
+@pytest.mark.parametrize(
+    "phone, code", [(None, "telefone_vazio"), ("", "telefone_vazio"), ("99", "telefone_invalido")]
+)
+def test_telefone_vazio_e_invalido_tem_codigos_separados(env, phone, code):
+    item = _item()
+    item["events"]["customer_phone"] = phone
+    _run(item)
+    assert env["abstract_calls"] == 0
+    assert env["sent"] == []
+    assert env["db"].updates["q-1"]["status"] == "failed"
+    assert env["db"].updates["q-1"]["last_error"] == code
+
+
+def test_produto_sem_lista_descarta_a_linha(env):
+    item = _item()
+    item["events"]["products"]["slicktext_product_lists"] = []
+    _run(item)
+    assert env["db"].deleted == ["q-1"]
+    assert "status" not in env["db"].updates.get("q-1", {})
+    assert env["sent"] == []
+
+
+def test_lista_que_saiu_da_tabela_descarta_a_linha(env):
+    _run(_item(id="q-2", list_id="999", slick_account_id="acc-2"))
+    assert env["db"].deleted == ["q-2"]
+    assert env["sent"] == []
+
+
+def test_venda_sem_produto_e_produto_nao_identificado(env):
+    item = _item()
+    item["events"]["products"] = None
+    _run(item)
+    assert env["db"].updates["q-1"]["status"] == "failed"
+    assert env["db"].updates["q-1"]["last_error"] == "produto_nao_identificado"
 
 
 def test_linha_com_lista_nao_valida_telefone_nem_divide(env):

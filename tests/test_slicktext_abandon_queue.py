@@ -21,8 +21,13 @@ from tests.test_aweber import ABANDON_BODY, BUYGOODS_ABANDON
 
 
 class FakeDB:
-    def __init__(self):
+    def __init__(self, products_with_list=None):
         self.queued = []
+        self.products_with_list = products_with_list
+
+    def has_slicktext_list(self, product_id, list_field):
+        assert list_field == "abandoned_list_id"
+        return product_id in (self.products_with_list or ())
 
     def insert_abandoned_cart(self, cart_data):
         return {"id": "cart-1"}
@@ -58,6 +63,21 @@ def test_abandono_buygoods_vai_pra_fila_com_id_do_carrinho():
             },
         )
     ]
+
+
+@pytest.mark.parametrize(
+    "product_id, queued", [("p-com-lista", 1), ("p-sem-lista", 0), (None, 1)]
+)
+def test_so_enfileira_produto_com_lista_de_abandono(product_id, queued):
+    from app.models.enums import NetworkType
+
+    db = FakeDB(products_with_list={"p-com-lista"})
+    _processor(db, slicktext_abandon_enabled=True)._enqueue_slicktext_abandon(
+        {"product_id": product_id, "customer_phone": "5551234567"},
+        {"id": "cart-1"},
+        NetworkType.BUYGOODS,
+    )
+    assert len(db.queued) == queued
 
 
 def test_abandono_pagamerican_vai_pra_fila():
@@ -210,18 +230,49 @@ def test_descartes_registram_o_motivo(phone, slicktext):
     assert _send({**PAYLOAD, "country": "Brazil"}) == AbandonOutcome.skipped(
         "país fora do escopo: BR"
     )
-    assert _send({**PAYLOAD, "phone": ""}) == AbandonOutcome.skipped(
-        "telefone vazio ou inválido"
+    assert _send({**PAYLOAD, "phone": ""}) == AbandonOutcome.skipped("telefone_vazio")
+    assert _send({**PAYLOAD, "phone": "  "}) == AbandonOutcome.skipped("telefone_vazio")
+    assert _send({**PAYLOAD, "phone": "99"}) == AbandonOutcome.skipped(
+        "telefone_invalido"
     )
-    assert _send(credentials=()).status == "skipped"  # nenhuma conta active
+    assert _send(credentials=()) == AbandonOutcome.skipped("sem_conta_active")
     phone["value"] = False
-    assert _send() == AbandonOutcome.skipped("telefone reprovado pela AbstractAPI")
+    assert _send() == AbandonOutcome.skipped("rejeitado_abstract")
     assert slicktext["calls"] == []
+
+
+def test_produto_sem_lista_no_cron_descarta(phone, slicktext):
+    sem_lista = {**CHECKOUT, "products": {**CHECKOUT["products"], "slicktext_product_lists": []}}
+    assert _send(checkout_rows=(sem_lista,)) == AbandonOutcome.discard("lista_nao_mapeada")
+    assert slicktext["calls"] == []
+
+
+def test_mark_discard_apaga_a_linha():
+    class _Del:
+        def table(self, name):
+            self.name = name
+            return self
+
+        def delete(self):
+            self.deleted = True
+            return self
+
+        def eq(self, col, val):
+            self.where = (col, val)
+            return self
+
+        def execute(self):
+            return _Result([])
+
+    repo = DatabaseRepository.__new__(DatabaseRepository)
+    repo.client = _Del()
+    repo.mark_slicktext_abandon("q-1", "discard", 0, "lista_nao_mapeada")
+    assert repo.client.deleted and repo.client.where == ("id", "q-1")
 
 
 def test_erro_temporario_vira_retry(phone, slicktext):
     phone["value"] = None  # AbstractAPI fora
-    assert _send() == AbandonOutcome.retry("AbstractAPI indisponível")
+    assert _send() == AbandonOutcome.retry("abstract_api_error")
     phone["value"] = True
     slicktext["value"] = SendResult.FAILED
     outcome = _send()
@@ -341,7 +392,7 @@ def test_telefone_reprovado_nao_divide_a_linha(phone, slicktext):
         raise AssertionError("não deveria dividir")
 
     assert _send_lists(assign_targets=assign) == AbandonOutcome.skipped(
-        "telefone reprovado pela AbstractAPI"
+        "rejeitado_abstract"
     )
 
 

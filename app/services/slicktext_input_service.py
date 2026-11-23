@@ -39,6 +39,13 @@ from app.scripts.sync_approved_orders import (
     sync_contact_to_slicktext,
     validate_phone_abstract,
 )
+from app.services.slicktext_errors import (
+    ERR_ABSTRACT,
+    ERR_ABSTRACT_API,
+    ERR_EMPTY_PHONE,
+    ERR_INVALID_PHONE,
+    is_empty_phone,
+)
 from app.services.slicktext_accounts import (
     ACCOUNT_ERROR_STATUSES,
     brand_is_down,
@@ -59,9 +66,6 @@ LIST_CHECK_TIMEOUT = 10.0
 ACTIVE_ACCOUNT_STATUSES = frozenset({"active", "ativa"})
 
 # last_error da fila (mesmos códigos da slicktext_sync_queue)
-ERR_ABSTRACT = "rejeitado_abstract"
-ERR_ABSTRACT_API = "abstract_api_error"
-ERR_INVALID_PHONE = "telefone_invalido"
 ERR_REGION = "regiao_nao_suportada"
 ERR_LIST_NOT_FOUND = "lista_nao_encontrada"
 ERR_SLICKTEXT_API = "slicktext_api_error"
@@ -343,8 +347,15 @@ def _contact_payload(event: dict, e164: str) -> dict:
 
 async def send_row(row: dict, event: Optional[dict], dest: Destination) -> RowOutcome:
     """Abstract + SlickText pra uma linha. Não escreve no banco."""
-    e164, country_code = phone_to_e164(row.get("customer_phone"))
+    raw_phone = row.get("customer_phone")
+    if is_empty_phone(raw_phone):
+        logger.warning(f"[SlickText input] Telefone VAZIO na linha {row.get('id')}.")
+        return RowOutcome("failed", ERR_EMPTY_PHONE)
+    e164, country_code = phone_to_e164(raw_phone)
     if not e164:
+        logger.warning(
+            f"[SlickText input] Telefone inválido na linha {row.get('id')}: {raw_phone!r}"
+        )
         return RowOutcome("failed", ERR_INVALID_PHONE)
     if country_code != 1:
         # SlickText só aceita EUA e Canadá; nem gasta a Abstract

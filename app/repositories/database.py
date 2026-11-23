@@ -776,6 +776,22 @@ class DatabaseRepository:
         )
         return response.data[0] if response.data else None
 
+    def has_slicktext_list(self, product_id, list_field: str) -> bool:
+        """
+        True se o produto tem lista SlickText em slicktext_product_lists
+        (`list_field`: approved_list_id ou abandoned_list_id). SMS só vai pras
+        listas dessa tabela: produto fora dela não entra na fila.
+        """
+        response = (
+            self.client.table("slicktext_product_lists")
+            .select("product_id")
+            .eq("product_id", str(product_id))
+            .not_.is_(list_field, "null")
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data)
+
     def enqueue_aweber_lead(
         self,
         lead_type: str,
@@ -978,8 +994,21 @@ class DatabaseRepository:
         """
         Grava o resultado do envio. status: 'synced', 'skipped' ou 'retry'
         (erro temporário: volta pra 'pending', ou 'failed' ao esgotar as
-        tentativas). `attempts` é o valor lido da fila, antes desta tentativa.
+        tentativas). 'discard' apaga a linha (produto sem lista). `attempts` é o valor lido da fila, antes desta tentativa.
         """
+        if status == "discard":
+            # produto saiu da slicktext_product_lists depois de enfileirar:
+            # mesma regra do enqueue, o lead não é dessa fila
+            try:
+                (
+                    self.client.table("slicktext_sync_queue")
+                    .delete()
+                    .eq("id", queue_id)
+                    .execute()
+                )
+            except Exception as e:
+                logger.error(f"Erro ao descartar abandono SlickText {queue_id}: {e}")
+            return
         now = datetime.now(timezone.utc).isoformat()
         new_attempts = attempts + 1
         if status == "retry":
