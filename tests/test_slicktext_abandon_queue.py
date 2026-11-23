@@ -522,3 +522,35 @@ def test_resposta_us_and_ca_da_slicktext_vira_unsupported_region(monkeypatch):
         api_key="k", brand_id="1", api_url="https://slicktext.test",
     )
     assert result is SendResult.UNSUPPORTED_REGION
+
+
+# --- Contato descadastrado (STOP) ----------------------------------------------
+
+
+def test_contato_unsubscribed_nao_e_reinscrito(monkeypatch):
+    import requests
+
+    created = requests.Response()
+    created.status_code = 409
+    created._content = b'{"error":"Contact already exists"}'
+    found = requests.Response()
+    found.status_code = 200
+    found._content = (
+        b'{"data":[{"contact_id":1,"mobile_number":"+12514618920",'
+        b'"opt_in_status":"unsubscribed"}]}'
+    )
+    puts = []
+    monkeypatch.setattr(slicktext_service.requests, "post", lambda *a, **k: created)
+    monkeypatch.setattr(slicktext_service.requests, "get", lambda *a, **k: found)
+    monkeypatch.setattr(slicktext_service.requests, "put", lambda *a, **k: puts.append(1))
+    result = slicktext_service._sync_to_slicktext(
+        {"mobile_number": "+12514618920", "opt_in_status": "subscribed"}, "John", 1,
+        api_key="k", brand_id="1", api_url="https://slicktext.test",
+    )
+    assert result is SendResult.OPTED_OUT
+    assert puts == []
+
+
+def test_descadastrado_em_todas_as_contas_e_skipped(phone, slicktext):
+    slicktext["value"] = SendResult.OPTED_OUT
+    assert _send() == AbandonOutcome.skipped("contato_descadastrado")

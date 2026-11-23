@@ -26,9 +26,11 @@ from app.services.slicktext_errors import (
     ERR_INVALID_PHONE,
     ERR_LIST_NOT_MAPPED,
     ERR_NO_ACTIVE_ACCOUNT,
+    ERR_OPTED_OUT,
     ERR_REGION,
     SLICKTEXT_REGION_ERROR,
     is_empty_phone,
+    is_opted_out,
     is_supported_region,
     phone_region,
 )
@@ -107,6 +109,7 @@ class SendResult(Enum):
     FAILED = auto()
     ACCOUNT_ERROR = auto()  # 401/404: a conta pode ter caído (ver slicktext_accounts.py)
     UNSUPPORTED_REGION = auto()  # SlickText recusou o país do telefone
+    OPTED_OUT = auto()  # contato já existe e está unsubscribed (mandou STOP)
 
 
 def _failure(response: Optional[requests.Response]) -> SendResult:
@@ -207,6 +210,12 @@ def _sync_to_slicktext(
 
                 for contact in contacts_list:
                     if contact.get("mobile_number") == mobile_number:
+                        if is_opted_out(contact):
+                            logger.info(
+                                f"[SlickText] {mobile_number} está unsubscribed nesta "
+                                "conta (pediu pra sair). Não reinscreve."
+                            )
+                            return SendResult.OPTED_OUT
                         contact_id = contact.get("contact_id")
                         break
 
@@ -524,6 +533,7 @@ async def process_slicktext_sync_task(
     }
 
     failures = []
+    opted_out = []
     for list_id, account in targets:
         # requests é síncrono: roda em thread pra não travar o event loop
         # durante as tentativas
@@ -546,6 +556,10 @@ async def process_slicktext_sync_task(
         if result is SendResult.UNSUPPORTED_REGION:
             # é do telefone, não da conta: nenhuma conta/tentativa resolve
             return AbandonOutcome.skipped(ERR_REGION)
+        if result is SendResult.OPTED_OUT:
+            # vale só pra esta conta; as outras seguem
+            opted_out.append(account.get("name"))
+            continue
         if result is not SendResult.SUCCESS:
             failures.append(f"{account.get('name')}: {result.name}")
 
@@ -555,4 +569,6 @@ async def process_slicktext_sync_task(
         return AbandonOutcome.retry(
             f"falha em {len(failures)}/{len(targets)} conta(s): " + "; ".join(failures)
         )
+    if opted_out and len(opted_out) == len(targets):
+        return AbandonOutcome.skipped(ERR_OPTED_OUT)
     return AbandonOutcome.synced()

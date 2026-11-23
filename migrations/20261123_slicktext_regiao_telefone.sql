@@ -16,5 +16,15 @@ where lead_type = 'abandon'
     or coalesce(phone, payload ->> 'phone', '') like '+52%'
   );
 
--- Conferência: deve sobrar só o 251-461-8920 (Alabama, investigar no log)
+-- +1 251-461-8920 (Alabama): mandou STOP na conta 09 às 00:56 UTC de 20/11
+-- (opt_in_status = unsubscribed na SlickText); os abandonos seguintes
+-- tentaram reinscrever e falharam. O código agora grava contato_descadastrado.
+update public.slicktext_sync_queue
+set status = 'skipped',
+    last_error = 'contato_descadastrado'
+where lead_type = 'abandon'
+  and last_error like 'falha em %'
+  and regexp_replace(coalesce(phone, payload ->> 'phone', ''), '\D', '', 'g') in ('2514618920', '12514618920');
+
+-- Conferência: não deve sobrar nada
 -- select phone, last_error from public.slicktext_sync_queue where last_error like 'falha em %';

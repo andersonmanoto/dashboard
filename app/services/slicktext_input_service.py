@@ -44,6 +44,7 @@ from app.services.slicktext_errors import (
     ERR_ABSTRACT_API,
     ERR_EMPTY_PHONE,
     ERR_INVALID_PHONE,
+    ERR_OPTED_OUT,
     ERR_REGION,
     is_empty_phone,
     is_supported_region,
@@ -403,6 +404,8 @@ async def send_row(row: dict, event: Optional[dict], dest: Destination) -> RowOu
         return RowOutcome("synced", None)
     if result is SyncResult.UNSUPPORTED_REGION:
         return RowOutcome("failed", ERR_REGION)
+    if result is SyncResult.OPTED_OUT:
+        return RowOutcome("failed", ERR_OPTED_OUT)  # input_queue não tem skipped
     if result is SyncResult.ACCOUNT_ERROR:
         if deactivated:
             # conta caiu: o input para; a linha fica pra quando/se voltar

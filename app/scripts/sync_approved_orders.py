@@ -27,10 +27,12 @@ from app.services.slicktext_errors import (
     ERR_INVALID_PHONE,
     ERR_LIST_NOT_MAPPED,
     ERR_NO_ACTIVE_ACCOUNT,
+    ERR_OPTED_OUT,
     ERR_PRODUCT_UNKNOWN,
     ERR_REGION,
     SLICKTEXT_REGION_ERROR,
     is_empty_phone,
+    is_opted_out,
     is_supported_region,
     phone_region,
 )
@@ -70,6 +72,7 @@ class SyncResult(Enum):
     MISSING_CREDENTIALS = auto()
     API_ERROR = auto()
     UNSUPPORTED_REGION = auto()
+    OPTED_OUT = auto()  # contato já existe e está unsubscribed (mandou STOP)
     ACCOUNT_ERROR = auto()  # 401/404: a conta pode ter caído (ver slicktext_accounts.py)
 
 
@@ -239,6 +242,12 @@ async def sync_contact_to_slicktext(
 
                         for contact in resp_search.json().get("data", []):
                             if contact.get("mobile_number") == mobile_number:
+                                if is_opted_out(contact):
+                                    logger.info(
+                                        f"{mobile_number} está unsubscribed nesta conta "
+                                        "(pediu pra sair). Não reinscreve."
+                                    )
+                                    return SyncResult.OPTED_OUT
                                 contact_id = contact.get("contact_id")
                                 break
 
@@ -535,6 +544,13 @@ async def process_queue_item(item: dict) -> None:
         await (
             db.table("slicktext_sync_queue")
             .update({"status": "failed", "last_error": ERR_REGION})
+            .eq("id", queue_id)
+            .execute()
+        )
+    elif result is SyncResult.OPTED_OUT:
+        await (
+            db.table("slicktext_sync_queue")
+            .update({"status": "skipped", "last_error": ERR_OPTED_OUT})
             .eq("id", queue_id)
             .execute()
         )
