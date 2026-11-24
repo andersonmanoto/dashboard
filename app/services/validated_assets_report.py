@@ -66,7 +66,7 @@ _INVALID_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
 class Creative:
     name: str
     conversions: int
-    cost_ic: float
+    cost_ic: float | None  # None = nenhum dia com IC (tela mostra "—")
 
 
 @dataclass
@@ -79,15 +79,18 @@ class Offer:
     lead: str
     microlead: str
     conversions: int
-    cost_ic: float
+    cost_ic: float | None
     creatives: list[Creative] = field(default_factory=list)
 
 
-def _mean_cost_ic(rows: list[dict]) -> float:
-    """Média do cost_ic diário ignorando nulos (dia sem IC), como a tela faz."""
+def _mean_cost_ic(rows: list[dict]) -> float | None:
+    """
+    Média do cost_ic diário ignorando nulos (dia sem IC), como a tela faz.
+    Todos nulos → None (a tela mostra "—").
+    """
     values = [float(r["cost_ic"]) for r in rows if r.get("cost_ic") is not None]
     if not values:
-        return 0.0
+        return None
     return round(sum(values) / len(values), 2)
 
 
@@ -172,7 +175,10 @@ def _write_cells(ws: Worksheet, row: int, values: dict, font=None, fill=None) ->
         if col_name == "Conversões":
             cell.number_format = INTEGER_FMT
         elif col_name == "Custo de IC":
-            cell.number_format = CURRENCY_FMT
+            if cell.value is None:
+                cell.value = EMPTY
+            else:
+                cell.number_format = CURRENCY_FMT
         if col_name != "Criativo":
             cell.alignment = Alignment(horizontal="center")
         if font:
