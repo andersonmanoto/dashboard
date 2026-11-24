@@ -776,6 +776,65 @@ class DatabaseRepository:
         )
         return response.data[0] if response.data else None
 
+    def get_digistore24_order_phone(self, order_id) -> Optional[str]:
+        """
+        Telefone do pedido DigiStore24 gravado pelo webhook "Orders by
+        customers" (digistore24_order_contacts). O postback de venda não
+        traz telefone; quando o webhook chega antes, a venda pega daqui.
+        """
+        if not order_id:
+            return None
+        response = (
+            self.client.table("digistore24_order_contacts")
+            .select("phone")
+            .eq("order_id", str(order_id))
+            .limit(1)
+            .execute()
+        )
+        phone = (response.data[0].get("phone") if response.data else None) or ""
+        return phone.strip() or None
+
+    def save_digistore24_order_contact(
+        self, order_id: str, email: Optional[str], phone: Optional[str], payload: dict
+    ) -> int:
+        """
+        Grava o contato do webhook "Orders by customers" da DigiStore24 e
+        aplica o telefone nas linhas da events desse pedido que estão sem
+        telefone (caso o postback de venda tenha chegado antes). Devolve
+        quantas linhas da events foram atualizadas.
+        """
+        phone = (phone or "").strip() or None
+        self.client.table("digistore24_order_contacts").upsert(
+            {
+                "order_id": str(order_id),
+                "email": (email or "").strip() or None,
+                "phone": phone,
+                "payload": payload,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="order_id",
+        ).execute()
+
+        if not phone:
+            return 0
+        network_id = self.get_network_id(NetworkType.DIGISTORE24)
+        updated = 0
+        # NULL e "" (o .or_ do PostgREST não combina com update de forma
+        # confiável, então são dois updates)
+        for apply_filter in (
+            lambda q: q.is_("customer_phone", "null"),
+            lambda q: q.eq("customer_phone", ""),
+        ):
+            query = (
+                self.client.table("events")
+                .update({"customer_phone": phone})
+                .eq("network_id", network_id)
+                .eq("order_id", str(order_id))
+            )
+            response = apply_filter(query).execute()
+            updated += len(response.data or [])
+        return updated
+
     def has_slicktext_list(self, product_id, list_field: str) -> bool:
         """
         True se o produto tem lista SlickText em slicktext_product_lists

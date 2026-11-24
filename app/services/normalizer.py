@@ -246,11 +246,14 @@ class PayloadNormalizer:
             action_type = ActionType.REBILL
 
         else:
-            # Fallback de segurança
+            # payment_missed, payment_denial, rebill_cancelled, rebill_resumed,
+            # last_paid_day... são avisos de assinatura/parcelamento, não
+            # vendas. Como CANCEL o process_event ignora (inbox fica com
+            # processed_with_ignored) em vez de gravar uma venda falsa.
             logger.warning(
-                f"DigiStore: Tipo desconhecido '{raw_type}'. Assumindo NEWORDER."
+                f"DigiStore: transaction_type '{raw_type}' não é venda. Ignorando."
             )
-            action_type = ActionType.NEWORDER
+            action_type = ActionType.CANCEL
 
         # 5. Identificadores de Produto
         product_id = payload.get("product_id")

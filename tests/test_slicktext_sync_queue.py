@@ -29,10 +29,15 @@ class FakeDB:
         self._data = []
         self.carts = []  # linhas de abandoned_carts devolvidas na busca por email
         self.cart_lookups = []
+        self.order_contacts = []  # linhas de digistore24_order_contacts
+        self.tables = []
 
     def table(self, name):
+        self.tables.append(name)
         if name == "abandoned_carts":
             self._data = self.carts
+        elif name == "digistore24_order_contacts":
+            self._data = self.order_contacts
         return self
 
     def select(self, *_a, **_kw):
@@ -310,3 +315,28 @@ def test_venda_sem_telefone_depois_da_espera_e_telefone_vazio(env):
 def test_venda_com_telefone_nao_busca_carrinho(env):
     _run(_item())
     assert env["db"].cart_lookups == []
+
+
+def test_venda_sem_telefone_usa_o_telefone_do_webhook_do_pedido(env):
+    db = env["db"]
+    db.order_contacts = [{"phone": "+1 202-555-0123"}]
+    db.carts = [{"customer_phone": "+1 202-555-0199"}]
+    item = _sem_telefone(minutes_ago=2)
+    item["events"]["order_id"] = "22FVH57E1"
+    _run(item)
+    assert db.cart_lookups == []  # achou no pedido, nem olha o carrinho
+    assert db.updates["ev-1"] == {"customer_phone": "+1 202-555-0123"}
+    assert env["sent"] == [("100", "1")]
+    assert db.updates["q-1"]["status"] == "synced"
+
+
+def test_venda_sem_telefone_no_pedido_cai_no_carrinho(env):
+    db = env["db"]
+    db.order_contacts = [{"phone": ""}]
+    db.carts = [{"customer_phone": "+1 202-555-0123"}]
+    item = _sem_telefone(minutes_ago=2)
+    item["events"]["order_id"] = "22FVH57E1"
+    _run(item)
+    assert db.cart_lookups == [("customer_email", ["John@Mail.com", "john@mail.com"])]
+    assert "ev-1" not in db.updates
+    assert db.updates["q-1"]["status"] == "synced"

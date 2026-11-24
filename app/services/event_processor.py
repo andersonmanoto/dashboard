@@ -268,6 +268,9 @@ class EventProcessor:
             # Ajustes de datas para Refund/Rebill
             self._adjust_event_by_action_type(event)
 
+            # Telefone da DigiStore24 (o postback não traz; vem do webhook)
+            self._fill_digistore24_phone(event)
+
             # 3. Preparação do Sales Status
             sales_status_obj = None
 
@@ -343,6 +346,29 @@ class EventProcessor:
             # retro_service) já trata exceção corretamente.
             logger.exception(f"Erro fatal ao processar evento {event.order_id}: {e}")
             raise
+
+    def _fill_digistore24_phone(self, event: NormalizedEvent) -> None:
+        """
+        O S2S postback de venda da DigiStore24 não tem placeholder de
+        telefone. Quem traz é o webhook "Orders by customers"
+        (/digistore24/order-contact), que grava em digistore24_order_contacts.
+        Se ele chegou antes da venda, o telefone é aplicado aqui; se chegar
+        depois, o próprio webhook faz o UPDATE na events. Falha na busca não
+        derruba a venda.
+        """
+        if self._network_value(event.network) != NetworkType.DIGISTORE24.value:
+            return
+        if (event.customer_phone or "").strip():
+            return
+        try:
+            phone = self.db.get_digistore24_order_phone(event.order_id)
+        except Exception:
+            logger.exception(
+                f"Falha ao buscar telefone DigiStore24 (Order: {event.order_id})"
+            )
+            return
+        if phone:
+            event.customer_phone = phone
 
     async def _enrich_affiliate(self, event: NormalizedEvent) -> None:
         """

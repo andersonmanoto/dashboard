@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 from typing import Annotated
@@ -413,6 +414,71 @@ async def webhook_digistore24_abandon(
     except Exception as e:
         # Sem "OK" a DigiStore retenta -- melhor que perder o abandono
         logger.exception(f"Erro DigiStore abandon: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@router.api_route("/digistore24/order-contact/{secret_token}", methods=["GET", "POST"])
+async def webhook_digistore24_order_contact(
+    secret_token: str,
+    request: Request,
+    processor: Annotated[EventProcessor, Depends(get_event_processor)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    auth: None = Depends(verify_secret_token),
+) -> PlainTextResponse:
+    """
+    Webhook "Orders by customers" da DigiStore24, só pra pegar o telefone
+    (phone_no) da venda -- o S2S postback (/digistore24), que é a fonte da
+    events, não tem placeholder de telefone. Não cria evento: grava o contato
+    em digistore24_order_contacts e completa events.customer_phone pelo
+    order_id. Funciona em qualquer ordem de chegada (ver
+    EventProcessor._fill_digistore24_phone e o sync do SlickText).
+
+    A DigiStore só considera entregue se a resposta for o texto "OK".
+    """
+    try:
+        payload = dict(request.query_params)
+        if request.method == "POST":
+            try:
+                payload.update(await extract_payload(request))
+            except Exception:
+                payload["_raw_body"] = (await request.body()).decode("utf-8", "replace")
+
+        db_async = await get_inbox_supabase(settings)
+        await (
+            db_async.table("webhook_inbox")
+            .insert(
+                {
+                    "network": NetworkType.DIGISTORE24.value,
+                    "payload": payload,
+                    "status": "order_contact_captured",
+                }
+            )
+            .execute()
+        )
+
+        order_id = str(payload.get("order_id") or "").strip()
+        if not order_id or order_id.startswith("CART-"):
+            # carrinho é do /digistore24/abandon; aqui só pedido de verdade
+            logger.info(f"DigiStore order-contact sem pedido ignorado | order_id={order_id!r}")
+            return PlainTextResponse("OK")
+
+        updated = await asyncio.to_thread(
+            processor.db.save_digistore24_order_contact,
+            order_id,
+            payload.get("email"),
+            payload.get("phone_no"),
+            payload,
+        )
+        logger.info(
+            f"DigiStore order-contact | order_id={order_id} "
+            f"| phone={'sim' if (payload.get('phone_no') or '').strip() else 'não'} "
+            f"| events atualizados={updated}"
+        )
+        return PlainTextResponse("OK")
+
+    except Exception as e:
+        # Sem "OK" a DigiStore retenta -- melhor que perder o telefone
+        logger.exception(f"Erro DigiStore order-contact: {e}")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

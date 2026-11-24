@@ -69,9 +69,11 @@ MAX_ATTEMPTS = 3
 SLICKTEXT_TIMEOUT = 10.0
 ABSTRACT_TIMEOUT = 10.0
 # Venda sem telefone (a DigiStore não manda telefone no postback) espera o
-# carrinho do mesmo email por até isso, contado do created_at da linha. O
-# webhook de contato da DigiStore às vezes chega uns minutos DEPOIS da venda;
-# com o cron de 15 em 15 min, 30 dá pelo menos duas rodadas.
+# telefone por até isso, contado do created_at da linha: primeiro o do webhook
+# "Orders by customers" (digistore24_order_contacts, pelo order_id), depois o
+# do carrinho do mesmo email. Os webhooks da DigiStore às vezes chegam uns
+# minutos DEPOIS da venda; com o cron de 15 em 15 min, 30 dá pelo menos duas
+# rodadas.
 CART_PHONE_WAIT_MINUTES = 30
 
 
@@ -153,6 +155,46 @@ async def phone_from_cart(db: AsyncClient, email: Optional[str]) -> Optional[str
         if isinstance(row, dict) and not is_empty_phone(row.get("customer_phone")):
             return str(row["customer_phone"]).strip()
     return None
+
+
+async def phone_from_order_contact(
+    db: AsyncClient, order_id: Optional[str]
+) -> Optional[str]:
+    """
+    Telefone gravado pelo webhook "Orders by customers" da DigiStore24
+    (digistore24_order_contacts), pelo order_id da venda. Cobre o caso em que
+    o webhook e o postback chegaram juntos e nenhum dos dois achou o outro.
+    """
+    order_id = (order_id or "").strip()
+    if not order_id:
+        return None
+    res = await retry_transport(
+        lambda: db.table("digistore24_order_contacts")
+        .select("phone")
+        .eq("order_id", order_id)
+        .limit(1)
+        .execute(),
+        "buscar telefone do pedido DigiStore24",
+    )
+    for row in res.data or []:
+        if isinstance(row, dict) and not is_empty_phone(row.get("phone")):
+            return str(row["phone"]).strip()
+    return None
+
+
+async def _save_event_phone(db: AsyncClient, event_id: Optional[str], phone: str) -> None:
+    """Grava na events o telefone achado no sync (não bloqueia o envio)."""
+    if not event_id:
+        return
+    try:
+        await (
+            db.table("events")
+            .update({"customer_phone": phone})
+            .eq("id", event_id)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning(f"Não gravou o telefone na events ({event_id}): {exc}")
 
 
 def _waiting_for_cart(created_at: Optional[str]) -> bool:
@@ -480,7 +522,15 @@ async def process_queue_item(item: dict) -> None:
     # Validação
     if is_empty_phone(raw_phone) and not list_id:
         try:
-            raw_phone = await phone_from_cart(db, event_data.get("customer_email"))
+            raw_phone = await phone_from_order_contact(db, event_data.get("order_id"))
+            if raw_phone:
+                logger.info(
+                    f"[SlickText] Venda sem telefone (fila {queue_id}, produto "
+                    f"{product_name}): usando o telefone do webhook do pedido."
+                )
+                await _save_event_phone(db, item.get("event_id"), raw_phone)
+            else:
+                raw_phone = await phone_from_cart(db, event_data.get("customer_email"))
         except Exception as exc:
             logger.error(f"Erro ao buscar telefone no carrinho ({queue_id}): {exc}")
             await _mark_retry_safely(db, queue_id, "erro_ao_buscar_carrinho")
@@ -712,7 +762,7 @@ async def process_single_item(queue_id: str) -> None:
         lambda: db.table("slicktext_sync_queue")
         .select(
             "id, event_id, attempts, list_id, slick_account_id, created_at, "
-            "events(customer_name, customer_email, customer_phone, shipping_details, "
+            "events(order_id, customer_name, customer_email, customer_phone, shipping_details, "
             "products(name, slicktext_product_lists(approved_list_id, "
             "slicktext_accounts(id))), checkouts(quantity))"
         )

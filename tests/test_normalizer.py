@@ -394,6 +394,16 @@ def test_normalize_buygoods_real_payload(normalizer):
 
 
 # ========== TESTES DIGISTORE24 ==========
+@pytest.mark.parametrize(
+    "transaction_type",
+    ["payment_missed", "payment_denial", "rebill_cancelled", "rebill_resumed", "last_paid_day"],
+)
+def test_normalize_digistore_aviso_nao_vira_venda(normalizer, transaction_type):
+    payload = {**PAYLOAD_DIGISTORE_SALE, "transaction_type": transaction_type}
+    event = normalizer.normalize(NetworkType.DIGISTORE24, payload)
+    assert event.action_type == ActionType.CANCEL  # process_event ignora
+
+
 def test_normalize_digistore_sale(normalizer):
     event = normalizer.normalize(NetworkType.DIGISTORE24, PAYLOAD_DIGISTORE_SALE)
     assert event.network == NetworkType.DIGISTORE24
