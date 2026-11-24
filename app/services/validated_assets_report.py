@@ -83,6 +83,13 @@ class Offer:
     creatives: list[Creative] = field(default_factory=list)
 
 
+def product_name(product_id: str | None, products: dict[str, dict]) -> str:
+    """Nome do produto; conversão sem produto identificado vira "Sem produto"."""
+    if not product_id:
+        return "Sem produto"
+    return (products.get(product_id) or {}).get("name") or str(product_id)
+
+
 def _mean_cost_ic(rows: list[dict]) -> float | None:
     """
     Média do cost_ic diário ignorando nulos (dia sem IC), como a tela faz.
@@ -136,7 +143,7 @@ def build_offers_by_product(
         product = products.get(product_id) or {}
         by_product[product_id].append(
             Offer(
-                product=product.get("name") or str(product_id),
+                product=product_name(product_id, products),
                 niche=product.get("niche") or EMPTY,
                 network=networks.get(network_id) or EMPTY,
                 original_offer=original or EMPTY,
@@ -249,8 +256,7 @@ def build_validated_assets_workbook(
     wb.remove(wb.worksheets[0])
     used: set[str] = set()
     for product_id in product_ids:
-        name = (products.get(product_id) or {}).get("name") or product_id
-        ws = wb.create_sheet(_sheet_title(name, used))
+        ws = wb.create_sheet(_sheet_title(product_name(product_id, products), used))
         _write_product_sheet(ws, offers_by_product.get(product_id, []))
 
     buffer = io.BytesIO()

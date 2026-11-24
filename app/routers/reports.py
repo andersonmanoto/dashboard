@@ -47,7 +47,8 @@ class AffiliateXlsxReportRequest(BaseModel):
 class ValidatedAssetsXlsxReportRequest(BaseModel):
     emails: list[EmailStr] = Field(min_length=1)
     period: DatePeriod
-    product_id: list[UUID] = Field(min_length=1)
+    # vazio/ausente = todos os produtos com conversão no período (abas em ordem alfabética)
+    product_id: Optional[list[UUID]] = None
     network_id: Optional[list[UUID]] = None
 
     @model_validator(mode="after")

@@ -679,13 +679,18 @@ class ReportService:
         period = filters["period"]
         start_date = str(period["start_date"])
         end_date = str(period["end_date"])
-        product_ids = [str(p) for p in filters["product_id"]]
+        # product_id vazio/ausente = todos os produtos com conversão no período
+        product_ids = [str(p) for p in (filters.get("product_id") or [])]
+        all_products = not product_ids
         network_ids = [str(n) for n in (filters.get("network_id") or [])] or None
 
         def fetch():
             return (
                 self.db.get_redtrack_snapshot(
-                    start_date, end_date, product_id=product_ids, network_id=network_ids
+                    start_date,
+                    end_date,
+                    product_id=product_ids or None,
+                    network_id=network_ids,
                 ),
                 self.db.get_products_with_niche(),
                 self.db.get_networks_lookup(),
@@ -696,16 +701,23 @@ class ReportService:
             rows, products, networks
         )
 
+        if all_products:
+            # uma aba por produto que teve conversão, em ordem alfabética
+            product_ids = sorted(
+                offers_by_product,
+                key=lambda pid: validated_assets.product_name(pid, products).casefold(),
+            )
         product_names = [
-            (products.get(pid) or {}).get("name") or pid for pid in product_ids
+            validated_assets.product_name(pid, products) for pid in product_ids
         ]
         network_label = (
             ", ".join(networks.get(n, n) for n in network_ids)
             if network_ids
             else "Todas as plataformas"
         )
+        products_label = "Todos" if all_products else ", ".join(product_names)
         filters_html = (
-            f"<p>Produtos: <strong>{', '.join(product_names)}</strong><br>"
+            f"<p>Produtos: <strong>{products_label}</strong><br>"
             f"Plataformas: <strong>{network_label}</strong></p>"
         )
 
@@ -713,7 +725,7 @@ class ReportService:
         if total_offers == 0:
             logger.info(
                 f"Ativos Validados sem conversões ({start_date} a {end_date}, "
-                f"produtos={product_ids}). Relatório não enviado."
+                f"produtos={product_ids or 'todos'}). Relatório não enviado."
             )
             params = {
                 "from": self.settings.email_from,
@@ -742,7 +754,9 @@ class ReportService:
         total_conversions = sum(
             o.conversions for offers in offers_by_product.values() for o in offers
         )
-        if len(product_names) == 1:
+        if all_products:
+            file_label = "todos"
+        elif len(product_names) == 1:
             file_label = re.sub(r"[^A-Za-z0-9_-]", "", product_names[0]) or "produto"
         else:
             file_label = f"{len(product_names)}produtos"
