@@ -483,7 +483,7 @@ async def process_slicktext_sync_task(
             f"SlickText ignorado: país '{country}' ({country_code}) fora do "
             f"escopo {sorted(SMS_ALLOWED_COUNTRIES)} (codename: {product_codename})."
         )
-        return AbandonOutcome.skipped(f"país fora do escopo: {country_code}")
+        return AbandonOutcome.skipped(ERR_REGION)
 
     if is_empty_phone(raw_phone):
         logger.warning(

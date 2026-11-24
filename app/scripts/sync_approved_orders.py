@@ -20,6 +20,7 @@ from phonenumbers import NumberParseException, PhoneNumberFormat
 from supabase import AsyncClient, create_async_client
 
 from app.config import get_settings
+from app.utils.formatters import country_to_alpha2
 from app.services.slicktext_errors import (
     ERR_ABSTRACT,
     ERR_ABSTRACT_API,
@@ -32,6 +33,7 @@ from app.services.slicktext_errors import (
     ERR_REGION,
     ERR_WAITING_CART_PHONE,
     SLICKTEXT_REGION_ERROR,
+    foreign_phone_region,
     is_empty_phone,
     is_opted_out,
     is_supported_region,
@@ -520,13 +522,30 @@ async def process_queue_item(item: dict) -> None:
 
     formatted_phone = format_phone_local(raw_phone)
     if not formatted_phone:
-        logger.warning(
-            f"[SlickText] Telefone inválido (fila {queue_id}, produto "
-            f"{product_name}): {raw_phone!r}"
+        # venda de fora (AU, GB...) com telefone em formato local não fecha
+        # como EUA: é fora de EUA/Canadá, não telefone inválido
+        country = country_to_alpha2(
+            (event_data.get("shipping_details") or {}).get("country")
         )
+        foreign = foreign_phone_region(raw_phone, country)
+        if foreign:
+            logger.info(
+                f"[SlickText] Telefone {raw_phone!r} é de {foreign}, fora de "
+                f"EUA/Canadá (fila {queue_id}, produto {product_name})."
+            )
+        else:
+            logger.warning(
+                f"[SlickText] Telefone inválido (fila {queue_id}, produto "
+                f"{product_name}): {raw_phone!r}"
+            )
         await (
             db.table("slicktext_sync_queue")
-            .update({"status": "failed", "last_error": ERR_INVALID_PHONE})
+            .update(
+                {
+                    "status": "failed",
+                    "last_error": ERR_REGION if foreign else ERR_INVALID_PHONE,
+                }
+            )
             .eq("id", queue_id)
             .execute()
         )
@@ -693,7 +712,7 @@ async def process_single_item(queue_id: str) -> None:
         lambda: db.table("slicktext_sync_queue")
         .select(
             "id, event_id, attempts, list_id, slick_account_id, created_at, "
-            "events(customer_name, customer_email, customer_phone, "
+            "events(customer_name, customer_email, customer_phone, shipping_details, "
             "products(name, slicktext_product_lists(approved_list_id, "
             "slicktext_accounts(id))), checkouts(quantity))"
         )

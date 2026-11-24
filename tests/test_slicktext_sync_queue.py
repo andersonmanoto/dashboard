@@ -181,6 +181,33 @@ def test_telefone_vazio_e_invalido_tem_codigos_separados(env, phone, code):
     assert env["db"].updates["q-1"]["last_error"] == code
 
 
+@pytest.mark.parametrize(
+    "phone, country",
+    [
+        ("0418441401", "Australia"),  # formato local, país no checkout
+        ("61419646095", "Australia"),  # internacional sem o '+'
+        ("447770846929", None),  # sem país: lê com '+'
+    ],
+)
+def test_venda_com_telefone_estrangeiro_e_regiao(env, phone, country):
+    item = _item()
+    item["events"]["customer_phone"] = phone
+    item["events"]["shipping_details"] = {"country": country} if country else None
+    _run(item)
+    assert env["abstract_calls"] == 0
+    assert env["sent"] == []
+    assert env["db"].updates["q-1"]["status"] == "failed"
+    assert env["db"].updates["q-1"]["last_error"] == "regiao_nao_suportada"
+
+
+def test_lixo_com_pais_us_continua_invalido(env):
+    item = _item()
+    item["events"]["customer_phone"] = "9324466077"
+    item["events"]["shipping_details"] = {"country": "United States"}
+    _run(item)
+    assert env["db"].updates["q-1"]["last_error"] == "telefone_invalido"
+
+
 def test_produto_sem_lista_descarta_a_linha(env):
     item = _item()
     item["events"]["products"]["slicktext_product_lists"] = []

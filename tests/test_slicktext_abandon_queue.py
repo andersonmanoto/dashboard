@@ -228,7 +228,7 @@ def test_descartes_registram_o_motivo(phone, slicktext):
         "checkout não encontrado: sohp_front_6b_fnn1"
     )
     assert _send({**PAYLOAD, "country": "Brazil"}) == AbandonOutcome.skipped(
-        "país fora do escopo: BR"
+        "regiao_nao_suportada"
     )
     assert _send({**PAYLOAD, "phone": ""}) == AbandonOutcome.skipped("telefone_vazio")
     assert _send({**PAYLOAD, "phone": "  "}) == AbandonOutcome.skipped("telefone_vazio")
