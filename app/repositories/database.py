@@ -1438,6 +1438,51 @@ class DatabaseRepository:
             logger.error(f"Erro ao carregar produtos: {e}")
             return {}
 
+    def get_redtrack_snapshot(
+        self,
+        start_date: str,
+        end_date: str,
+        product_id: Optional[list[str]] = None,
+        network_id: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """
+        snapshot_daily_redtrack no período (1 linha por dia + oferta + criativo).
+        É a redtrack_events (conversões/IC) já somada ao custo da
+        redtrack_cost_daily — mesma fonte da tela Ativos Validados.
+        """
+
+        def build(query):
+            query = query.gte("snapshot_date", start_date).lte("snapshot_date", end_date)
+            if product_id:
+                query = query.in_("product_id", product_id)
+            if network_id:
+                query = query.in_("network_id", network_id)
+            # ordem estável: sem ela a paginação por range pode pular/duplicar linhas
+            return query.order("id")
+
+        return self._fetch_all_paginated(
+            "snapshot_daily_redtrack",
+            build,
+            select=(
+                "snapshot_date, network_id, product_id, original_offer, "
+                "current_offer, lead, microlead, rt_ad, purchases, cost_ic"
+            ),
+        )
+
+    def get_products_with_niche(self) -> Dict[str, dict]:
+        """Mapa id -> {name, niche} (nome do nicho) de todos os produtos."""
+        niches = {
+            row["id"]: row["name"]
+            for row in self._fetch_all_paginated("niches", lambda q: q, select="id, name")
+        }
+        rows = self._fetch_all_paginated(
+            "products", lambda q: q, select="id, name, niche_id"
+        )
+        return {
+            row["id"]: {"name": row["name"], "niche": niches.get(row.get("niche_id"))}
+            for row in rows
+        }
+
     def get_networks_lookup(self) -> Dict[str, str]:
         """Mapa id -> nome da plataforma/rede (paginado)."""
         try:

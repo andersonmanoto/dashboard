@@ -164,6 +164,21 @@ async def task_generate_affiliate_xlsx_report(ctx, target_emails: list[str], fil
     )
 
 
+async def task_generate_validated_assets_xlsx_report(
+    ctx, target_emails: list[str], filters: dict
+):
+    """Tarefa sob demanda disparada pela API para o relatório Ativos Validados (.xlsx)."""
+    logger.info(
+        f"[Report Worker] Pedido de Ativos Validados (.xlsx) para: {target_emails}"
+    )
+
+    report_service: ReportService = ctx["report_service"]
+
+    await report_service.generate_and_send_validated_assets_xlsx_report(
+        target_emails=target_emails, filters=filters
+    )
+
+
 async def cron_maxweb_refund_warning(ctx):
     """Executado automaticamente pelo ARQ cron"""
     logger.info("Executando Cron Diário: MaxWeb High Refund Warning")
@@ -228,6 +243,7 @@ class ReportWorkerSettings:
         task_generate_chargeback_report,
         task_generate_netrevenue_report,
         task_generate_affiliate_xlsx_report,
+        task_generate_validated_assets_xlsx_report,
         task_funnel_sync,
     ]
 

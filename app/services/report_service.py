@@ -14,6 +14,7 @@ from app.config import Settings
 from app.repositories.database import DatabaseRepository
 from app.services import affiliate_report_aggregator as aggregator
 from app.services.affiliate_xlsx_builder import build_affiliate_report_workbook
+from app.services import validated_assets_report as validated_assets
 from supabase import create_async_client
 
 
@@ -630,6 +631,152 @@ class ReportService:
         response = await asyncio.to_thread(resend.Emails.send, email_params)
         logger.success(
             f"Relatório de Afiliados (.xlsx) enviado! Resend ID: {response.get('id')}"
+        )
+        return True
+
+    async def generate_and_send_validated_assets_xlsx_report(
+        self, target_emails: list[str], filters: dict
+    ):
+        """
+        Gera o .xlsx de Ativos Validados (uma aba por produto) e envia por
+        e-mail. Falha é avisada por e-mail ao solicitante e relançada pro ARQ.
+        """
+        try:
+            return await self._generate_and_send_validated_assets_xlsx_report(
+                target_emails, filters
+            )
+        except Exception as e:
+            logger.exception(f"Falha ao gerar relatório de Ativos Validados (.xlsx): {e}")
+            period = filters.get("period", {})
+            start_date = str(period.get("start_date", "?"))
+            end_date = str(period.get("end_date", "?"))
+            try:
+                params = {
+                    "from": self.settings.email_from,
+                    "to": target_emails,
+                    "subject": f"Ativos Validados ({start_date} a {end_date}) — Falhou",
+                    "html": f"""
+                    <p>Olá,</p>
+                    <p>Não foi possível gerar o relatório de <strong>Ativos Validados</strong>
+                    para o período <strong>{start_date}</strong> a
+                    <strong>{end_date}</strong>.</p>
+                    <p>Detalhe técnico: <code>{type(e).__name__}: {e}</code></p>
+                    <p>Tente novamente em alguns minutos.</p>
+                    <br>
+                    <p>Atenciosamente,<br><strong>Tiger Offers Team</strong></p>
+                    """,
+                }
+                await asyncio.to_thread(resend.Emails.send, params)
+            except Exception:
+                logger.exception(
+                    "Falha ao notificar por e-mail o erro do relatório de Ativos Validados."
+                )
+            raise
+
+    async def _generate_and_send_validated_assets_xlsx_report(
+        self, target_emails: list[str], filters: dict
+    ):
+        period = filters["period"]
+        start_date = str(period["start_date"])
+        end_date = str(period["end_date"])
+        product_ids = [str(p) for p in filters["product_id"]]
+        network_ids = [str(n) for n in (filters.get("network_id") or [])] or None
+
+        def fetch():
+            return (
+                self.db.get_redtrack_snapshot(
+                    start_date, end_date, product_id=product_ids, network_id=network_ids
+                ),
+                self.db.get_products_with_niche(),
+                self.db.get_networks_lookup(),
+            )
+
+        rows, products, networks = await asyncio.to_thread(fetch)
+        offers_by_product = validated_assets.build_offers_by_product(
+            rows, products, networks
+        )
+
+        product_names = [
+            (products.get(pid) or {}).get("name") or pid for pid in product_ids
+        ]
+        network_label = (
+            ", ".join(networks.get(n, n) for n in network_ids)
+            if network_ids
+            else "Todas as plataformas"
+        )
+        filters_html = (
+            f"<p>Produtos: <strong>{', '.join(product_names)}</strong><br>"
+            f"Plataformas: <strong>{network_label}</strong></p>"
+        )
+
+        total_offers = sum(len(o) for o in offers_by_product.values())
+        if total_offers == 0:
+            logger.info(
+                f"Ativos Validados sem conversões ({start_date} a {end_date}, "
+                f"produtos={product_ids}). Relatório não enviado."
+            )
+            params = {
+                "from": self.settings.email_from,
+                "to": target_emails,
+                "subject": f"Ativos Validados ({start_date} a {end_date}) — Sem dados",
+                "html": f"""
+                <p>Olá,</p>
+                <p>Não foram encontradas ofertas com conversão no período
+                <strong>{start_date}</strong> a <strong>{end_date}</strong>.</p>
+                {filters_html}
+                <p>Nenhum arquivo foi gerado.</p>
+                <br>
+                <p>Atenciosamente,<br><strong>Tiger Offers Team</strong></p>
+                """,
+            }
+            await asyncio.to_thread(resend.Emails.send, params)
+            return True
+
+        xlsx_bytes = await asyncio.to_thread(
+            validated_assets.build_validated_assets_workbook,
+            product_ids,
+            offers_by_product,
+            products,
+        )
+
+        total_conversions = sum(
+            o.conversions for offers in offers_by_product.values() for o in offers
+        )
+        if len(product_names) == 1:
+            file_label = re.sub(r"[^A-Za-z0-9_-]", "", product_names[0]) or "produto"
+        else:
+            file_label = f"{len(product_names)}produtos"
+
+        email_params = {
+            "from": self.settings.email_from,
+            "to": target_emails,
+            "subject": f"Ativos Validados — {start_date} a {end_date}",
+            "html": f"""
+            <p>Olá,</p>
+            <p>O relatório de <strong>Ativos Validados</strong> referente ao período
+            <strong>{start_date}</strong> a <strong>{end_date}</strong> está pronto.</p>
+            {filters_html}
+            <p>Resumo: <strong>{total_offers} oferta(s)</strong> com conversão,
+            <strong>{total_conversions} conversão(ões)</strong> no total.</p>
+            <p>O arquivo em anexo tem uma aba por produto. Cada oferta traz logo
+            abaixo os criativos que venderam nela (agrupados — dá pra recolher
+            pelos botões de agrupamento à esquerda das linhas).</p>
+            <br>
+            <p>Atenciosamente,<br><strong>Tiger Offers Team</strong></p>
+            """,
+            "attachments": [
+                {
+                    "filename": (
+                        f"ativos_validados_{file_label}_{start_date}_a_{end_date}.xlsx"
+                    ),
+                    "content": list(xlsx_bytes),
+                }
+            ],
+        }
+
+        response = await asyncio.to_thread(resend.Emails.send, email_params)
+        logger.success(
+            f"Ativos Validados (.xlsx) enviado! Resend ID: {response.get('id')}"
         )
         return True
 

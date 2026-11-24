@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, status, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from typing import Optional
 from datetime import date
 from uuid import UUID
@@ -42,6 +42,19 @@ class AffiliateXlsxReportRequest(BaseModel):
     network_id: Optional[list[UUID]] = None
     product_id: Optional[list[UUID]] = None
     requesting_user_id: Optional[UUID] = None
+
+
+class ValidatedAssetsXlsxReportRequest(BaseModel):
+    emails: list[EmailStr] = Field(min_length=1)
+    period: DatePeriod
+    product_id: list[UUID] = Field(min_length=1)
+    network_id: Optional[list[UUID]] = None
+
+    @model_validator(mode="after")
+    def check_period(self):
+        if self.period.start_date > self.period.end_date:
+            raise ValueError("period.start_date não pode ser depois de period.end_date")
+        return self
 
 
 @router.post(
@@ -227,4 +240,43 @@ async def request_affiliate_xlsx_report(
         }
     except Exception as e:
         logger.exception(f"Erro ao enfileirar relatório de afiliados (.xlsx): {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao processar pedido.")
+
+
+@router.post(
+    "/reports/validated-assets-xlsx",
+    summary="Request Validated Assets Report (.xlsx)",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(verify_reports_key)],
+)
+async def request_validated_assets_xlsx_report(
+    request: Request, payload: ValidatedAssetsXlsxReportRequest
+):
+    """
+    Enfileira o relatório Ativos Validados em .xlsx: ofertas (VSLs) com
+    conversão e os criativos que venderam nelas, no período informado. Uma aba
+    por produto de `product_id`; `network_id` vazio = todas as plataformas.
+    O arquivo é enviado para todos os e-mails de `emails` quando pronto.
+    """
+    logger.info(f"Payload recebido para Ativos Validados (.xlsx): {payload.model_dump()}")
+    try:
+        redis_pool = getattr(request.app.state, "redis_pool", None)
+        if not redis_pool:
+            raise HTTPException(status_code=500, detail="Fila indisponível.")
+
+        job = await redis_pool.enqueue_job(
+            "task_generate_validated_assets_xlsx_report",
+            payload.emails,
+            payload.model_dump(mode="json"),
+            _queue_name="reports_queue",
+        )
+        return {
+            "status": "queued",
+            "message": "Relatório de Ativos Validados (.xlsx) na fila.",
+            "job_id": job.job_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao enfileirar relatório de Ativos Validados (.xlsx): {e}")
         raise HTTPException(status_code=500, detail="Erro interno ao processar pedido.")
