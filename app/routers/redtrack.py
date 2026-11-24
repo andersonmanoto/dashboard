@@ -65,7 +65,9 @@ async def create_redtrack_offers(
     requisição: a oferta volta com `checkout_id: null`.
     Por último, também em background, gera o kit de VSL do produto no
     psstock (PVs/{codigo_produto}/pv1 e pv1(ap)) a partir da DTC cadastrada
-    em products_urls, se ainda não existir -- ver vsl_template_auto.py.
+    em products_urls, se ainda não existir, e avisa no #monitor-sites
+    (criado com as URLs, não necessário com o motivo, ou falha) -- ver
+    vsl_template_auto.py.
     """
     try:
         service = RedTrackOfferService(settings)

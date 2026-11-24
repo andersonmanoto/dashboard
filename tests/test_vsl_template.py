@@ -250,3 +250,87 @@ def test_pick_dtc_prefere_rede_da_plataforma():
     rows = [_url("dtc", "BuyGoods", "https://bg"), _url("dtc", "DigiStore24", "https://ds")]
     assert pick_dtc_url(rows, "DigiStore24") == "https://ds"
     assert pick_dtc_url(rows, "JVZoo") == "https://bg"
+
+
+# --- aviso no #monitor-sites (vsl_template_auto) ------------------------
+
+import asyncio as _asyncio  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from app.services import vsl_template_auto  # noqa: E402
+
+_PAYLOAD = {"produto": "TitanHoney", "codigo_produto": "TtnHny", "plataforma": "buygoods", "funil": "2"}
+
+
+def test_mensagem_kit_criado_tem_urls_e_avisos():
+    text = vsl_template_auto.build_slack_message(
+        _PAYLOAD,
+        result={
+            "dtc_url": "https://titanhoney.com/dtc/",
+            "preview_url": "https://psstock.site/PVs/TtnHny/pv1/",
+            "ap_url": "https://psstock.site/PVs/TtnHny/pv1(ap)/",
+            "warnings": ["sem slogan"],
+        },
+    )
+    assert "Templates de VSL criados" in text
+    assert "Preview: https://psstock.site/PVs/TtnHny/pv1/" in text
+    assert "AutoPages: https://psstock.site/PVs/TtnHny/pv1(ap)/" in text
+    assert ":warning: sem slogan" in text
+
+
+def _run_with(monkeypatch, sales_pages=(), dtc_rows=(), generate=None):
+    enviados = []
+    monkeypatch.setattr(vsl_template_auto, "_slack", lambda s, t: enviados.append(t))
+    monkeypatch.setattr(
+        vsl_template_auto, "VslTemplateService",
+        lambda s: SimpleNamespace(_check_config=lambda: None, generate=generate),
+    )
+
+    class _AP:
+        def __init__(self, s):
+            pass
+
+        async def find_sales_pages(self, produto, codigo):
+            return list(sales_pages)
+
+    async def _urls(s, produto):
+        return list(dtc_rows)
+
+    monkeypatch.setattr(vsl_template_auto, "AutoPagesService", _AP)
+    monkeypatch.setattr(vsl_template_auto, "fetch_product_urls", _urls)
+    _asyncio.run(vsl_template_auto.generate_vsl_templates_for_offer(SimpleNamespace(), _PAYLOAD))
+    assert len(enviados) == 1
+    return enviados[0]
+
+
+def test_aviso_nao_necessario_quando_ja_tem_sales_page(monkeypatch):
+    text = _run_with(monkeypatch, sales_pages=[{"url": "https://x.com/vsl"}])
+    assert "não criados" in text
+    assert "Não foi necessário criar: o produto já tem sales page no AutoPages (https://x.com/vsl)" in text
+
+
+def test_aviso_nao_necessario_sem_dtc(monkeypatch):
+    text = _run_with(monkeypatch)
+    assert "Não foi necessário criar: produto sem URL de DTC" in text
+
+
+def test_aviso_kit_criado(monkeypatch):
+    rows = [{"type": "dtc", "url": "https://titanhoney.com/dtc/", "networks": {"name": "BuyGoods"}}]
+
+    def gen(**kw):
+        return {"preview_url": "P", "ap_url": "A", "warnings": []}
+
+    text = _run_with(monkeypatch, dtc_rows=rows, generate=gen)
+    assert "Templates de VSL criados" in text
+    assert "DTC usada: https://titanhoney.com/dtc/" in text
+
+
+def test_aviso_falha(monkeypatch):
+    rows = [{"type": "dtc", "url": "https://titanhoney.com/dtc/"}]
+
+    def gen(**kw):
+        raise RuntimeError("SFTP caiu")
+
+    text = _run_with(monkeypatch, dtc_rows=rows, generate=gen)
+    assert "Falha ao gerar templates de VSL" in text
+    assert "Erro: SFTP caiu" in text

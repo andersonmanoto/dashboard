@@ -14,13 +14,18 @@ qualquer sales page em `sales_pages` do AutoPages, não gera. E o
 /offers-rt-ap roda uma vez por funil/plataforma, então o kit é gerado só na
 primeira vez: se as pastas já existem, não mexe (pra regerar, POST
 /vsl-templates com overwrite=true). Sem as credenciais do psstock no .env,
-não faz nada. Nunca levanta erro: as offers já foram criadas.
+não gera. Nunca levanta erro: as offers já foram criadas.
+
+Em todos os casos avisa no #monitor-sites (slack_monitor_channel -- não no
+#backend-geral, que é dos afiliados): kit criado com as URLs de preview e
+AutoPages, não necessário (com o motivo) ou falha na geração.
 """
 
 import asyncio
 import re
 
 from loguru import logger
+from slack_sdk import WebClient
 from supabase import create_async_client
 
 from app.config import Settings
@@ -70,39 +75,88 @@ async def fetch_product_urls(settings: Settings, produto: str) -> list[dict] | N
     return [r for r in rows if isinstance(r, dict)]
 
 
-async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) -> None:
-    """Background task do /offers-rt-ap. Nunca levanta erro."""
+class _NaoGerado(Exception):
+    """Kit não gerado porque o produto não atende os requisitos (não é erro)."""
+
+
+def build_slack_message(
+    payload: dict,
+    *,
+    result: dict | None = None,
+    motivo: str | None = None,
+    erro: str | None = None,
+) -> str:
+    """Mensagem do #monitor-sites: kit criado (result), não necessário (motivo) ou falha (erro)."""
+    produto = payload["produto"]
+    codigo = (payload.get("codigo_produto") or "").strip() or "—"
+    contexto = (
+        f"Plataforma: {payload.get('plataforma') or '—'} | Funil: {payload.get('funil') or '—'}"
+    )
+
+    if result is not None:
+        linhas = [
+            f":white_check_mark: Templates de VSL criados — *{produto}* (`{codigo}`)",
+            contexto,
+            f"DTC usada: {result.get('dtc_url') or '—'}",
+            f"Preview: {result['preview_url']}",
+            f"AutoPages: {result['ap_url']}",
+        ]
+        linhas += [f":warning: {w}" for w in result.get("warnings") or []]
+    elif erro is not None:
+        linhas = [
+            f":x: Falha ao gerar templates de VSL — *{produto}* (`{codigo}`)",
+            contexto,
+            f"Erro: {erro}",
+            "Pra tentar de novo: POST /vsl-templates",
+        ]
+    else:
+        linhas = [
+            f":information_source: Templates de VSL não criados — *{produto}* (`{codigo}`)",
+            contexto,
+            f"Não foi necessário criar: {motivo}.",
+        ]
+    return "\n".join(linhas)
+
+
+def _slack(settings: Settings, text: str) -> None:
+    WebClient(token=settings.slack_bot_token).chat_postMessage(
+        channel=settings.slack_monitor_channel,
+        username="Backend Bot",
+        text=text,
+        unfurl_links=False,
+    )
+
+
+async def _generate(settings: Settings, payload: dict) -> dict:
+    """Gera o kit; levanta _NaoGerado se o produto não atende os requisitos."""
     produto = payload["produto"]
     codigo = (payload.get("codigo_produto") or "").strip()
+
+    service = VslTemplateService(settings)
     try:
-        service = VslTemplateService(settings)
-        try:
-            service._check_config()
-        except VslTemplateConfigError as e:
-            logger.warning(f"[vsl-templates] {produto}: kit não gerado -- {e}")
-            return
+        service._check_config()
+    except VslTemplateConfigError as e:
+        raise _NaoGerado(f"credenciais do psstock não configuradas ({e})")
 
-        if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", codigo):
-            raise ValueError(f"codigo_produto {codigo!r} inválido pra nome de pasta")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", codigo):
+        raise _NaoGerado(f"codigo_produto {codigo!r} inválido pra nome de pasta")
 
-        # Só produto novo: se já existe qualquer sales page dele no AutoPages
-        # (em qualquer plataforma), aborta.
-        sales_pages = await AutoPagesService(settings).find_sales_pages(produto, codigo)
-        if sales_pages:
-            logger.info(
-                f"[vsl-templates] {produto} ({codigo}): kit não gerado -- produto já "
-                f"tem sales page no AutoPages ({sales_pages[0]['url']})"
-            )
-            return
+    # Só produto novo: se já existe qualquer sales page dele no AutoPages
+    # (em qualquer plataforma), aborta.
+    sales_pages = await AutoPagesService(settings).find_sales_pages(produto, codigo)
+    if sales_pages:
+        raise _NaoGerado(
+            f"o produto já tem sales page no AutoPages ({sales_pages[0]['url']})"
+        )
 
-        rows = await fetch_product_urls(settings, produto) or []
+    rows = await fetch_product_urls(settings, produto) or []
+    dtc_url = pick_dtc_url(rows, payload["plataforma"])
+    if not dtc_url:
+        raise _NaoGerado(
+            "produto sem URL de DTC em products_urls (type='dtc') no dashboard"
+        )
 
-        dtc_url = pick_dtc_url(rows, payload["plataforma"])
-        if not dtc_url:
-            raise ValueError(
-                "produto sem URL de DTC em products_urls (type='dtc') no dashboard"
-            )
-
+    try:
         result = await asyncio.to_thread(
             service.generate,
             codigo=codigo,
@@ -117,15 +171,36 @@ async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) ->
             dry_run=False,
         )
     except VslTemplateConflict:
-        logger.info(f"[vsl-templates] {codigo}: kit já existe no psstock, mantido.")
-        return
+        raise _NaoGerado(f"o kit já existe no psstock (PVs/{codigo}/pv1), mantido")
+    return {**result, "dtc_url": dtc_url}
+
+
+async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) -> None:
+    """Background task do /offers-rt-ap. Nunca levanta erro.
+
+    Sempre avisa no Slack (#monitor-sites, slack_monitor_channel): kit criado
+    (com as URLs), não necessário (com o motivo) ou falha.
+    """
+    produto = payload["produto"]
+    codigo = (payload.get("codigo_produto") or "").strip()
+    try:
+        result = await _generate(settings, payload)
+    except _NaoGerado as e:
+        logger.info(f"[vsl-templates] {produto} ({codigo}): kit não gerado -- {e}")
+        text = build_slack_message(payload, motivo=str(e))
     except Exception as e:
         logger.error(f"[vsl-templates] {produto} ({codigo}): falha ao gerar kit: {e}")
-        return
+        text = build_slack_message(payload, erro=str(e))
+    else:
+        logger.info(
+            f"[vsl-templates] {codigo}: kit gerado -- preview {result['preview_url']} "
+            f"| AutoPages {result['ap_url']}"
+        )
+        for w in result["warnings"]:
+            logger.warning(f"[vsl-templates] {codigo}: {w}")
+        text = build_slack_message(payload, result=result)
 
-    logger.info(
-        f"[vsl-templates] {codigo}: kit gerado -- preview {result['preview_url']} "
-        f"| AutoPages {result['ap_url']}"
-    )
-    for w in result["warnings"]:
-        logger.warning(f"[vsl-templates] {codigo}: {w}")
+    try:
+        await asyncio.to_thread(_slack, settings, text)
+    except Exception as e:
+        logger.error(f"[vsl-templates] falha ao avisar no Slack: {e}")
