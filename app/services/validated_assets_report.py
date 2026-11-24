@@ -8,9 +8,10 @@ Ativos Validados do dashboard lê, e os números seguem as regras da tela:
 
 - oferta = produto + plataforma + Sprint/OT original + atual + lead + microlead
 - Conversões = soma de purchases
-- Custo de IC = média simples do cost_ic das linhas diárias do grupo (nulo
-  conta como 0). Conferido em 24/11 contra a tela (BullSodaRise S410 L1 =
-  $19.26, criativo S410EDC19FBYTR2AD19 v1 = $31.5).
+- Custo de IC = média simples do cost_ic das linhas diárias do grupo,
+  ignorando nulos (dia sem IC). Conferido em 24/11 contra a tela
+  (BullSodaRise S410 L1 = $19.26, VigorTitan OT356 L1 = $33.18 — este tem
+  um dia com cost_ic nulo, que não entra na média).
 """
 
 import io
@@ -83,9 +84,11 @@ class Offer:
 
 
 def _mean_cost_ic(rows: list[dict]) -> float:
-    if not rows:
+    """Média do cost_ic diário ignorando nulos (dia sem IC), como a tela faz."""
+    values = [float(r["cost_ic"]) for r in rows if r.get("cost_ic") is not None]
+    if not values:
         return 0.0
-    return round(sum(float(r.get("cost_ic") or 0) for r in rows) / len(rows), 2)
+    return round(sum(values) / len(values), 2)
 
 
 def build_offers_by_product(
