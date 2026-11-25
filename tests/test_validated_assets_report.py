@@ -21,8 +21,8 @@ OFFER = {
 RT_AD = "S410EDC19FBYTR2AD19 v1"
 
 
-def _snapshot(rt_ad, purchases, cost_ic=10.0):
-    return {**OFFER, "rt_ad": rt_ad, "purchases": purchases, "cost_ic": cost_ic}
+def _snapshot(rt_ad, purchases):
+    return {**OFFER, "rt_ad": rt_ad, "purchases": purchases}
 
 
 def _sale(sub12, rt_ad=RT_AD, campaign="G1 | S410 | FB", **kw):
@@ -44,7 +44,7 @@ def test_sub12_por_criativo_mais_vendas_primeiro():
     )
     (offer,) = offers["p1"]
     by_name = {c.name: c for c in offer.creatives}
-    assert by_name[RT_AD].sub12 == ["BK102", "AD03_meta", "BK36"]
+    assert by_name[RT_AD].sub12 == [("BK102", 2), ("AD03_meta", 1), ("BK36", 1)]
     assert by_name["sem-sub12"].sub12 == []
 
 
@@ -53,16 +53,27 @@ def test_sub12_opcional():
     assert offers["p1"][0].creatives[0].sub12 == []
 
 
-def test_coluna_click_sub_12_no_xlsx():
-    offers = build_offers_by_product(
-        [_snapshot(RT_AD, 2), _snapshot("sem-sub12", 1)],
-        PRODUCTS,
-        NETWORKS,
-        [_sale("BK36"), _sale("BK102")],
-    )
+def _sheet(snapshots, sales):
+    offers = build_offers_by_product(snapshots, PRODUCTS, NETWORKS, sales)
     ws = load_workbook(io.BytesIO(build_validated_assets_workbook(["p1"], offers, PRODUCTS))).active
-    col = COLUMNS.index("clickSub12") + 1
-    assert ws.cell(row=1, column=col).value == "clickSub12"
-    assert ws.cell(row=2, column=col).value is None  # linha da oferta
-    assert ws.cell(row=3, column=col).value == "BK102, BK36"
-    assert ws.cell(row=4, column=col).value == "—"
+    return [list(r) for r in ws.iter_rows(values_only=True)]
+
+
+def test_sem_coluna_custo_de_ic():
+    assert "Custo de IC" not in COLUMNS
+
+
+def test_um_sub12_por_linha_com_criativo_repetido():
+    rows = _sheet(
+        [_snapshot(RT_AD, 4), _snapshot("sem-sub12", 1)],
+        [_sale("BK102"), _sale("BK102"), _sale("BK36")],  # 1 venda de RT_AD sem sub12
+    )
+    crit, sub, conv = (COLUMNS.index(c) for c in ("Criativo", "clickSub12", "Conversões"))
+    assert rows[0] == COLUMNS
+    assert rows[1][sub] is None and rows[1][conv] == 5  # linha da oferta
+    assert [(r[crit], r[sub], r[conv]) for r in rows[2:]] == [
+        (RT_AD, "BK102", 2),
+        (RT_AD, "BK36", 1),
+        (RT_AD, "—", 1),  # resto sem sub12, soma bate com o criativo
+        ("sem-sub12", "—", 1),
+    ]

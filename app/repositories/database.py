@@ -1524,7 +1524,7 @@ class DatabaseRepository:
             build,
             select=(
                 "snapshot_date, network_id, product_id, original_offer, "
-                "current_offer, lead, microlead, rt_ad, purchases, cost_ic"
+                "current_offer, lead, microlead, rt_ad, purchases"
             ),
         )
 

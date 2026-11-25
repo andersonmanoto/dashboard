@@ -2,20 +2,18 @@
 Relatório Ativos Validados (.xlsx): ofertas (VSLs) com conversão e os
 criativos que venderam nelas, uma aba por produto.
 
-Fonte: snapshot_daily_redtrack — conversões/IC vêm da redtrack_events e o custo
-da redtrack_cost_daily (a events não tem custo). É a mesma tabela que a tela
-Ativos Validados do dashboard lê, e os números seguem as regras da tela:
+Fonte: snapshot_daily_redtrack — a mesma tabela que a tela Ativos Validados
+do dashboard lê, e os números seguem as regras da tela:
 
 - oferta = produto + plataforma + Sprint/OT original + atual + lead + microlead
 - Conversões = soma de purchases
-- Custo de IC = média simples do cost_ic das linhas diárias do grupo,
-  ignorando nulos (dia sem IC). Conferido em 24/11 contra a tela
-  (BullSodaRise S410 L1 = $19.26, VigorTitan OT356 L1 = $33.18 — este tem
-  um dia com cost_ic nulo, que não entra na média).
 - clickSub12 = valores do sub12 (redtrack_events.click_sub_12) das vendas do
-  criativo, só informativo: o criativo continua sendo o rt_ad e o custo não
-  é separado por sub12. Na maioria das vendas o sub12 é o criativo de verdade
-  ("BK36") enquanto o rt_ad vem herdado ("S410EDC19FBYTR2AD19 v1").
+  criativo, um por linha (o criativo se repete), com as vendas de cada um.
+  Vendas do criativo sem sub12 ficam numa linha "—", pra soma das linhas
+  bater com o total do criativo. Na maioria das vendas o sub12 é o criativo
+  de verdade ("BK36") enquanto o rt_ad vem herdado ("S410EDC19FBYTR2AD19 v1").
+- Custo de IC saiu do relatório a pedido (25/11): não fazia sentido no
+  relatório (continua na tela).
 """
 
 import io
@@ -29,7 +27,6 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.services.affiliate_xlsx_builder import (
-    CURRENCY_FMT,
     INTEGER_FMT,
     TOTALS_FONT,
     _write_header,
@@ -46,7 +43,6 @@ COLUMNS = [
     "Criativo",
     "clickSub12",
     "Conversões",
-    "Custo de IC",
 ]
 COLUMN_WIDTHS = {
     "Produto": 20,
@@ -59,7 +55,6 @@ COLUMN_WIDTHS = {
     "Criativo": 60,
     "clickSub12": 40,
     "Conversões": 13,
-    "Custo de IC": 13,
 }
 OFFER_FILL = PatternFill("solid", fgColor="E5E7EB")
 CREATIVE_FONT = Font(color="374151")
@@ -72,8 +67,19 @@ _INVALID_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
 class Creative:
     name: str
     conversions: int
-    cost_ic: float | None  # None = nenhum dia com IC (tela mostra "—")
-    sub12: list[str] = field(default_factory=list)  # mais vendas primeiro
+    # (sub12, vendas), mais vendas primeiro
+    sub12: list[tuple[str, int]] = field(default_factory=list)
+
+    def sub12_lines(self) -> list[tuple[str, int]]:
+        """
+        Linhas do xlsx: um sub12 por linha + o resto das vendas sem sub12
+        como "—". Sem sub12 nenhum → uma linha "—" com todas as vendas.
+        """
+        lines = list(self.sub12)
+        rest = self.conversions - sum(n for _, n in lines)
+        if rest > 0 or not lines:
+            lines.append((EMPTY, max(rest, 0) if lines else self.conversions))
+        return lines
 
 
 @dataclass
@@ -86,7 +92,6 @@ class Offer:
     lead: str
     microlead: str
     conversions: int
-    cost_ic: float | None
     creatives: list[Creative] = field(default_factory=list)
 
 
@@ -95,17 +100,6 @@ def product_name(product_id: str | None, products: dict[str, dict]) -> str:
     if not product_id:
         return "Sem produto"
     return (products.get(product_id) or {}).get("name") or str(product_id)
-
-
-def _mean_cost_ic(rows: list[dict]) -> float | None:
-    """
-    Média do cost_ic diário ignorando nulos (dia sem IC), como a tela faz.
-    Todos nulos → None (a tela mostra "—").
-    """
-    values = [float(r["cost_ic"]) for r in rows if r.get("cost_ic") is not None]
-    if not values:
-        return None
-    return round(sum(values) / len(values), 2)
 
 
 def _creative_key(row: dict) -> tuple:
@@ -121,9 +115,9 @@ def _creative_key(row: dict) -> tuple:
     )
 
 
-def sub12_by_creative(sub12_rows: list[dict]) -> dict[tuple, list[str]]:
+def sub12_by_creative(sub12_rows: list[dict]) -> dict[tuple, list[tuple[str, int]]]:
     """
-    (oferta + criativo) → valores de click_sub_12 das vendas, do que mais
+    (oferta + criativo) → [(click_sub_12, vendas)], do que mais
     vendeu pro que menos (empate em ordem alfabética). Backredirect fica de
     fora, como na snapshot.
     """
@@ -135,7 +129,7 @@ def sub12_by_creative(sub12_rows: list[dict]) -> dict[tuple, list[str]]:
         if sub12:
             counts[_creative_key(row)][sub12] += 1
     return {
-        key: [v for v, _ in sorted(c.items(), key=lambda kv: (-kv[1], kv[0]))]
+        key: sorted(c.items(), key=lambda kv: (-kv[1], kv[0]))
         for key, c in counts.items()
     }
 
@@ -174,7 +168,6 @@ def build_offers_by_product(
             Creative(
                 name=name or "(sem criativo)",
                 conversions=sum(int(r.get("purchases") or 0) for r in c_rows),
-                cost_ic=_mean_cost_ic(c_rows),
                 sub12=sub12.get((*key, name), []),
             )
             for name, c_rows in creative_rows.items()
@@ -193,7 +186,6 @@ def build_offers_by_product(
                 lead=lead or EMPTY,
                 microlead=microlead or EMPTY,
                 conversions=conversions,
-                cost_ic=_mean_cost_ic(group),
                 creatives=creatives,
             )
         )
@@ -223,11 +215,6 @@ def _write_cells(ws: Worksheet, row: int, values: dict, font=None, fill=None) ->
         cell = ws.cell(row=row, column=col_idx, value=values.get(col_name))
         if col_name == "Conversões":
             cell.number_format = INTEGER_FMT
-        elif col_name == "Custo de IC":
-            if cell.value is None:
-                cell.value = EMPTY
-            else:
-                cell.number_format = CURRENCY_FMT
         if col_name not in ("Criativo", "clickSub12"):
             cell.alignment = Alignment(horizontal="center")
         if font:
@@ -267,26 +254,25 @@ def _write_product_sheet(ws: Worksheet, offers: list[Offer]) -> None:
                 "Microlead": offer.microlead,
                 "Criativo": f"{len(offer.creatives)} criativo(s)",
                 "Conversões": offer.conversions,
-                "Custo de IC": offer.cost_ic,
             },
             font=TOTALS_FONT,
             fill=OFFER_FILL,
         )
         row += 1
         for creative in offer.creatives:
-            _write_cells(
-                ws,
-                row,
-                {
-                    "Criativo": creative.name,
-                    "clickSub12": ", ".join(creative.sub12) or EMPTY,
-                    "Conversões": creative.conversions,
-                    "Custo de IC": creative.cost_ic,
-                },
-                font=CREATIVE_FONT,
-            )
-            ws.row_dimensions[row].outlineLevel = 1
-            row += 1
+            for sub12, conversions in creative.sub12_lines():
+                _write_cells(
+                    ws,
+                    row,
+                    {
+                        "Criativo": creative.name,
+                        "clickSub12": sub12,
+                        "Conversões": conversions,
+                    },
+                    font=CREATIVE_FONT,
+                )
+                ws.row_dimensions[row].outlineLevel = 1
+                row += 1
 
 
 def build_validated_assets_workbook(
