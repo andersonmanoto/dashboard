@@ -340,3 +340,12 @@ def test_venda_sem_telefone_no_pedido_cai_no_carrinho(env):
     assert db.cart_lookups == [("customer_email", ["John@Mail.com", "john@mail.com"])]
     assert "ev-1" not in db.updates
     assert db.updates["q-1"]["status"] == "synced"
+
+
+def test_linha_de_lista_sem_telefone_tambem_usa_o_carrinho(env):
+    # 2ª conta: o telefone do carrinho não ficou no evento, então a linha da
+    # lista 200 também precisa buscar (antes caía em telefone_vazio)
+    env["db"].carts = [{"customer_phone": "+1 202-555-0123"}]
+    _run(_sem_telefone(minutes_ago=20, id="q-2", list_id="200", slick_account_id="acc-2"))
+    assert env["sent"] == [("200", "2")]
+    assert env["db"].updates["q-2"]["status"] == "synced"

@@ -520,7 +520,9 @@ async def process_queue_item(item: dict) -> None:
         return
 
     # Validação
-    if is_empty_phone(raw_phone) and not list_id:
+    # linha de lista (list_id) também busca: o telefone do carrinho não fica
+    # gravado no evento, só na linha que achou
+    if is_empty_phone(raw_phone):
         try:
             raw_phone = await phone_from_order_contact(db, event_data.get("order_id"))
             if raw_phone:
