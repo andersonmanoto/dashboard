@@ -138,6 +138,13 @@ def test_build_event_row():
     assert row["microlead"] is None
     assert (row["product_id"], row["network_id"]) == (ALPHAEREC_ID, BUYGOODS_ID)
     assert row["payout"] == 240
+    assert row["click_sub_12"] is None  # sem sub12 na conversão
+
+
+@pytest.mark.parametrize("sub12, expected", [("BK36", "BK36"), (" AD03_meta ", "AD03_meta"), ("", None), (None, None)])
+def test_build_event_row_click_sub_12(sub12, expected):
+    row = build_event_row({"id": "x", "type": "Purchase", "sub12": sub12}, CATALOG)
+    assert row["click_sub_12"] == expected
 
 
 def test_build_cost_rows_sums_and_skips_empty():

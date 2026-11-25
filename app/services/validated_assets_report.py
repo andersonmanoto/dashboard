@@ -12,11 +12,15 @@ Ativos Validados do dashboard lê, e os números seguem as regras da tela:
   ignorando nulos (dia sem IC). Conferido em 24/11 contra a tela
   (BullSodaRise S410 L1 = $19.26, VigorTitan OT356 L1 = $33.18 — este tem
   um dia com cost_ic nulo, que não entra na média).
+- clickSub12 = valores do sub12 (redtrack_events.click_sub_12) das vendas do
+  criativo, só informativo: o criativo continua sendo o rt_ad e o custo não
+  é separado por sub12. Na maioria das vendas o sub12 é o criativo de verdade
+  ("BK36") enquanto o rt_ad vem herdado ("S410EDC19FBYTR2AD19 v1").
 """
 
 import io
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from openpyxl import Workbook
@@ -40,6 +44,7 @@ COLUMNS = [
     "Lead",
     "Microlead",
     "Criativo",
+    "clickSub12",
     "Conversões",
     "Custo de IC",
 ]
@@ -52,6 +57,7 @@ COLUMN_WIDTHS = {
     "Lead": 9,
     "Microlead": 12,
     "Criativo": 60,
+    "clickSub12": 40,
     "Conversões": 13,
     "Custo de IC": 13,
 }
@@ -67,6 +73,7 @@ class Creative:
     name: str
     conversions: int
     cost_ic: float | None  # None = nenhum dia com IC (tela mostra "—")
+    sub12: list[str] = field(default_factory=list)  # mais vendas primeiro
 
 
 @dataclass
@@ -101,12 +108,46 @@ def _mean_cost_ic(rows: list[dict]) -> float | None:
     return round(sum(values) / len(values), 2)
 
 
+def _creative_key(row: dict) -> tuple:
+    """Oferta + criativo, as mesmas colunas nas duas tabelas."""
+    return (
+        row.get("product_id"),
+        row.get("network_id"),
+        row.get("original_offer"),
+        row.get("current_offer"),
+        row.get("lead"),
+        row.get("microlead"),
+        row.get("rt_ad") or "",
+    )
+
+
+def sub12_by_creative(sub12_rows: list[dict]) -> dict[tuple, list[str]]:
+    """
+    (oferta + criativo) → valores de click_sub_12 das vendas, do que mais
+    vendeu pro que menos (empate em ordem alfabética). Backredirect fica de
+    fora, como na snapshot.
+    """
+    counts: dict[tuple, Counter] = defaultdict(Counter)
+    for row in sub12_rows:
+        if (row.get("campaign") or "").strip().lower().startswith("backredirect"):
+            continue
+        sub12 = (row.get("click_sub_12") or "").strip()
+        if sub12:
+            counts[_creative_key(row)][sub12] += 1
+    return {
+        key: [v for v, _ in sorted(c.items(), key=lambda kv: (-kv[1], kv[0]))]
+        for key, c in counts.items()
+    }
+
+
 def build_offers_by_product(
     rows: list[dict],
     products: dict[str, dict],
     networks: dict[str, str],
+    sub12_rows: list[dict] | None = None,
 ) -> dict[str, list[Offer]]:
     """Agrupa as linhas diárias em ofertas → criativos, por product_id."""
+    sub12 = sub12_by_creative(sub12_rows or [])
     offer_rows: dict[tuple, list[dict]] = defaultdict(list)
     for row in rows:
         key = (
@@ -134,6 +175,7 @@ def build_offers_by_product(
                 name=name or "(sem criativo)",
                 conversions=sum(int(r.get("purchases") or 0) for r in c_rows),
                 cost_ic=_mean_cost_ic(c_rows),
+                sub12=sub12.get((*key, name), []),
             )
             for name, c_rows in creative_rows.items()
         ]
@@ -186,7 +228,7 @@ def _write_cells(ws: Worksheet, row: int, values: dict, font=None, fill=None) ->
                 cell.value = EMPTY
             else:
                 cell.number_format = CURRENCY_FMT
-        if col_name != "Criativo":
+        if col_name not in ("Criativo", "clickSub12"):
             cell.alignment = Alignment(horizontal="center")
         if font:
             cell.font = font
@@ -237,6 +279,7 @@ def _write_product_sheet(ws: Worksheet, offers: list[Offer]) -> None:
                 row,
                 {
                     "Criativo": creative.name,
+                    "clickSub12": ", ".join(creative.sub12) or EMPTY,
                     "Conversões": creative.conversions,
                     "Custo de IC": creative.cost_ic,
                 },

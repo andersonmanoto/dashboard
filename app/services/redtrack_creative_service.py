@@ -151,6 +151,8 @@ def build_event_row(conversion: dict, catalog: CatalogLookup) -> dict:
         "lead": lead,
         "vturb_video_id": parse_vturb_video_id(conversion.get("landing")),
         "microlead": parse_microlead(conversion.get("campaign")),
+        # "clickSub12" da tela Conversions; vazio vem como "" (a tela mostra 0)
+        "click_sub_12": (conversion.get("sub12") or "").strip() or None,
         "product_id": product_id,
         "network_id": network_id,
         "payout": conversion.get("payout") or 0,
