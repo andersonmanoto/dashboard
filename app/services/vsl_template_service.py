@@ -42,6 +42,11 @@ from app.config import Settings
 KIT_DIR = Path(__file__).resolve().parents[2] / "templates" / "vsl_kit"
 
 POTES = ("2b", "3b", "6b")
+MODOS = ("preview", "ap", "aff")
+# Kits que generate() sobe: "pv" = preview + (ap) do AutoPages em
+# PVs/{codigo}/{pagina}[(ap)]; "aff" = template da Aff Page em
+# PVs/{codigo}/aff/{pagina}(ap) (o /criar-aff-page do full_midias lê dali).
+KITS = ("pv", "aff")
 # Ordem dos /click/N do RedTrack no AutoPages (segue a quantidade de potes,
 # não a posição na tela): 1=2b, 2=3b, 3=6b.
 AP_CLICK = {"2b": 1, "3b": 2, "6b": 3}
@@ -296,21 +301,36 @@ _env = Environment(
 )
 
 
+def _link(modo: str, pote: str) -> str:
+    if modo == "ap":
+        return f"https://rt.{{{{ estrutura.dominio }}}}/click/{AP_CLICK[pote]}"
+    if modo == "aff":
+        # Mesma ordem dos /click/N: linkOferta1=2b, 2=3b, 3=6b (o /criar-aff-page
+        # do full_midias preenche com linksCheckout[0].linkOferta1..3).
+        return f"{{{{ aff_page.linkOferta{AP_CLICK[pote]} }}}}"
+    return "#/"
+
+
 def render_kit(
     dtc: DtcData,
     *,
-    ap: bool,
+    modo: str,
     vturb_embed: str,
     vturb_speed_script: str,
     pitch_seconds: int,
 ) -> dict[str, bytes]:
-    """Arquivos de uma pasta do kit: {caminho relativo: conteúdo}."""
-    links = {
-        p: (f"https://rt.{{{{ estrutura.dominio }}}}/click/{AP_CLICK[p]}" if ap else "#/")
-        for p in POTES
-    }
+    """Arquivos de uma pasta do kit: {caminho relativo: conteúdo}.
+
+    modo: "preview" (área de edição rápida), "ap" (Jinja2 do AutoPages,
+    `estrutura.*`) ou "aff" (Jinja2 da Aff Page do /criar-aff-page do
+    full_midias, `aff_page.*`: sem pixel do Meta, campoLivre nem script do
+    RedTrack -- igual a PVs/{VpMnd,TtnHny}/aff/pv1(ap)).
+    """
+    if modo not in MODOS:
+        raise ValueError(f"modo {modo!r} inválido (use {MODOS})")
+    links = {p: _link(modo, p) for p in POTES}
     ctx = {
-        "ap": ap,
+        "modo": modo,
         "nome": dtc.nome,
         "nome_com_slogan": f"{dtc.nome} — {dtc.slogan}" if dtc.slogan else dtc.nome,
         "cor_primaria": dtc.cor_primaria,
@@ -384,8 +404,8 @@ class VslTemplateService:
         vturb_embed: str,
         vturb_speed_script: str,
         pitch_seconds: int,
-    ) -> tuple[DtcData, dict[str, bytes], dict[str, bytes]]:
-        """Baixa a DTC e devolve (dados extraídos, arquivos do preview, arquivos do ap)."""
+    ) -> tuple[DtcData, dict[str, dict[str, bytes]]]:
+        """Baixa a DTC e devolve (dados extraídos, {modo: arquivos da pasta})."""
         base_url = dtc_url if dtc_url.endswith("/") else dtc_url + "/"
         with httpx.Client(timeout=30, follow_redirects=True, headers=HTTP_HEADERS) as client:
             html = self._fetch(client, base_url).decode("utf-8", errors="replace")
@@ -400,16 +420,16 @@ class VslTemplateService:
                 raw = self._fetch(client, url) if url else IMAGENS_PADRAO[stem].read_bytes()
                 imagens[f"images/pots/{stem}.webp"] = to_webp(raw, largura)
 
-        def render(ap: bool) -> dict[str, bytes]:
+        def render(modo: str) -> dict[str, bytes]:
             return render_kit(
                 dtc,
-                ap=ap,
+                modo=modo,
                 vturb_embed=vturb_embed,
                 vturb_speed_script=vturb_speed_script,
                 pitch_seconds=pitch_seconds,
             ) | imagens
 
-        return dtc, render(False), render(True)
+        return dtc, {modo: render(modo) for modo in MODOS}
 
     # --- SFTP ---
 
@@ -490,19 +510,40 @@ class VslTemplateService:
             sftp.mkdir(p)
 
     def upload(
-        self, codigo: str, pastas: dict[str, dict[str, bytes]], overwrite: bool
-    ) -> None:
-        """pastas: {nome_da_pasta: {caminho relativo: conteúdo}}."""
+        self,
+        codigo: str,
+        kits: dict[str, dict[str, dict[str, bytes]]],
+        overwrite: bool,
+    ) -> list[str]:
+        """kits: {kit: {pasta: {caminho relativo: conteúdo}}}.
+
+        Sem overwrite, kit com alguma pasta já existente no psstock é pulado
+        (o resto sobe); se todos já existem, levanta VslTemplateConflict.
+        Devolve os kits pulados.
+        """
         base = posixpath.join(self.settings.psstock_pvs_dir, codigo)
         sftp, transport = self._connect()
         try:
+            pulados: dict[str, list[str]] = {}
             if not overwrite:
-                existentes = [p for p in pastas if self._exists(sftp, posixpath.join(base, p))]
-                if existentes:
+                for kit, pastas in kits.items():
+                    existentes = [
+                        p for p in pastas if self._exists(sftp, posixpath.join(base, p))
+                    ]
+                    if existentes:
+                        pulados[kit] = existentes
+                if len(pulados) == len(kits):
+                    todas = [p for ps in pulados.values() for p in ps]
                     raise VslTemplateConflict(
-                        f"Já existe {codigo}/{', '.join(existentes)} no psstock — "
+                        f"Já existe {codigo}/{', '.join(todas)} no psstock — "
                         "use overwrite=true pra substituir."
                     )
+            pastas = {
+                pasta: arquivos
+                for kit, ps in kits.items()
+                if kit not in pulados
+                for pasta, arquivos in ps.items()
+            }
             for pasta, arquivos in pastas.items():
                 for rel, conteudo in arquivos.items():
                     remote = posixpath.join(base, pasta, rel)
@@ -517,6 +558,7 @@ class VslTemplateService:
                 logger.info(
                     f"[vsl-templates] {codigo}/{pasta}: {len(arquivos)} arquivos enviados"
                 )
+            return list(pulados)
         finally:
             sftp.close()
             transport.close()
@@ -534,11 +576,19 @@ class VslTemplateService:
         pitch_seconds: int,
         overwrite: bool,
         dry_run: bool,
+        kits: tuple[str, ...] | list[str] = ("pv",),
     ) -> dict:
-        """Bloqueante (HTTP + Pillow + SFTP) — chamar via asyncio.to_thread."""
+        """Bloqueante (HTTP + Pillow + SFTP) — chamar via asyncio.to_thread.
+
+        kits: "pv" (preview + (ap) do AutoPages) e/ou "aff" (Aff Page). Sem
+        overwrite, kit cuja pasta já existe é mantido e volta em `ja_existiam`.
+        """
+        kits = [k for k in KITS if k in kits]
+        if not kits:
+            raise VslTemplateError(f"Nenhum kit pedido (use {KITS}).")
         if not dry_run:
             self._check_config()  # falha antes de baixar/converter tudo
-        dtc, preview, ap = self.build(
+        dtc, arquivos = self.build(
             dtc_url,
             nome=nome,
             slogan=slogan,
@@ -547,14 +597,26 @@ class VslTemplateService:
             pitch_seconds=pitch_seconds,
         )
         pasta_ap = f"{pagina}(ap)"
+        pasta_aff = f"aff/{pagina}(ap)"
+        pastas_por_kit = {
+            "pv": {pagina: arquivos["preview"], pasta_ap: arquivos["ap"]},
+            "aff": {pasta_aff: arquivos["aff"]},
+        }
+        ja_existiam: list[str] = []
         if not dry_run:
-            self.upload(codigo, {pagina: preview, pasta_ap: ap}, overwrite)
+            ja_existiam = self.upload(
+                codigo, {k: pastas_por_kit[k] for k in kits}, overwrite
+            )
+        criados = [k for k in kits if k not in ja_existiam]
 
         base_url = self.settings.psstock_pvs_url.rstrip("/")
         return {
             "status": "dry_run" if dry_run else "uploaded",
-            "preview_url": f"{base_url}/{codigo}/{pagina}/",
-            "ap_url": f"{base_url}/{codigo}/{pasta_ap}/",
+            "kits": criados,
+            "ja_existiam": ja_existiam,
+            "preview_url": f"{base_url}/{codigo}/{pagina}/" if "pv" in criados else None,
+            "ap_url": f"{base_url}/{codigo}/{pasta_ap}/" if "pv" in criados else None,
+            "aff_url": f"{base_url}/{codigo}/{pasta_aff}/" if "aff" in criados else None,
             "extraido_da_dtc": {
                 "nome": dtc.nome,
                 "slogan": dtc.slogan,
@@ -563,6 +625,6 @@ class VslTemplateService:
                 "potes": {p: vars(v) for p, v in dtc.potes.items()},
                 "tracking": bool(dtc.tracking_scripts),
             },
-            "arquivos": sorted(preview),
+            "arquivos": sorted(arquivos["preview"]),
             "warnings": dtc.warnings,
         }

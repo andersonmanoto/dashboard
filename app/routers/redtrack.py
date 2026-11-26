@@ -63,11 +63,13 @@ async def create_redtrack_offers(
     (pelo `checkout_id` de cada oferta ou, sem ele, pelo checkout_code da
     URL) -- ver checkout_offer_link.py. Falha nesse vínculo não derruba a
     requisição: a oferta volta com `checkout_id: null`.
-    Por último, também em background, gera o kit de VSL do produto no
-    psstock (PVs/{codigo_produto}/pv1 e pv1(ap)) a partir da DTC cadastrada
-    em products_urls, se ainda não existir, e avisa no #monitor-sites
-    (criado com as URLs, não necessário com o motivo, ou falha) -- ver
-    vsl_template_auto.py.
+    Por último, também em background, gera os templates do produto no
+    psstock a partir da DTC cadastrada em products_urls: o kit de PV
+    (PVs/{codigo_produto}/pv1 e pv1(ap)) se o produto não tem nada em
+    sales_pages do AutoPages, e o da Aff Page (PVs/{codigo_produto}/aff/pv1(ap))
+    se não tem nada em sales_page_aff. Pasta que já existe é mantida. Avisa
+    no #monitor-sites (criado com as URLs, não necessário com o motivo, ou
+    falha) -- ver vsl_template_auto.py.
     """
     try:
         service = RedTrackOfferService(settings)

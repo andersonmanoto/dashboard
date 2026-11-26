@@ -3,16 +3,19 @@ Gera o kit de VSL (preview + AutoPages) no psstock automaticamente quando um
 produto chega pelo POST /offers-rt-ap -- roda em background, depois das
 offers criadas e do aviso no Slack.
 
-  - pasta:  PVs/{codigo_produto}/pv1  e  pv1(ap)
+  - pastas: PVs/{codigo_produto}/pv1  e  pv1(ap)   (kit de PV)
+            PVs/{codigo_produto}/aff/pv1(ap)       (kit de Aff Page, lido pelo
+            /criar-aff-page do full_midias)
   - DTC:    products_urls (type='dtc') do produto no dashboard, preferindo a
             URL da rede da `plataforma` do payload (cada rede tem as próprias
             URLs) e caindo pra qualquer DTC do produto se essa rede não tiver
   - vídeo/pitch do preview: os padrões (os do VapoMend)
 
-Só pra produto novo: se o produto (por nome ou codigo_produto) já tem
-qualquer sales page em `sales_pages` do AutoPages, não gera. E o
-/offers-rt-ap roda uma vez por funil/plataforma, então o kit é gerado só na
-primeira vez: se as pastas já existem, não mexe (pra regerar, POST
+Só pra produto novo, kit a kit (por nome ou codigo_produto, em qualquer
+plataforma): o de PV só se o produto não tem nada em `sales_pages` do
+AutoPages; o de Aff Page só se não tem nada em `sales_page_aff`. E o
+/offers-rt-ap roda uma vez por funil/plataforma, então cada kit é gerado só
+na primeira vez: se a pasta já existe, não mexe (pra regerar, POST
 /vsl-templates com overwrite=true). Sem as credenciais do psstock no .env,
 não gera. Nunca levanta erro: as offers já foram criadas.
 
@@ -79,6 +82,11 @@ class _NaoGerado(Exception):
     """Kit não gerado porque o produto não atende os requisitos (não é erro)."""
 
 
+KIT_LABEL = {"pv": "Template de PV", "aff": "Template de Aff Page"}
+# Tabela do AutoPages que diz se o produto já tem página de cada kit.
+KIT_TABLE = {"pv": "sales_pages", "aff": "sales_page_aff"}
+
+
 def build_slack_message(
     payload: dict,
     *,
@@ -98,8 +106,16 @@ def build_slack_message(
             f":white_check_mark: Templates de VSL criados — *{produto}* (`{codigo}`)",
             contexto,
             f"DTC usada: {result.get('dtc_url') or '—'}",
-            f"Preview: {result['preview_url']}",
-            f"AutoPages: {result['ap_url']}",
+        ]
+        if result.get("preview_url"):
+            linhas.append(f"Preview: {result['preview_url']}")
+        if result.get("ap_url"):
+            linhas.append(f"AutoPages: {result['ap_url']}")
+        if result.get("aff_url"):
+            linhas.append(f"Aff Page: {result['aff_url']}")
+        linhas += [
+            f":information_source: {KIT_LABEL[k]} não criado: {m}."
+            for k, m in (result.get("nao_criados") or {}).items()
         ]
         linhas += [f":warning: {w}" for w in result.get("warnings") or []]
     elif erro is not None:
@@ -141,13 +157,19 @@ async def _generate(settings: Settings, payload: dict) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", codigo):
         raise _NaoGerado(f"codigo_produto {codigo!r} inválido pra nome de pasta")
 
-    # Só produto novo: se já existe qualquer sales page dele no AutoPages
-    # (em qualquer plataforma), aborta.
-    sales_pages = await AutoPagesService(settings).find_sales_pages(produto, codigo)
-    if sales_pages:
-        raise _NaoGerado(
-            f"o produto já tem sales page no AutoPages ({sales_pages[0]['url']})"
-        )
+    # Só produto novo, kit a kit: PV se não tem nada em sales_pages, Aff Page
+    # se não tem nada em sales_page_aff (em qualquer plataforma).
+    autopages = AutoPagesService(settings)
+    nao_criados: dict[str, str] = {}
+    for kit, table in KIT_TABLE.items():
+        paginas = await autopages.find_sales_pages(produto, codigo, table=table)
+        if paginas:
+            nao_criados[kit] = (
+                f"o produto já tem página em {table} no AutoPages ({paginas[0]['url']})"
+            )
+    kits = [k for k in KIT_TABLE if k not in nao_criados]
+    if not kits:
+        raise _NaoGerado("; ".join(nao_criados.values()))
 
     rows = await fetch_product_urls(settings, produto) or []
     dtc_url = pick_dtc_url(rows, payload["plataforma"])
@@ -169,10 +191,13 @@ async def _generate(settings: Settings, payload: dict) -> dict:
             pitch_seconds=DEFAULT_PITCH_SECONDS,
             overwrite=False,
             dry_run=False,
+            kits=kits,
         )
-    except VslTemplateConflict:
-        raise _NaoGerado(f"o kit já existe no psstock (PVs/{codigo}/pv1), mantido")
-    return {**result, "dtc_url": dtc_url}
+    except VslTemplateConflict as e:
+        raise _NaoGerado(f"os templates já existem no psstock, mantidos ({e})")
+    for kit in result.get("ja_existiam") or []:
+        nao_criados[kit] = "a pasta já existe no psstock, mantida"
+    return {**result, "dtc_url": dtc_url, "nao_criados": nao_criados}
 
 
 async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) -> None:
@@ -193,8 +218,9 @@ async def generate_vsl_templates_for_offer(settings: Settings, payload: dict) ->
         text = build_slack_message(payload, erro=str(e))
     else:
         logger.info(
-            f"[vsl-templates] {codigo}: kit gerado -- preview {result['preview_url']} "
-            f"| AutoPages {result['ap_url']}"
+            f"[vsl-templates] {codigo}: kits {result.get('kits')} gerados -- "
+            f"preview {result.get('preview_url')} | AutoPages {result.get('ap_url')} "
+            f"| Aff Page {result.get('aff_url')}"
         )
         for w in result["warnings"]:
             logger.warning(f"[vsl-templates] {codigo}: {w}")

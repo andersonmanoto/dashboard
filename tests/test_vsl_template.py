@@ -47,13 +47,13 @@ def _embed_do_kit(kit: str) -> str:
     return m.group(1)
 
 
-def _render(produto, url, slogan, ap):
+def _render(produto, url, slogan, modo):
     dtc = parse_dtc(_read(produto, "dtc.html"), url)
     if slogan:
         dtc.slogan = slogan
     return render_kit(
         dtc,
-        ap=ap,
+        modo=modo,
         vturb_embed=_embed_do_kit(_read(produto, "pv1.html")),
         vturb_speed_script="",
         pitch_seconds=1111,
@@ -90,7 +90,7 @@ def _ap_esperado(produto: str) -> str:
 
 @pytest.mark.parametrize("produto,url,slogan", PRODUTOS)
 def test_preview_mantem_area_de_edicao_e_cards_do_kit(produto, url, slogan):
-    out = _render(produto, url, slogan, ap=False)["index.html"].decode()
+    out = _render(produto, url, slogan, modo="preview")["index.html"].decode()
     kit = _read(produto, "pv1.html")
     esperado_head = [
         l for l in _head(kit) if not l.startswith("Valor inicial: template não tinha pitch")
@@ -101,7 +101,7 @@ def test_preview_mantem_area_de_edicao_e_cards_do_kit(produto, url, slogan):
 
 @pytest.mark.parametrize("produto,url,slogan", PRODUTOS)
 def test_ap_mantem_head_e_cards_do_kit(produto, url, slogan):
-    out = _render(produto, url, slogan, ap=True)["index.html"].decode()
+    out = _render(produto, url, slogan, modo="ap")["index.html"].decode()
     esperado = _ap_esperado(produto)
     assert _head(out) == _head(esperado)
     assert _cards(out) == _cards(esperado)
@@ -115,9 +115,9 @@ def test_ap_mantem_head_e_cards_do_kit(produto, url, slogan):
         assert trecho in out
 
 
-@pytest.mark.parametrize("ap", [False, True])
-def test_layout_do_vapomend(ap):
-    out = _render(*PRODUTOS[1], ap=ap)["index.html"].decode()
+@pytest.mark.parametrize("modo", ["preview", "ap", "aff"])
+def test_layout_do_vapomend(modo):
+    out = _render(*PRODUTOS[1], modo=modo)["index.html"].decode()
     assert 'class="header-bg"' in out
     assert "Get the <b class=\"pv-vm-highlight\">Best Offer</b> on <b>BullSodaRise</b>" in out
     assert "has not been evaluated by the Food &amp; Drug Administration" in out
@@ -131,7 +131,7 @@ def test_layout_do_vapomend(ap):
 @pytest.mark.parametrize("produto,url,slogan", PRODUTOS)
 def test_pricing_css_com_cores_da_dtc(produto, url, slogan):
     dtc = parse_dtc(_read(produto, "dtc.html"), url)
-    out = _render(produto, url, slogan, ap=False)["assets/css/pricing-cards.css"].decode()
+    out = _render(produto, url, slogan, modo="preview")["assets/css/pricing-cards.css"].decode()
     esperado = _linhas(_read(produto, "pricing-cards.css"))
     assert _linhas(out)[: len(esperado)] == esperado
     # faixa do layout novo com as cores do produto
@@ -163,7 +163,7 @@ def test_ap_renderiza_no_autopages():
     """O index.html do (ap) tem que ser Jinja válido e não quebrar com pitch vazio."""
     dtc = parse_dtc(_read("titanhoney", "dtc.html"), "https://titanhoney.com/dtc/")
     ap = render_kit(
-        dtc, ap=True, vturb_embed="<vturb-smartplayer>", vturb_speed_script="", pitch_seconds=0
+        dtc, modo="ap", vturb_embed="<vturb-smartplayer>", vturb_speed_script="", pitch_seconds=0
     )["index.html"].decode()
 
     out = Environment(autoescape=True).from_string(ap).render(
@@ -184,6 +184,119 @@ def test_ap_renderiza_no_autopages():
     assert out.count('href="https://rt.meusite.com/click/3" data-checkout="6b"') == 2
 
 
+def _aff_esperado() -> str:
+    # Diferenças de forma do aff.html feito à mão (TtnHny/aff/pv1(ap)) que
+    # não mudam nada: comentários e o `or 0` do pitch.
+    return (
+        _read("titanhoney", "aff.html")
+        .replace("<!-- CSS ESCONDER Colocar no <Head> -->", "")
+        .replace("{{ aff_page.pitchTime }}", "{{ aff_page.pitchTime or 0 }}")
+    )
+
+
+def _sem_scroll_event(linhas: list[str]) -> list[str]:
+    # o aff.html feito à mão tem um class="smartplayer-scroll-event" a mais
+    # num dos botões do 6b (sobra do VapoMend; o kit não usa)
+    return [l.replace('<a class="smartplayer-scroll-event" href=', "<a href=") for l in linhas]
+
+
+def test_aff_mantem_head_e_cards_do_kit_feito_a_mao():
+    out = _render(*PRODUTOS[0], modo="aff")["index.html"].decode()
+    esperado = _aff_esperado()
+    assert _head(out) == _head(esperado)
+    assert _sem_scroll_event(_cards(out)) == _sem_scroll_event(_cards(esperado))
+    for trecho in (
+        "{{ aff_page.vturbScript | safe }}",
+        "{{ aff_page.pitchTime or 0 }}",
+    ):
+        assert trecho in out
+    # nada do AutoPages: pixel do Meta, campoLivre, script do RedTrack, /click/N
+    for trecho in ("estrutura.", "fbq(", "redtrackScript", "/click/"):
+        assert trecho not in out
+
+
+def test_aff_renderiza_no_criar_aff_page():
+    """Mesmo render do processar_aff_pages do full_midias (aff_page=dados)."""
+    dtc = parse_dtc(_read("titanhoney", "dtc.html"), "https://titanhoney.com/dtc/")
+    aff = render_kit(
+        dtc, modo="aff", vturb_embed="<x>", vturb_speed_script="", pitch_seconds=0
+    )["index.html"].decode()
+
+    out = Environment().from_string(aff).render(
+        aff_page={
+            "vturbScript": "<vturb-smartplayer id='v'>",
+            "pitchTime": 0,
+            "linkOferta1": "https://chk/2b",
+            "linkOferta2": "https://chk/3b",
+            "linkOferta3": "https://chk/6b",
+        }
+    )
+    assert "const delaySeconds = 0;" in out
+    assert "<vturb-smartplayer id='v'>" in out
+    assert out.count('href="https://chk/2b" data-checkout="2b"') == 2
+    assert out.count('href="https://chk/3b" data-checkout="3b"') == 2
+    assert out.count('href="https://chk/6b" data-checkout="6b"') == 2
+    assert "a=13732" in out  # tracking da DTC fica, como no aff feito à mão
+    assert ".esconder{display:none;}" in out
+
+
+# --- upload: kit com pasta já existente é mantido -------------------------
+
+from app.services.vsl_template_service import VslTemplateConflict, VslTemplateService  # noqa: E402
+
+
+class _FakeSftp:
+    def __init__(self, existentes):
+        self.existentes = set(existentes)
+        self.gravados = []
+
+    def stat(self, path):
+        if path in self.existentes or any(e.startswith(path + "/") for e in self.existentes):
+            import stat as _st
+            return SimpleNamespace(st_mode=_st.S_IFDIR)
+        raise FileNotFoundError(path)
+
+    def mkdir(self, path):
+        self.existentes.add(path)
+
+    def open(self, path, mode):
+        self.gravados.append(path)
+        return io.BytesIO()
+
+    def close(self):
+        pass
+
+
+def _upload(monkeypatch, existentes, overwrite=False):
+    sftp = _FakeSftp(existentes)
+    svc = VslTemplateService(SimpleNamespace(psstock_pvs_dir="/PVs"))
+    monkeypatch.setattr(svc, "_connect", lambda: (sftp, SimpleNamespace(close=lambda: None)))
+    kits = {
+        "pv": {"pv1": {"index.html": b"p"}, "pv1(ap)": {"index.html": b"a"}},
+        "aff": {"aff/pv1(ap)": {"index.html": b"f"}},
+    }
+    return svc.upload("Prod", kits, overwrite), sftp.gravados
+
+
+def test_upload_pula_kit_existente(monkeypatch):
+    pulados, gravados = _upload(monkeypatch, {"/PVs/Prod/pv1"})
+    assert pulados == ["pv"]
+    assert gravados == ["/PVs/Prod/aff/pv1(ap)/index.html"]
+
+
+def test_upload_conflito_quando_todos_existem(monkeypatch):
+    with pytest.raises(VslTemplateConflict):
+        _upload(monkeypatch, {"/PVs/Prod/pv1(ap)", "/PVs/Prod/aff/pv1(ap)"})
+
+
+def test_upload_overwrite_grava_tudo(monkeypatch):
+    pulados, gravados = _upload(
+        monkeypatch, {"/PVs/Prod/pv1", "/PVs/Prod/aff/pv1(ap)"}, overwrite=True
+    )
+    assert pulados == []
+    assert len(gravados) == 3
+
+
 def test_to_webp_redimensiona():
     buf = io.BytesIO()
     Image.new("P", (800, 600)).save(buf, "PNG")
@@ -200,11 +313,11 @@ def test_preview_usa_vsl_padrao_do_vapomend():
         vturb_speed_script="",
         pitch_seconds=DEFAULT_PITCH_SECONDS,
     )
-    preview = render_kit(dtc, ap=False, **kwargs)["index.html"].decode()
+    preview = render_kit(dtc, modo="preview", **kwargs)["index.html"].decode()
     assert 'id="vid-6a0bb9604b6ee00cb92018fc"' in preview
     assert "window.VSL_PITCH_SECONDS = 10;" in preview
 
-    ap = render_kit(dtc, ap=True, **kwargs)["index.html"].decode()
+    ap = render_kit(dtc, modo="ap", **kwargs)["index.html"].decode()
     assert "vid-6a0bb9604b6ee00cb92018fc" not in ap
     assert "{{ estrutura.vturbScript | safe }}" in ap
 
@@ -278,7 +391,7 @@ def test_mensagem_kit_criado_tem_urls_e_avisos():
     assert ":warning: sem slogan" in text
 
 
-def _run_with(monkeypatch, sales_pages=(), dtc_rows=(), generate=None):
+def _run_with(monkeypatch, sales_pages=(), sales_page_aff=(), dtc_rows=(), generate=None):
     enviados = []
     monkeypatch.setattr(vsl_template_auto, "_slack", lambda s, t: enviados.append(t))
     monkeypatch.setattr(
@@ -290,8 +403,8 @@ def _run_with(monkeypatch, sales_pages=(), dtc_rows=(), generate=None):
         def __init__(self, s):
             pass
 
-        async def find_sales_pages(self, produto, codigo):
-            return list(sales_pages)
+        async def find_sales_pages(self, produto, codigo, table="sales_pages"):
+            return list(sales_pages if table == "sales_pages" else sales_page_aff)
 
     async def _urls(s, produto):
         return list(dtc_rows)
@@ -303,10 +416,80 @@ def _run_with(monkeypatch, sales_pages=(), dtc_rows=(), generate=None):
     return enviados[0]
 
 
-def test_aviso_nao_necessario_quando_ja_tem_sales_page(monkeypatch):
-    text = _run_with(monkeypatch, sales_pages=[{"url": "https://x.com/vsl"}])
+def test_aviso_nao_necessario_quando_ja_tem_sales_page_e_aff(monkeypatch):
+    text = _run_with(
+        monkeypatch,
+        sales_pages=[{"url": "https://x.com/vsl"}],
+        sales_page_aff=[{"url": "https://x.com/aff"}],
+    )
     assert "não criados" in text
-    assert "Não foi necessário criar: o produto já tem sales page no AutoPages (https://x.com/vsl)" in text
+    assert "Não foi necessário criar: o produto já tem página em sales_pages no AutoPages (https://x.com/vsl)" in text
+    assert "sales_page_aff no AutoPages (https://x.com/aff)" in text
+
+
+_DTC_ROWS = [{"type": "dtc", "url": "https://titanhoney.com/dtc/", "networks": {"name": "BuyGoods"}}]
+
+
+def _gen_que_registra(chamadas):
+    def gen(**kw):
+        chamadas.append(kw)
+        kits = kw["kits"]
+        return {
+            "kits": kits,
+            "ja_existiam": [],
+            "preview_url": "P" if "pv" in kits else None,
+            "ap_url": "A" if "pv" in kits else None,
+            "aff_url": "F" if "aff" in kits else None,
+            "warnings": [],
+        }
+
+    return gen
+
+
+def test_so_aff_quando_ja_tem_sales_page(monkeypatch):
+    chamadas = []
+    text = _run_with(
+        monkeypatch,
+        sales_pages=[{"url": "https://x.com/vsl"}],
+        dtc_rows=_DTC_ROWS,
+        generate=_gen_que_registra(chamadas),
+    )
+    assert chamadas[0]["kits"] == ["aff"]
+    assert "Aff Page: F" in text
+    assert "Preview:" not in text and "AutoPages:" not in text
+    assert ":information_source: Template de PV não criado: o produto já tem página em sales_pages" in text
+
+
+def test_so_pv_quando_ja_tem_sales_page_aff(monkeypatch):
+    chamadas = []
+    text = _run_with(
+        monkeypatch,
+        sales_page_aff=[{"url": "https://x.com/aff"}],
+        dtc_rows=_DTC_ROWS,
+        generate=_gen_que_registra(chamadas),
+    )
+    assert chamadas[0]["kits"] == ["pv"]
+    assert "Preview: P" in text and "AutoPages: A" in text
+    assert "Aff Page:" not in text
+    assert "Template de Aff Page não criado" in text
+
+
+def test_produto_novo_gera_os_dois_kits(monkeypatch):
+    chamadas = []
+    text = _run_with(monkeypatch, dtc_rows=_DTC_ROWS, generate=_gen_que_registra(chamadas))
+    assert chamadas[0]["kits"] == ["pv", "aff"]
+    assert "Preview: P" in text and "Aff Page: F" in text
+    assert "não criado" not in text
+
+
+def test_pasta_existente_no_psstock_vira_nao_criado(monkeypatch):
+    def gen(**kw):
+        return {"kits": ["aff"], "ja_existiam": ["pv"], "preview_url": None,
+                "ap_url": None, "aff_url": "F", "warnings": []}
+
+    text = _run_with(monkeypatch, dtc_rows=_DTC_ROWS, generate=gen)
+    assert "Aff Page: F" in text
+    assert "Template de PV não criado: a pasta já existe no psstock, mantida." in text
 
 
 def test_aviso_nao_necessario_sem_dtc(monkeypatch):
@@ -322,6 +505,7 @@ def test_aviso_kit_criado(monkeypatch):
 
     text = _run_with(monkeypatch, dtc_rows=rows, generate=gen)
     assert "Templates de VSL criados" in text
+    assert "Preview: P" in text
     assert "DTC usada: https://titanhoney.com/dtc/" in text
 
 

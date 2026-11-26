@@ -1,4 +1,5 @@
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
@@ -34,6 +35,9 @@ class VslTemplateRequest(BaseModel):
     nome: str | None = None
     slogan: str | None = None
     overwrite: bool = False
+    # "pv" = preview + (ap) do AutoPages; "aff" = template da Aff Page em
+    # PVs/{codigo}/aff/{pagina}(ap). Sem overwrite, kit já existente é mantido.
+    kits: list[Literal["pv", "aff"]] = Field(default=["pv"], min_length=1)
     # Só extrai/renderiza e devolve o resumo, sem subir nada
     dry_run: bool = False
 
@@ -50,11 +54,13 @@ async def create_vsl_templates(
     """
     Gera o kit de VSL 2.9 de um produto a partir da página DTC e sobe no
     psstock via SFTP: `PVs/{codigo}/{pagina}/` (preview, com área de edição
-    rápida) e `PVs/{codigo}/{pagina}(ap)/` (template Jinja2 do AutoPages).
+    rápida) e `PVs/{codigo}/{pagina}(ap)/` (template Jinja2 do AutoPages)
+    com `kits=["pv"]` (padrão); com "aff", também (ou só)
+    `PVs/{codigo}/aff/{pagina}(ap)/` (template da Aff Page).
 
     Da DTC vêm nome/slogan, cores, preços dos potes 2b/3b/6b, imagens
     (convertidas pra webp) e os scripts de tracking da BuyGoods. Responde
-    409 se as pastas já existirem (a menos que `overwrite=true`) e 422 se a
+    409 se as pastas de todos os kits pedidos já existirem (a menos que `overwrite=true`) e 422 se a
     DTC fugir do padrão esperado.
     """
     service = VslTemplateService(settings)
@@ -71,6 +77,7 @@ async def create_vsl_templates(
             pitch_seconds=payload.pitch_seconds,
             overwrite=payload.overwrite,
             dry_run=payload.dry_run,
+            kits=payload.kits,
         )
     except VslTemplateConfigError as e:
         logger.error(f"[vsl-templates] {e}")

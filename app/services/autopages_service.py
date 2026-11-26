@@ -118,11 +118,14 @@ class AutoPagesService:
         )
         return len(response.data or [])
 
-    async def find_sales_pages(self, name: str, code: str) -> list[dict]:
+    async def find_sales_pages(
+        self, name: str, code: str, table: str = "sales_pages"
+    ) -> list[dict]:
         """
-        Sales pages (`sales_pages`) de qualquer produto do AutoPages com esse
-        `name` ou `code` (case-insensitive). Usado pra saber se o produto é
-        novo: produto que já roda em alguma plataforma já tem sales page.
+        Sales pages (`sales_pages`, ou `sales_page_aff` pras Aff Pages) de
+        qualquer produto do AutoPages com esse `name` ou `code`
+        (case-insensitive). Usado pra saber se o produto é novo: produto que
+        já roda em alguma plataforma já tem sales page.
         """
         client = await self._get_client()
         products = (
@@ -135,7 +138,7 @@ class AutoPagesService:
         if not ids:
             return []
         return (
-            await client.table("sales_pages")
+            await client.table(table)
             .select("id, code, url")
             .in_("product_id", ids)
             .execute()

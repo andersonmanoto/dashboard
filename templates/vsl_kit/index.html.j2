@@ -18,7 +18,9 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="assets/css/main.css">
   <link rel="stylesheet" href="assets/css/pricing-cards.css">
-[% if ap %]
+[% if modo == "aff" %]
+<style>.esconder{display:none;}</style>
+[% elif modo == "ap" %]
 <style>.esconder{display:none;}</style>
 
 {% if estrutura.plataforma == 'fb' %}
@@ -171,7 +173,11 @@ src="https://www.facebook.com/tr?id={{ estrutura.pixelCode }}&ev=PageView&noscri
   <!-- Layout de referência: preview do VapoMend (psstock.site/PVs/VpMnd/pv1) -->
   <section class="pv-vm-vsl">
     <div class="pv-vm-vsl__inner">
-[% if ap %]
+[% if modo == "aff" %]
+                    <!-- VSL -->
+{{ aff_page.vturbScript | safe }}
+<!-- END-->
+[% elif modo == "ap" %]
                     <!-- VSL -->
 {{ estrutura.vturbScript | safe }}
 <!-- END-->
@@ -387,15 +393,15 @@ src="https://www.facebook.com/tr?id={{ estrutura.pixelCode }}&ev=PageView&noscri
       <a>PRIVACY</a>
     </div>
     <p class="pv-vm-footer__disclaimer">The information on this website has not been evaluated by the Food &amp; Drug Administration or any other medical body. We do not aim to diagnose, treat, cure or prevent any illness or disease. Information is shared for educational purposes only. You should always consult your doctor before acting on any content on this website, especially if you are pregnant, nursing, taking medication or have a medical condition</p>
-[% if ap %]
+[% if modo == "ap" %]
     {{ estrutura.campoLivre }}
 [% endif %]
     <p class="pv-vm-footer__copy">Copyright &copy; 2026. All Rights Reserved.</p>
   </footer>
-[% if ap %]
+[% if modo != "preview" %]
   <script>
 /* ALTERE O VALOR 10 PARA OS SEGUNDOS EM QUE AS SEÇÕES VÃO APARECER */
-const delaySeconds = {{ estrutura.pitchTime or 0 }};
+const delaySeconds = [% if modo == "aff" %]{{ aff_page.pitchTime or 0 }}[% else %]{{ estrutura.pitchTime or 0 }}[% endif %];
 document.addEventListener("DOMContentLoaded", initDelayForHiddenElements);
 function initDelayForHiddenElements() {
   const player = document.querySelector("vturb-smartplayer");
@@ -410,7 +416,7 @@ function showElementsAfterDelay(player, seconds) {
   });
 }
 </script>
-
+[% if modo == "ap" %]
 <!-- RED -->
 {% if estrutura.plataforma == 'fb' %}
 <script type="text/javascript" src="https://rt.{{ estrutura.dominio }}/track.js"></script>
@@ -420,6 +426,7 @@ function showElementsAfterDelay(player, seconds) {
 {% endfor %}
 {% endif %}
 <!-- END -->
+[%- endif %]
 [% else %]
   <script>
     document.addEventListener("DOMContentLoaded", initDelayForHiddenElements);
