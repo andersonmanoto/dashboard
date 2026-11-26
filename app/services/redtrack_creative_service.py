@@ -1,17 +1,20 @@
 """
-Ranking de criativos (rt_ad) do RedTrack (ver
-migrations/20261021_snapshot_redtrack_por_oferta_criativo.sql):
+Ranking de criativos (rt_ad + click_sub_12) do RedTrack (ver
+migrations/20261021_snapshot_redtrack_por_oferta_criativo.sql e
+migrations/20261126_snapshot_redtrack_click_sub_12.sql):
 
   redtrack_events          GET /conversions -> 1 linha por conversão (upsert pelo id)
-  redtrack_cost_daily      GET /report?group=rt_ad,landing,campaign -> custo
+  redtrack_cost_daily      GET /report?group=rt_ad,landing,campaign,sub12 -> custo
                            absoluto do dia, substituindo o dia inteiro
   snapshot_daily_redtrack  update_snapshot_daily_redtrack(dia), no banco:
-                           conversões da events + custo da redtrack_cost_daily
+                           conversões da events + custo da redtrack_cost_daily,
+                           só as linhas (oferta + rt_ad + sub12) com venda
 
 Só entram landers que tiveram receita no dia (total_revenue > 0 no /report,
 com ou sem custo — YouTube vende sem custo no RedTrack): conversões e custo
-de lander sem venda nem são gravados. Dentro de uma lander que vendeu entram
-todos os criativos, inclusive os que gastaram sem vender.
+de lander sem venda nem são gravados. Dentro de uma lander que vendeu, a
+redtrack_cost_daily guarda todos os criativos, inclusive os que gastaram sem
+vender; a snapshot fica só com os que venderam.
 
 O RedTrack mostra o valor "atualizado" do dia (custo do Facebook vai subindo
 ao longo do dia), não venda a venda. Por isso nada aqui soma em cima do que
@@ -39,7 +42,14 @@ from loguru import logger
 
 PURCHASE_CONVTYPE = "convtype1"
 INITIATE_CHECKOUT_CONVTYPE = "convtype3"
-COST_REPORT_GROUP = "rt_ad,landing,campaign"
+# sub12 no agrupamento: o RedTrack devolve o custo por sub12 (é parâmetro do
+# clique), então a snapshot separa criativos por click_sub_12 sem rateio.
+# Conferido em 20/11 e 24/11: totais batem com o agrupamento sem sub12.
+COST_REPORT_GROUP = "rt_ad,landing,campaign,sub12"
+
+# gclid (tráfego Google/YouTube) chega no sub12: 1 por clique, 40+ caracteres.
+# Criativo real tem no máximo 38 (conferido em novembro).
+CLICK_SUB_12_MAX_LEN = 40
 
 LANDING_PREFIX_RE = re.compile(r"^G\d+$")
 LEAD_RE = re.compile(r"^L\d+$")
@@ -89,6 +99,20 @@ def parse_microlead(campaign_title: Optional[str]) -> Optional[str]:
     """
     match = MICROLEAD_RE.search(campaign_title or "")
     return match.group(0).upper() if match else None
+
+
+def parse_click_sub_12(value: Optional[str]) -> Optional[str]:
+    """
+    "clickSub12" do RedTrack (sub12): na maioria das vendas é o criativo de
+    verdade ("BK36", "AD03_meta"), enquanto o rt_ad vem herdado. Vazio e
+    gclid viram None — gclid é 1 por clique e quebraria a snapshot em 1 linha
+    por venda. Fora isso fica como veio (sem normalizar maiúscula/espaço:
+    grafias diferentes são criativos diferentes).
+    """
+    sub12 = (value or "").strip()
+    if not sub12 or len(sub12) >= CLICK_SUB_12_MAX_LEN:
+        return None
+    return sub12
 
 
 def parse_offer_title(title: Optional[str]) -> tuple[Optional[str], Optional[str]]:
@@ -152,7 +176,7 @@ def build_event_row(conversion: dict, catalog: CatalogLookup) -> dict:
         "vturb_video_id": parse_vturb_video_id(conversion.get("landing")),
         "microlead": parse_microlead(conversion.get("campaign")),
         # "clickSub12" da tela Conversions; vazio vem como "" (a tela mostra 0)
-        "click_sub_12": (conversion.get("sub12") or "").strip() or None,
+        "click_sub_12": parse_click_sub_12(conversion.get("sub12")),
         "product_id": product_id,
         "network_id": network_id,
         "payout": conversion.get("payout") or 0,
@@ -175,14 +199,16 @@ def build_cost_rows(
     campaign_products: dict[str, tuple[Optional[str], Optional[str]]],
 ) -> list[dict]:
     """
-    Linhas da redtrack_cost_daily a partir do /report agrupado por rt_ad,landing,campaign.
+    Linhas da redtrack_cost_daily a partir do /report agrupado por
+    rt_ad,landing,campaign,sub12.
 
     `campaign_products`: campaign_id -> (product_id, network_id).
     Linhas sem nada (0 clique, 0 custo, 0 conversão) ficam de fora. rt_ad
-    vazio e nulo caem na mesma chave, então soma por chave em vez de confiar
-    que o RedTrack nunca repete.
+    vazio e nulo caem na mesma chave (e os gclids no sub12 vazio, ver
+    parse_click_sub_12), então soma por chave em vez de confiar que o
+    RedTrack nunca repete.
     """
-    by_key: dict[tuple[str, str, str], dict] = {}
+    by_key: dict[tuple[str, str, str, Optional[str]], dict] = {}
     for r in report_rows:
         clicks = r.get("clicks") or 0
         lp_clicks = r.get("lp_clicks") or 0
@@ -193,7 +219,12 @@ def build_cost_rows(
         if not (clicks or lp_clicks or ics or purchases or revenue or cost):
             continue
 
-        key = (r.get("rt_ad") or "", r.get("campaign_id") or "", r.get("landing_id") or "")
+        key = (
+            r.get("rt_ad") or "",
+            r.get("campaign_id") or "",
+            r.get("landing_id") or "",
+            parse_click_sub_12(r.get("sub12")),
+        )
         row = by_key.get(key)
         if row is None:
             original_offer, current_offer, lead = parse_landing_title(r.get("landing"))
@@ -209,6 +240,7 @@ def build_cost_rows(
                 "lead": lead,
                 "vturb_video_id": parse_vturb_video_id(r.get("landing")),
                 "microlead": parse_microlead(r.get("campaign")),
+                "click_sub_12": key[3],
                 "product_id": product_id,
                 "network_id": network_id,
                 "clicks": 0,

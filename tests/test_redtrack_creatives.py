@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../a
 
 import pytest
 from services.redtrack_creative_service import (
+    COST_REPORT_GROUP,
     CatalogLookup,
     build_event_row,
     build_cost_rows,
@@ -141,7 +142,20 @@ def test_build_event_row():
     assert row["click_sub_12"] is None  # sem sub12 na conversão
 
 
-@pytest.mark.parametrize("sub12, expected", [("BK36", "BK36"), (" AD03_meta ", "AD03_meta"), ("", None), (None, None)])
+GCLID = "CjwKCAiA2frXBhBwEiwAIYhXKfw2l2A0tdyewo99mq-ZAUAfNhU94rszUq-r8tFsfZbkfDzPXIQX7hoC3jg"
+
+
+@pytest.mark.parametrize(
+    "sub12, expected",
+    [
+        ("BK36", "BK36"),
+        (" AD03_meta ", "AD03_meta"),
+        ("S410ED  C01  FBYT  R1  AD04  041126-v1", "S410ED  C01  FBYT  R1  AD04  041126-v1"),  # sem normalizar
+        ("", None),
+        (None, None),
+        (GCLID, None),  # gclid do YT = vazio
+    ],
+)
 def test_build_event_row_click_sub_12(sub12, expected):
     row = build_event_row({"id": "x", "type": "Purchase", "sub12": sub12}, CATALOG)
     assert row["click_sub_12"] == expected
@@ -188,3 +202,27 @@ def test_landings_with_revenue():
         {"landing_id": None, "rt_ad": "AD4", "total_revenue": 100, "cost": 10},
     ]
     assert landings_with_revenue(rows) == {"l1", "l3"}
+
+
+def test_build_cost_rows_por_sub12():
+    base = {"campaign_id": "c1", "landing_id": "l1", "landing": "x", "campaign": "G3 | S410 | YT", "rt_ad": "SUB12"}
+    rows = build_cost_rows(
+        [
+            {**base, "sub12": "OT397ED-SPY-FB-R1-AD5", "clicks": 10, "cost": 5.0, "convtype1": 1, "total_revenue": 240},
+            {**base, "sub12": "OT397ED-SPY-FB-R1-AD19", "clicks": 4, "cost": 2.0},
+            # gclids caem no sub12 vazio, junto com o vazio de verdade
+            {**base, "sub12": GCLID, "clicks": 1, "cost": 0.5},
+            {**base, "sub12": GCLID[:-1] + "x", "clicks": 1, "cost": 0.25},
+            {**base, "sub12": "", "clicks": 2, "cost": 1.0},
+        ],
+        {"c1": (ALPHAEREC_ID, BUYGOODS_ID)},
+    )
+    by_sub12 = {r["click_sub_12"]: r for r in rows}
+    assert set(by_sub12) == {"OT397ED-SPY-FB-R1-AD5", "OT397ED-SPY-FB-R1-AD19", None}
+    assert (by_sub12["OT397ED-SPY-FB-R1-AD5"]["cost"], by_sub12["OT397ED-SPY-FB-R1-AD5"]["purchases"]) == (5.0, 1)
+    assert (by_sub12[None]["clicks"], by_sub12[None]["cost"]) == (4, 1.75)
+    assert all(r["rt_ad"] == "SUB12" for r in rows)
+
+
+def test_cost_report_agrupa_por_sub12():
+    assert COST_REPORT_GROUP == "rt_ad,landing,campaign,sub12"

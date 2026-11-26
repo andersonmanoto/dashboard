@@ -1505,7 +1505,8 @@ class DatabaseRepository:
         network_id: Optional[list[str]] = None,
     ) -> list[dict]:
         """
-        snapshot_daily_redtrack no período (1 linha por dia + oferta + criativo).
+        snapshot_daily_redtrack no período (1 linha por dia + oferta + criativo
+        + clickSub12).
         É a redtrack_events (conversões/IC) já somada ao custo da
         redtrack_cost_daily — mesma fonte da tela Ativos Validados.
         """
@@ -1524,41 +1525,7 @@ class DatabaseRepository:
             build,
             select=(
                 "snapshot_date, network_id, product_id, original_offer, "
-                "current_offer, lead, microlead, rt_ad, purchases"
-            ),
-        )
-
-    def get_redtrack_purchase_sub12(
-        self,
-        start_date: str,
-        end_date: str,
-        product_id: Optional[list[str]] = None,
-        network_id: Optional[list[str]] = None,
-    ) -> list[dict]:
-        """
-        Vendas (Purchase) da redtrack_events no período com click_sub_12,
-        com as colunas que identificam oferta + criativo na snapshot.
-        """
-
-        def build(query):
-            query = (
-                query.gte("conversion_date", start_date)
-                .lte("conversion_date", end_date)
-                .eq("conversion_type", "Purchase")
-                .not_.is_("click_sub_12", "null")
-            )
-            if product_id:
-                query = query.in_("product_id", product_id)
-            if network_id:
-                query = query.in_("network_id", network_id)
-            return query.order("id")
-
-        return self._fetch_all_paginated(
-            "redtrack_events",
-            build,
-            select=(
-                "network_id, product_id, original_offer, current_offer, lead, "
-                "microlead, rt_ad, campaign, click_sub_12"
+                "current_offer, lead, microlead, rt_ad, click_sub_12, purchases"
             ),
         )
 

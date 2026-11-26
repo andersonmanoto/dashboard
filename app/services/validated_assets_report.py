@@ -7,10 +7,10 @@ do dashboard lê, e os números seguem as regras da tela:
 
 - oferta = produto + plataforma + Sprint/OT original + atual + lead + microlead
 - Conversões = soma de purchases
-- clickSub12 = valores do sub12 (redtrack_events.click_sub_12) das vendas do
-  criativo, um por linha (o criativo se repete), com as vendas de cada um.
-  Vendas do criativo sem sub12 ficam numa linha "—", pra soma das linhas
-  bater com o total do criativo. Na maioria das vendas o sub12 é o criativo
+- clickSub12 = click_sub_12 da snapshot, um por linha (o criativo se
+  repete), com as vendas de cada um. Vendas do criativo sem sub12 (vazio ou
+  gclid) ficam numa linha "—", pra soma das linhas bater com o total do
+  criativo. Na maioria das vendas o sub12 é o criativo
   de verdade ("BK36") enquanto o rt_ad vem herdado ("S410EDC19FBYTR2AD19 v1").
 - Custo de IC saiu do relatório a pedido (25/11): não fazia sentido no
   relatório (continua na tela).
@@ -102,46 +102,25 @@ def product_name(product_id: str | None, products: dict[str, dict]) -> str:
     return (products.get(product_id) or {}).get("name") or str(product_id)
 
 
-def _creative_key(row: dict) -> tuple:
-    """Oferta + criativo, as mesmas colunas nas duas tabelas."""
-    return (
-        row.get("product_id"),
-        row.get("network_id"),
-        row.get("original_offer"),
-        row.get("current_offer"),
-        row.get("lead"),
-        row.get("microlead"),
-        row.get("rt_ad") or "",
-    )
-
-
-def sub12_by_creative(sub12_rows: list[dict]) -> dict[tuple, list[tuple[str, int]]]:
-    """
-    (oferta + criativo) → [(click_sub_12, vendas)], do que mais
-    vendeu pro que menos (empate em ordem alfabética). Backredirect fica de
-    fora, como na snapshot.
-    """
-    counts: dict[tuple, Counter] = defaultdict(Counter)
-    for row in sub12_rows:
-        if (row.get("campaign") or "").strip().lower().startswith("backredirect"):
-            continue
-        sub12 = (row.get("click_sub_12") or "").strip()
+def _sub12_sales(rows: list[dict]) -> list[tuple[str, int]]:
+    """[(click_sub_12, vendas)] do criativo, do que mais vendeu pro que menos
+    (empate em ordem alfabética). Linhas sem sub12 ficam de fora (viram "—")."""
+    sales: Counter = Counter()
+    for r in rows:
+        sub12 = r.get("click_sub_12")
         if sub12:
-            counts[_creative_key(row)][sub12] += 1
-    return {
-        key: sorted(c.items(), key=lambda kv: (-kv[1], kv[0]))
-        for key, c in counts.items()
-    }
+            sales[sub12] += int(r.get("purchases") or 0)
+    return sorted(
+        ((k, n) for k, n in sales.items() if n > 0), key=lambda kv: (-kv[1], kv[0])
+    )
 
 
 def build_offers_by_product(
     rows: list[dict],
     products: dict[str, dict],
     networks: dict[str, str],
-    sub12_rows: list[dict] | None = None,
 ) -> dict[str, list[Offer]]:
-    """Agrupa as linhas diárias em ofertas → criativos, por product_id."""
-    sub12 = sub12_by_creative(sub12_rows or [])
+    """Agrupa as linhas diárias em ofertas → criativos → clickSub12, por product_id."""
     offer_rows: dict[tuple, list[dict]] = defaultdict(list)
     for row in rows:
         key = (
@@ -168,7 +147,7 @@ def build_offers_by_product(
             Creative(
                 name=name or "(sem criativo)",
                 conversions=sum(int(r.get("purchases") or 0) for r in c_rows),
-                sub12=sub12.get((*key, name), []),
+                sub12=_sub12_sales(c_rows),
             )
             for name, c_rows in creative_rows.items()
         ]

@@ -694,17 +694,11 @@ class ReportService:
                 ),
                 self.db.get_products_with_niche(),
                 self.db.get_networks_lookup(),
-                self.db.get_redtrack_purchase_sub12(
-                    start_date,
-                    end_date,
-                    product_id=product_ids or None,
-                    network_id=network_ids,
-                ),
             )
 
-        rows, products, networks, sub12_rows = await asyncio.to_thread(fetch)
+        rows, products, networks = await asyncio.to_thread(fetch)
         offers_by_product = validated_assets.build_offers_by_product(
-            rows, products, networks, sub12_rows
+            rows, products, networks
         )
 
         if all_products:
